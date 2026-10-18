@@ -364,3 +364,198 @@ struct ContentView: View {
     { name: dir + 'iosApp/iosApp/Assets.xcassets/LaunchBackground.colorset/Contents.json', data: JSON.stringify({ colors: [{ color: { 'color-space': 'srgb', components: { red: '1.000', green: '1.000', blue: '1.000', alpha: '1.000' } }, idiom: 'universal' }], info: { author: 'xcode', version: 1 } }, null, 2) },
   ] };
 }
+
+// =============================================================================================================
+// Games: the game in a web view (Android WebView / iOS WKWebView), hosted by Compose Multiplatform
+// =============================================================================================================
+
+/** The game page with the bridge: window.Capacitor calls go to Kotlin (Android: PocketBridge, iOS: webkit.messageHandlers.pocket). */
+export function kotlinGameHtml(html, bridge) {
+  const tag = `<script>window.__pkPlatform=/android/i.test(navigator.userAgent)?'android':'ios';window.ReactNativeWebView={postMessage:function(s){if(window.PocketBridge)PocketBridge.postMessage(s);else window.webkit.messageHandlers.pocket.postMessage(s)}};${bridge.replace(/ true;$/, '')}</script>`;
+  return /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => m + tag) : tag + html;
+}
+
+const gameBridgeKt = (pkg) => `package ${pkg}
+
+import kotlinx.serialization.json.*
+
+/**
+ * The game's native calls (window.Capacitor in the page): haptics, Back and closing the app are answered here.
+ * Phone notifications and in-app purchases aren't in this project yet: the game is told so and carries on
+ * (Pocket Engine's Flutter, Xcode and Android Studio projects have them).
+ */
+object GameBridge {
+    /** Handles one message from the page; returns the JavaScript to run in the page in reply (or null). */
+    fun handle(text: String, haptic: (String) -> Unit, exit: () -> Unit): String? {
+        val m = runCatching { Json.parseToJsonElement(text).jsonObject }.getOrNull() ?: return null
+        if (m["exit"]?.jsonPrimitive?.booleanOrNull == true) { exit(); return null }
+        val id = m["id"]?.jsonPrimitive?.content ?: return null
+        val plugin = m["plugin"]?.jsonPrimitive?.content
+        val method = m["method"]?.jsonPrimitive?.content
+        val args = m["args"] as? JsonObject
+        fun ok(v: JsonElement = JsonObject(emptyMap())) = "window.__pkReply($id, true, $v)"
+        fun no(why: String) = "window.__pkReply($id, false, \${JsonPrimitive(why)})"
+        return when (plugin) {
+            "Haptics" -> {
+                haptic(when (method) { "impact" -> args?.get("style")?.jsonPrimitive?.content ?: "MEDIUM"; "notification" -> args?.get("type")?.jsonPrimitive?.content ?: "SUCCESS"; else -> "VIBRATE" })
+                ok()
+            }
+            "LocalNotifications" -> when (method) {
+                "checkPermissions", "requestPermissions" -> ok(buildJsonObject { put("display", "denied") })
+                "getPending" -> ok(buildJsonObject { put("notifications", JsonArray(emptyList())) })
+                "createChannel", "cancel" -> ok()
+                else -> no("Phone notifications aren't in the Kotlin project yet")
+            }
+            "Purchases" -> no("In-app purchases aren't in the Kotlin project yet")
+            else -> no("$plugin.$method is not available")
+        }
+    }
+}
+`;
+
+const gameAppKt = (pkg) => `// The game, made with Pocket Engine, in a full-screen web view (Compose Multiplatform for Android and iOS).
+package ${pkg}
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+
+/** The web view with the game (GameView.android.kt / GameView.ios.kt). */
+@Composable
+expect fun GameView(modifier: Modifier)
+
+@Composable
+fun App() {
+    GameView(Modifier.fillMaxSize().background(Color.Black))
+}
+`;
+
+const gameAndroidKt = (pkg) => `package ${pkg}
+
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.view.HapticFeedbackConstants
+import android.webkit.JavascriptInterface
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.AndroidView
+
+private class Bridge(private val web: WebView) {
+    @JavascriptInterface
+    fun postMessage(text: String) {
+        web.post {
+            val js = GameBridge.handle(text,
+                haptic = { web.performHapticFeedback(if (it == "HEAVY" || it == "ERROR" || it == "VIBRATE") HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.VIRTUAL_KEY) },
+                exit = { (web.context as? Activity)?.finish() })
+            if (js != null) web.evaluateJavascript(js, null)
+        }
+    }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+actual fun GameView(modifier: Modifier) {
+    val holder = remember { arrayOfNulls<WebView>(1) }
+    BackHandler { holder[0]?.evaluateJavascript("window.__pkBack && window.__pkBack()", null) } // Back goes back in the game first
+    AndroidView(modifier = modifier, factory = { ctx ->
+        WebView(ctx).apply {
+            settings.javaScriptEnabled = true
+            settings.domStorageEnabled = true
+            settings.mediaPlaybackRequiresUserGesture = false
+            settings.allowFileAccess = true
+            webViewClient = WebViewClient()
+            addJavascriptInterface(Bridge(this), "PocketBridge")
+            loadUrl("file:///android_asset/index.html")
+            holder[0] = this
+        }
+    })
+}
+`;
+
+const gameIosKt = (pkg) => `@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
+package ${pkg}
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.viewinterop.UIKitView
+import kotlinx.cinterop.readValue
+import platform.CoreGraphics.CGRectZero
+import platform.Foundation.NSBundle
+import platform.UIKit.UIImpactFeedbackGenerator
+import platform.UIKit.UIImpactFeedbackStyle
+import platform.WebKit.WKAudiovisualMediaTypeNone
+import platform.WebKit.WKScriptMessage
+import platform.WebKit.WKScriptMessageHandlerProtocol
+import platform.WebKit.WKUserContentController
+import platform.WebKit.WKWebView
+import platform.WebKit.WKWebViewConfiguration
+import platform.darwin.NSObject
+
+private object Bridge : NSObject(), WKScriptMessageHandlerProtocol {
+    var web: WKWebView? = null
+    override fun userContentController(userContentController: WKUserContentController, didReceiveScriptMessage: WKScriptMessage) {
+        val text = didReceiveScriptMessage.body as? String ?: return
+        val js = GameBridge.handle(text,
+            haptic = { UIImpactFeedbackGenerator(style = if (it == "HEAVY" || it == "ERROR") UIImpactFeedbackStyle.UIImpactFeedbackStyleHeavy else UIImpactFeedbackStyle.UIImpactFeedbackStyleMedium).impactOccurred() },
+            exit = {}) // (iOS apps don't close themselves)
+        if (js != null) web?.evaluateJavaScript(js, completionHandler = null)
+    }
+}
+
+@Composable
+actual fun GameView(modifier: Modifier) {
+    UIKitView(modifier = modifier, factory = {
+        val config = WKWebViewConfiguration().apply {
+            allowsInlineMediaPlayback = true
+            mediaTypesRequiringUserActionForPlayback = WKAudiovisualMediaTypeNone
+            userContentController.addScriptMessageHandler(Bridge, name = "pocket")
+        }
+        WKWebView(frame = CGRectZero.readValue(), configuration = config).also { web ->
+            Bridge.web = web
+            NSBundle.mainBundle.URLForResource("index", withExtension = "html")?.let { url ->
+                url.URLByDeletingLastPathComponent?.let { dir -> web.loadFileURL(url, allowingReadAccessToURL = dir) }
+            }
+        }
+    })
+}
+`;
+
+/** The Kotlin game project. html: the built game (native build); bridge: expo.js BRIDGE; wrapper / icon as for apps. */
+export function kotlinGameFiles(o, { html, bridge, wrapper, icon }) {
+  const shell = kotlinNativeFiles({ name: o.name, settings: { app: true, appName: o.name }, entities: [] }, o, { runtime: '', wrapper, icon });
+  const pkg = kotlinPackage(o.appId), dir = shell.files[0].name.split('/')[0] + '/', src = (set) => `${dir}composeApp/src/${set}/kotlin/${pkg.replace(/\./g, '/')}/`;
+  const page = kotlinGameHtml(html, bridge);
+  const keep = shell.files.filter((f) => !/\/commonMain\/|\/commonTest\/|\/iosMain\/|Platform\.android\.kt$|MainActivity\.kt$|README\.md$/.test(f.name));
+  return [
+    ...keep,
+    { name: dir + 'README.md', data: `# ${o.name} (Kotlin: Compose Multiplatform)
+
+Your Pocket Engine game in a full-screen web view, hosted by a **Kotlin Multiplatform** app for **Android and iOS**
+(Android WebView / iOS WKWebView). The game is \`composeApp/src/androidMain/assets/index.html\` and \`iosApp/iosApp/index.html\`.
+
+- **Android:** open this folder in Android Studio and press Run, or \`sh gradlew :composeApp:installDebug\`.
+- **iOS (Mac):** open \`iosApp/iosApp.xcodeproj\` in Xcode and press Run (Xcode builds the Kotlin part with Gradle).
+
+Native features: haptics, the Back button (Android) and closing the app are handled in \`GameBridge.kt\`. Phone notifications and
+in-app purchases aren't in this project yet (the game is told and carries on); the Flutter, Xcode and Android Studio projects have them.
+
+To update the game: export again from Pocket Engine, or replace both \`index.html\` files.
+` },
+    { name: src('commonMain') + 'App.kt', data: gameAppKt(pkg) },
+    { name: src('commonMain') + 'GameBridge.kt', data: gameBridgeKt(pkg) },
+    { name: src('commonTest') + 'GameBridgeTest.kt', data: `package ${pkg}\n\nimport kotlin.test.Test\nimport kotlin.test.assertEquals\nimport kotlin.test.assertTrue\n\nclass GameBridgeTest {\n    @Test fun hapticsAnswer() {\n        var felt = ""\n        val js = GameBridge.handle("""{"id":3,"plugin":"Haptics","method":"impact","args":{"style":"HEAVY"}}""", { felt = it }, {})\n        assertEquals("HEAVY", felt)\n        assertTrue(js!!.startsWith("window.__pkReply(3, true"))\n    }\n}\n` },
+    { name: src('androidMain') + 'GameView.android.kt', data: gameAndroidKt(pkg) },
+    { name: src('androidMain') + 'MainActivity.kt', data: `package ${pkg}\n\nimport android.os.Bundle\nimport androidx.activity.ComponentActivity\nimport androidx.activity.compose.setContent\nimport androidx.activity.enableEdgeToEdge\n\nclass MainActivity : ComponentActivity() {\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        enableEdgeToEdge()\n        setContent { App() }\n    }\n}\n` },
+    { name: dir + 'composeApp/src/androidMain/assets/index.html', data: page },
+    { name: src('iosMain') + 'GameView.ios.kt', data: gameIosKt(pkg) },
+    { name: src('iosMain') + 'MainViewController.kt', data: `package ${pkg}\n\nimport androidx.compose.ui.window.ComposeUIViewController\n\nfun MainViewController() = ComposeUIViewController { App() }\n` },
+    { name: dir + 'iosApp/iosApp/index.html', data: page },
+  ];
+}

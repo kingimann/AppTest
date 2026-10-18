@@ -243,3 +243,140 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
   drawAll();
   return { root, close, app: A };
 }
+
+// =============================================================================================================
+// Games: the real game in the phone, inside a web view the way the Flutter / Kotlin / Xcode projects host it,
+// with their native bridge simulated (notifications, permission prompts, purchases, haptics, Back, closing).
+// =============================================================================================================
+
+/** opts: { game, html() → Promise<string> (the native build), bridge (the window.Capacitor bridge script), products, files(kind), download(kind), toast } */
+export function openGamePreview({ game, html, bridge, products = [], files, download, toast = () => {} }) {
+  let kind = 'flutter', view = 'app', codeFiles = null, codeSel = '', page = null, url = '', perm = 'prompt', owned = new Set(), sheet = null, closed = false;
+  const log = [];
+  const phone = h('div', { class: 'npv-phone game' }), codeBox = h('div', { class: 'npv-code' }), logBox = h('div', { class: 'npv-log', 'aria-live': 'polite' });
+  const head = h('div', { class: 'npv-head' }), keys = h('div', { class: 'npv-keys' });
+  const root = h('div', { class: 'npv', role: 'dialog', 'aria-label': 'Native game preview' }, head, h('div', { class: 'npv-body' }, h('div', { class: 'npv-app' }, phone, keys, logBox), codeBox));
+  const platform = () => (kind === 'swift' ? 'ios' : 'android');
+  const label = () => ({ flutter: 'Flutter', kotlin: 'Kotlin', swift: 'Xcode (Swift)' }[kind]);
+  const seg = (items, cur, pick) => h('div', { class: 'npv-seg', role: 'tablist' }, items.map(([k, l]) => h('button', { class: k === cur ? 'on' : '', role: 'tab', 'aria-selected': String(k === cur), 'data-k': k, onclick: () => pick(k) }, l)));
+  const note = (t) => { log.unshift({ t, at: new Date().toLocaleTimeString() }); log.length = Math.min(log.length, 40); drawLog(); };
+  const win = () => page?.contentWindow;
+  const reply = (id, ok, v) => { try { win()?.__pkReply?.(id, ok, v); } catch { /* reloading */ } };
+  const event = (name, data) => { try { win()?.__pkEvent?.(name, data); } catch { /* reloading */ } };
+  const hasNotifs = () => kind !== 'kotlin', hasStore = () => kind !== 'kotlin';
+
+  function drawHead() {
+    head.replaceChildren(
+      h('div', { class: 'npv-title' }, h('b', {}, 'Native game'), h('small', {}, `${game.name || 'Game'} in a ${platform() === 'ios' ? 'WKWebView' : 'WebView'}`)),
+      seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'Xcode']], kind, (k) => { kind = k; codeFiles = null; perm = 'prompt'; start(); }),
+      seg([['app', 'Game'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
+      h('div', { class: 'npv-acts' },
+        h('button', { class: 'npv-btn', title: 'Start the game again', onclick: () => start() }, '↺ Restart'),
+        h('button', { class: 'npv-btn primary', onclick: () => download(kind) }, '⬇ Download'),
+        h('button', { class: 'npv-btn', 'aria-label': 'Close', onclick: close }, '✕')));
+  }
+  function drawLog() {
+    logBox.replaceChildren(h('b', {}, 'Native calls'), ...(log.length ? log.map((l) => h('div', { class: 'npv-logl' }, h('small', {}, l.at), ' ', l.t)) : [h('div', { class: 'npv-logl muted' }, `Haptics, notifications${hasStore() ? ', purchases' : ''} and Back show up here, the way the ${label()} project answers them.`)]));
+  }
+  function overlay(el) { phone.querySelector('.npv-over')?.remove(); if (el) phone.append(h('div', { class: 'npv-over' }, el)); }
+  function banner(title, body, key) {
+    const b = h('button', { class: 'npv-banner', onclick: () => { b.remove(); note(`Notification tapped: “${title}” → the game gets “notification opened ${key || ''}”`); event('localNotificationActionPerformed', { notification: { extra: { key } } }); } }, h('b', {}, title || game.name), h('span', {}, body || ''));
+    phone.append(b); setTimeout(() => b.remove(), 6000);
+  }
+
+  /** The bridge, answered the way each project answers it. */
+  function onMessage(text) {
+    let m; try { m = JSON.parse(text); } catch { return; }
+    if (m.exit) { note('The game asked to close the app (Back on its first page)'); closed = true; overlay(h('div', { class: 'npv-closed' }, h('b', {}, 'App closed'), h('button', { class: 'npv-pbtn filled', onclick: () => start() }, 'Open it again'))); return; }
+    const { id, plugin, method, args = {} } = m, ok = (v = {}) => reply(id, true, v), no = (why) => { note(`${plugin}.${method}: ${why}`); reply(id, false, why); };
+    if (plugin === 'Haptics') {
+      const what = method === 'impact' ? args.style || 'MEDIUM' : method === 'notification' ? args.type || 'SUCCESS' : `vibrate ${args.duration || 300} ms`;
+      note(`Haptic: ${String(what).toLowerCase()}`); phone.classList.remove('buzz'); void phone.offsetWidth; phone.classList.add('buzz'); try { navigator.vibrate?.(30); } catch { /* not here */ }
+      return ok();
+    }
+    if (plugin === 'LocalNotifications') {
+      if (!hasNotifs()) {
+        if (method === 'checkPermissions' || method === 'requestPermissions') { note('Notifications: not in the Kotlin project yet (the game hears “denied”)'); return ok({ display: 'denied' }); }
+        if (['getPending'].includes(method)) return ok({ notifications: [] });
+        if (['createChannel', 'cancel'].includes(method)) return ok();
+        return no('not in the Kotlin project yet');
+      }
+      switch (method) {
+        case 'checkPermissions': return ok({ display: perm });
+        case 'requestPermissions':
+          if (perm !== 'prompt') return ok({ display: perm });
+          overlay(h('div', { class: 'npv-alert' + (platform() === 'ios' ? '' : ' android') }, platform() === 'ios' ? [h('b', {}, `“${game.name || 'Game'}” would like to send you notifications`), h('p', {}, 'Notifications may include alerts, sounds and badges.')] : [h('b', {}, `Allow ${game.name || 'Game'} to send you notifications?`)],
+            h('div', {}, h('button', { onclick: () => { perm = 'denied'; overlay(null); note('Notifications: not allowed'); ok({ display: perm }); } }, "Don't Allow"), h('button', { class: 'on', onclick: () => { perm = 'granted'; overlay(null); note('Notifications: allowed'); ok({ display: perm }); } }, 'Allow'))));
+          return;
+        case 'createChannel': return ok();
+        case 'getPending': return ok({ notifications: [] });
+        case 'cancel': note(`Notification cancelled (${(args.notifications || []).map((n) => n.id).join(', ')})`); return ok();
+        case 'schedule':
+          for (const n of args.notifications || []) {
+            const s = n.schedule || {}, key = n.extra?.key || '';
+            if (s.at) { const ms = new Date(s.at).getTime() - Date.now(); note(`Notification scheduled: “${n.title}” in ${Math.max(1, Math.round(ms / 1000))} s`); if (ms < 120000) setTimeout(() => !closed && banner(n.title, n.body, key), Math.max(300, ms)); }
+            else if (s.on) note(`Notification every day at ${String(s.on.hour).padStart(2, '0')}:${String(s.on.minute || 0).padStart(2, '0')}: “${n.title}”`);
+            else if (s.every) note(`Notification every ${s.every}: “${n.title}”`);
+            else { note(`Notification: “${n.title}”`); banner(n.title, n.body, key); }
+          }
+          return ok();
+      }
+    }
+    if (plugin === 'Purchases') {
+      if (!hasStore()) return no('in-app purchases aren’t in the Kotlin project yet');
+      const P = (pid) => products.find((p) => p.id === pid) || { id: pid, name: pid, price: '' };
+      if (method === 'products') { note(`Store: ${(args.items || []).length} product prices asked for`); return ok({ products: (args.items || []).map((i) => { const p = P(i.id); return { id: p.id, title: p.name, description: '', price: p.price || '$0.99' }; }) }); }
+      if (method === 'buy') {
+        const p = P(args.id);
+        overlay(h('div', { class: 'npv-sheet' }, h('small', {}, platform() === 'ios' ? 'App Store' : 'Google Play'), h('b', {}, p.name), h('span', { class: 'price' }, p.price || '$0.99'), h('p', {}, 'Test purchase: nothing is charged.'),
+          h('button', { class: 'npv-pbtn filled', onclick: () => { overlay(null); if (args.type !== 'consumable') owned.add(p.id); note(`Bought “${p.name}”`); ok({ status: 'bought', id: p.id }); } }, platform() === 'ios' ? 'Purchase' : 'Buy'),
+          h('button', { class: 'npv-pbtn outlined', onclick: () => { overlay(null); note(`Purchase cancelled: “${p.name}”`); ok({ status: 'cancelled' }); } }, 'Cancel')));
+        return;
+      }
+      note(`Store: ${method === 'restore' ? 'purchases restored' : 'owned products checked'}`); return ok({ ids: [...owned] });
+    }
+    return no('not available');
+  }
+
+  async function start() {
+    closed = false; overlay(null); drawHead(); drawLog();
+    const ios = platform() === 'ios';
+    phone.className = 'npv-phone game ' + (ios ? 'ios' : 'material');
+    if (!url) {
+      phone.replaceChildren(h('div', { class: 'npv-empty' }, 'Building the game…'));
+      let src = await html();
+      window.__pkPreviewBridge = onMessage;
+      const inject = (p) => `<script>window.__pkPlatform=${JSON.stringify(p)};window.ReactNativeWebView={postMessage:function(s){try{parent.__pkPreviewBridge(s)}catch(e){}}};${bridge.replace(/ true;$/, '')}</script>`;
+      url = { android: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('android'))], { type: 'text/html' })), ios: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('ios'))], { type: 'text/html' })) };
+      src = null;
+    }
+    page = h('iframe', { class: 'npv-frame', src: url[platform()], title: 'The game', allow: 'autoplay; fullscreen; vibrate' });
+    phone.replaceChildren(...[h('div', { class: 'npv-status' }, h('span', {}, '9:41'), h('span', {}, '▂▄▆ ◉')), page, ios && h('div', { class: 'npv-home' })].filter(Boolean));
+    keys.replaceChildren(...(ios ? [h('small', {}, 'iOS has no Back button: the game\'s own buttons go back.')] : [
+      h('button', { class: 'npv-key', 'aria-label': 'Back', title: 'Android Back: goes back a page in the game, or closes the app', onclick: () => { note('Back button'); try { win()?.__pkBack?.(); } catch { /* reloading */ } } }, '◁'),
+      h('button', { class: 'npv-key', 'aria-label': 'Home', title: 'Restart', onclick: () => start() }, '○')]));
+    if (view === 'code' || matchMedia('(min-width: 900px)').matches) drawCode();
+  }
+
+  async function drawCode() {
+    if (!codeFiles) {
+      codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Writing the project…'));
+      try { codeFiles = (await files(kind)).filter((f) => typeof f.data === 'string'); } catch (err) { codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Could not write the project: ' + err.message)); return; }
+      codeSel = (codeFiles.find((f) => /main\.dart$|GameBridge\.kt$|GameApp\.swift$/.test(f.name)) || codeFiles[0])?.name || '';
+    }
+    const f = codeFiles.find((x) => x.name === codeSel) || codeFiles[0], short = (n) => n.split('/').slice(1).join('/');
+    const big = f.data.length > 60000, text = big ? f.data.slice(0, 4000) + `\n\n… (${Math.round(f.data.length / 1024)} KB: your whole game in one file)` : f.data;
+    codeBox.replaceChildren(
+      h('div', { class: 'npv-ctools' }, h('select', { class: 'npv-files', 'aria-label': 'File', onchange: (e) => { codeSel = e.target.value; drawCode(); } }, codeFiles.map((x) => h('option', { value: x.name, selected: x.name === f.name }, short(x.name)))),
+        h('button', { class: 'npv-btn', onclick: async () => { try { await navigator.clipboard.writeText(f.data); toast('Copied ' + short(f.name)); } catch { toast('Select the text to copy it'); } } }, 'Copy')),
+      h('pre', { class: 'npv-pre' }, text.split('\n').map((l) => h('div', {}, l || ' '))));
+  }
+  function drawAll() { drawHead(); root.dataset.view = view; if (view === 'code' || matchMedia('(min-width: 900px)').matches) drawCode(); }
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  function close() { root.remove(); removeEventListener('keydown', onKey); if (window.__pkPreviewBridge === onMessage) delete window.__pkPreviewBridge; if (url) { URL.revokeObjectURL(url.android); URL.revokeObjectURL(url.ios); } }
+  addEventListener('keydown', onKey);
+  document.body.append(root);
+  root.dataset.view = view;
+  start();
+  return { root, close, onMessage };
+}

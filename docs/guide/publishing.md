@@ -186,6 +186,17 @@ The download has a `your_game/` folder (with `store-listing/` inside).
 
 The version comes from **App** in Build Settings and the build number from the Flutter section (both end up in `pubspec.yaml`). To update the game later, replace `assets/game/index.html` with a new download's.
 
+## Native Preview for games
+
+**File › Native Preview…** (or *Preview it* in Build Settings › Flutter project) runs your **game** in a phone, inside a web view the way the native projects host it, and lets you read each project's code. Pick **Flutter**, **Kotlin** or **Xcode** at the top:
+
+- the game sees a native Android (Flutter, Kotlin) or iOS (Xcode) app, just as it will on the phone;
+- the native bridge is simulated the way each project answers it: the **notification permission** prompt (Allow / Don't Allow), **notifications** dropping in as banners (tap one and the game gets *notification opened*), the **store sheet** for in-app purchases (Buy / Cancel, nothing charged), **haptics** (the phone shakes), Android's **Back** key (◁ under the phone) and the game closing the app;
+- **Native calls** under the phone lists each call as it happens;
+- **Code** shows every file of that project (`lib/main.dart`, `GameBridge.kt`, `GameApp.swift`…), and **Download** gives the real one.
+
+The **Kotlin project** (Build Settings › Flutter project › *Also: Kotlin project*) hosts the game in a Kotlin Multiplatform app (Compose) for Android and iOS: an Android WebView and an iOS WKWebView, with haptics, Back and closing in `GameBridge.kt`. It doesn't have phone notifications and in-app purchases yet (the game is told and carries on; the preview shows exactly that); the Flutter, Xcode and Android Studio projects have them.
+
 ## Native code (apps)
 
 The Flutter, Xcode and Android Studio projects all run your project in a web view. For an **app**, pick **Native code (apps)** in Build Settings to get it written out as real native code instead, to keep building on in code:

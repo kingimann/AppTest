@@ -27,12 +27,12 @@ import { initData, dataEditor, ensureCollection, connectSupabase, STARTER_COLLEC
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import * as CM from './codemagic.js';
-import { expoFiles } from './expo.js';
+import { expoFiles, BRIDGE } from './expo.js';
 import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
 import { flutterNativeFiles, swiftNativeFiles, nativeReadme } from './nativecode.js';
 import { appModel } from './appmodel.js';
-import { kotlinNativeFiles } from './kotlincode.js';
-import { openNativePreview } from './nativepreview.js';
+import { kotlinNativeFiles, kotlinGameFiles } from './kotlincode.js';
+import { openNativePreview, openGamePreview } from './nativepreview.js';
 import { flutterFiles } from './flutter.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
@@ -6134,7 +6134,7 @@ function openFileMenu() {
     { icon: 'globe', label: 'Test in Safari', k: 'the built web app', fn: testInSafari },
     { icon: 'link', label: 'Copy test link', k: 'open it on your iPhone', fn: copyTestLink },
     { icon: 'gear', label: 'Build Settings…', fn: openBuildSettings },
-    root.settings?.app && { icon: 'phone', label: 'Native App Preview…', k: 'Flutter · Kotlin · SwiftUI', fn: openNativeApp },
+    { icon: 'phone', label: root.settings?.app ? 'Native App Preview…' : 'Native Preview…', k: root.settings?.app ? 'Flutter · Kotlin · SwiftUI' : 'Flutter · Kotlin · Xcode', fn: openNativeApp },
     '-',
     { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
     { icon: 'save', label: 'Back Up All Games', k: 'one file', fn: backupAll },
@@ -7447,11 +7447,42 @@ async function nativeFilesFor(kind, so, game, icon) {
 }
 /** Native App Preview: try the app the way the Flutter / Kotlin / SwiftUI exports build it, and read their code. */
 function openNativeApp() {
-  if (!root.settings?.app) return toast('The native preview is for apps (pages, lists, forms). Make an app from New Project › Apps.');
+  if (!root.settings?.app) return openNativeGame();
   saveNow();
   const so = nativeOpts(); if (!validAppId(so.appId)) so.appId = suggestAppId(buildOpts().author, so.name);
   const { game } = buildGameJSON();
   openNativePreview({ game, toast, download: (kind) => exportNative(kind), files: async (kind) => (await nativeFilesFor(kind, so, game, new Uint8Array(0))).files });
+}
+const kotlinWrapper = async () => {
+  const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });
+  return { jar: new Uint8Array(await (await get('./native/kotlin/wrapper/gradle-wrapper.jar')).arrayBuffer()), gradlew: await (await get('./native/kotlin/wrapper/gradlew')).text(), gradlewBat: await (await get('./native/kotlin/wrapper/gradlew.bat')).text() };
+};
+/** A game's projects (the game in a web view): Flutter, Kotlin Multiplatform or Xcode. */
+async function gameFilesFor(kind, so, html, icon) {
+  if (kind === 'flutter') return flutterFiles({ ...so, app: false }, { html, icon, iconFg: icon });
+  if (kind === 'kotlin') return kotlinGameFiles({ ...so, slug: slug(so.name) }, { html, bridge: BRIDGE, wrapper: await kotlinWrapper(), icon });
+  return xcodeFiles(so, { html, icon });
+}
+/** The game as a Kotlin Multiplatform project (Android + iOS), in a web view. */
+async function exportKotlinGame() {
+  const so = nativeOpts();
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
+  try {
+    toast('Making the Kotlin project…');
+    const o = buildOpts(), b = await buildHTML({ native: true }), kit = await storeKitFiles(o);
+    const icon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data, files = await gameFilesFor('kotlin', so, b.html, icon), dir = files[0].name.split('/')[0] + '/';
+    const zip = downloadZip([...files, ...kit.map((f) => ({ ...f, name: dir + f.name }))], slug(so.name) + '-kotlin.zip');
+    noteBuild('flutter', zip.size); toast(`Kotlin project ready (${kb(zip.size)}): open it in Android Studio, or iosApp/ in Xcode. README.md has the steps.`);
+  } catch (err) { toast('Could not make the Kotlin project: ' + err.message); }
+}
+/** Native Preview for a game: the real game in the phone, in a web view the way each project hosts it, with the native bridge simulated. */
+function openNativeGame() {
+  saveNow();
+  const so = nativeOpts(); if (!validAppId(so.appId)) so.appId = suggestAppId(buildOpts().author, so.name);
+  let built = null; const html = async () => (built ||= (await buildHTML({ native: true })).html);
+  openGamePreview({ game: { name: so.name }, html, bridge: BRIDGE, products: so.products || [], toast,
+    download: (kind) => (kind === 'flutter' ? exportFlutter() : kind === 'kotlin' ? exportKotlinGame() : exportXcode()),
+    files: async (kind) => gameFilesFor(kind, so, await html(), new Uint8Array(0)) });
 }
 /** Native code: the app as Flutter widgets or SwiftUI views (no web view). */
 async function exportNative(kind) {
@@ -7938,6 +7969,8 @@ function openBuildSettings() {
         C('storeFullscreen', { label: 'Full screen (hide the status bar)', type: 'bool' }),
         h('p', { class: 'desc' }, `Version ${o.version || '1.0'} (from App above) · ${so.orientation || 'either way up'} · Flutter 3.38 or newer · icon from Icon above. store-listing/ has the listing text and pictures.`),
         h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk, onclick: exportFlutter }, icon('download'), 'Download Flutter project (.zip)')),
+        h('div', { class: 'btns' }, h('button', { class: 'btn', onclick: () => { closeLayer(); openNativeApp(); } }, icon('play'), 'Preview it (Flutter · Kotlin · Xcode)')),
+        h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk, onclick: exportKotlinGame }, icon('download'), 'Also: Kotlin project, Android + iOS (.zip)')),
       ];
       return [
         h('p', { class: 'desc' }, ios

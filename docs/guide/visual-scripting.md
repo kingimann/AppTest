@@ -118,7 +118,7 @@ Lists live in variables and show in text as `1, 2, 3`. Positions start at **1**.
 ## Functions and custom events
 
 - **Function** names a piece of script. Give it **Function Input** values (a, b, c) and a **Return Value**.
-- **Call Function** uses it as a value (inside a Formula, say). **Run Function** runs it as a step, optionally storing the result. Functions can call each other and themselves (up to 20 deep).
+- **Call Function** uses it as a value (inside a Formula, say). **Run Function** runs it as a step, optionally storing the result. A Function can **Wait** before its Return Value: Run Function then waits too, stores the result when it arrives and only then goes on to *then* (inside a loop, each round waits for it). **Call Function** is a value, so it can't wait: it gives what the Function returned straight away, or 0 if the Return comes after a Wait. **Run Function On Objects** and the Triggers *Run visual script function* go on at once and store a late result when it arrives. Functions can call each other and themselves (up to 20 deep).
 - **Custom Event** + **Call Custom Event** (on this object, *other*, an object by name, everything with a tag, or everywhere, with a number or text value). Triggers can listen for the same events (*Run by another trigger / custom event*).
 - **Call Function On Object** reads another script's result (the Game Manager's `canAfford`). **Run Function On Objects** runs it on many objects.
 - **Delegates:** **Set Delegate** stores which Function to run in a variable and **Call Delegate** runs it, so behaviour can be swapped without rewiring. **Listen: Message → Function** subscribes a function to a message.

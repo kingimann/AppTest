@@ -22440,7 +22440,8 @@ export function bindArgs(v, args) {
 const customArgs = (def, it) => Object.fromEntries((def.params || []).map((q) => { const v = it[q.key] ?? q.default ?? ''; return [q.key, q.type === 'number' && v !== '' && Number.isFinite(+v) ? +v : v]; }));
 const customSay = (def, p) => { if (def.say) return def.say.replace(/\{@(\w+)\}/g, (m, k) => { const q = (def.params || []).find((x) => x.key === k); return q ? String(p[k] ?? q.default ?? '') : m; }); const a = (def.params || []).map((q) => `${q.label || q.key} ${p[q.key] ?? q.default ?? ''}`).join(', '); return (def.name || 'My instruction') + (a ? ` (${a})` : ''); };
 /** Visual scripts on other objects: run one of their Functions and get its Return Value. */
-function callScriptFunction(t, name, args, from) { for (const f of t?._fns || []) if (f.has(name)) return { ok: true, v: f.call(name, args, from) }; return { ok: false, v: 0 }; }
+/** Run another object's visual script Function. later: it Waits before its Return Value, which then goes to onLate(value). */
+function callScriptFunction(t, name, args, from, onLate) { for (const f of t?._fns || []) if (f.has(name)) { let now = null; const v = f.call(name, args, from, (x, late) => { if (late) onLate?.(x); else now = x; }); return { ok: true, v: now ?? v, later: now === null }; } return { ok: false, v: 0 }; }
 function whoOf(s, e, other, on, name) {
   if (on === 'other') return other ? [other] : [];
   if (on === 'all with tag') return s.findAll(name).filter((q) => !q.dead);
@@ -22727,7 +22728,7 @@ export const LOGIC_ACTIONS = {
   setPage: { cat: 'Game', label: 'Go to page', icon: 'layers', params: [txt('page', 'shop', 'page')], run: (c, p) => c.s.setVar('page', p.page), say: (p) => `Page → ${p.page}` },
   // talking to scripts and other triggers
   callEvent: { cat: 'Scripts', label: 'Call custom event', icon: 'link', params: [txt('name', 'explode', 'event name'), opt('on', ON_WHO, 'everything', 'on'), sug(txt('object', '', 'object / tag'), 'objects'), txt('value', '', 'value (optional)')], run: (c, p) => { const set = new Set(whoOf(c.s, c.e, c.other, p.on, p.object)); c.s.emit('graphCall', p.name, (q) => set.has(q), c.e, listVal(fillTemplate(p.value ?? '', c.s.vars))); }, say: (p) => `Call “${p.name}” on ${p.on === 'object named' || p.on === 'all with tag' ? p.object : p.on}` },
-  runFunction: { cat: 'Scripts', label: 'Run visual script function', icon: 'nodes', params: [txt('name', 'double', 'function'), opt('on', ON_WHO, 'this object', 'on'), sug(txt('object', '', 'object / tag'), 'objects'), num('a', 0, 'input a'), num('b', 0, 'input b'), sug(txt('store', '', 'put the result in variable (optional)'), 'vars')], run: (c, p) => { let r = null; for (const t of whoOf(c.s, c.e, c.other, p.on, p.object)) { const q = callScriptFunction(t, p.name, { a: +p.a || 0, b: +p.b || 0, c: 0 }, c.e); if (q.ok) r = q; } if (!r) Log.add('warn', `No visual script function “${p.name}” found`, c.e?.name); else if (p.store) c.s.setVar(p.store, r.v); }, say: (p) => `Run ${p.name}()${p.store ? ' → ' + p.store : ''}` },
+  runFunction: { cat: 'Scripts', label: 'Run visual script function', icon: 'nodes', params: [txt('name', 'double', 'function'), opt('on', ON_WHO, 'this object', 'on'), sug(txt('object', '', 'object / tag'), 'objects'), num('a', 0, 'input a'), num('b', 0, 'input b'), sug(txt('store', '', 'put the result in variable (optional)'), 'vars')], run: (c, p) => { let r = null; for (const t of whoOf(c.s, c.e, c.other, p.on, p.object)) { const q = callScriptFunction(t, p.name, { a: +p.a || 0, b: +p.b || 0, c: 0 }, c.e, p.store ? (v) => c.s.setVar(p.store, v) : null); if (q.ok) r = q; } if (!r) Log.add('warn', `No visual script function “${p.name}” found`, c.e?.name); else if (p.store && !r.later) c.s.setVar(p.store, r.v); }, say: (p) => `Run ${p.name}()${p.store ? ' → ' + p.store : ''}` },
   custom: { cat: 'My Instructions', label: 'My instruction', icon: 'script', hidden: true,
     run: (c, p) => {
       const def = customLogic.actions.find((q) => q.id === p.ref); if (!def) return;
@@ -23530,10 +23531,16 @@ registerBehavior('graph', {
       for (const l of g.links) if (l.from.node === n.id && l.from.port === port) run(byId.get(l.to.node), ctx);
     };
     /** Run a Function's nodes right now with inputs a–c and give back what its Return Value node sets. */
-    const callFunction = (s, e, ctx, name, args) => {
-      const depth = (ctx.callDepth || 0) + 1; if (depth > 20) { Log.add('warn', `Function "${name}" calls itself too deeply`); return 0; }
-      const ret = { v: 0, done: false };
-      for (const fn of g.nodes) if (fn.type === 'funcDef' && param(fn, 'name') === name) { follow(fn, 'then', { s, e, other: ctx.other, steps: 0, dt: ctx.dt, args, ret, callDepth: depth }); if (ret.done) break; }
+    /** Run this script's Function. With onDone, a Function that Waits before its Return Value calls onDone(value, true) when it gets there
+     * (or when everything it started has finished without one); without it (a Call Function value), what it returned straight away. */
+    const callFunction = (s, e, ctx, name, args, onDone) => {
+      const depth = (ctx.callDepth || 0) + 1; if (depth > 20) { Log.add('warn', `Function "${name}" calls itself too deeply`); onDone?.(0, false); return 0; }
+      const ret = { v: 0, done: false }, F = { n: 0, check: null };
+      for (const fn of g.nodes) if (fn.type === 'funcDef' && param(fn, 'name') === name) { follow(fn, 'then', { s, e, other: ctx.other, steps: 0, dt: ctx.dt, args, ret, callDepth: depth, flow: F, loop: null }); if (ret.done) break; }
+      if (onDone) {
+        if (ret.done || F.n <= 0) onDone(ret.v, false);
+        else { let fin = false; const end = () => { if (fin) return; fin = true; F.check = null; ret.late = null; onDone(ret.v, true); }; F.check = () => { if (F.n <= 0) end(); }; ret.late = end; }
+      }
       return ret.v;
     };
     const missWarned = new Set();
@@ -23768,7 +23775,8 @@ registerBehavior('graph', {
         case 'setTextVar': s.setVar(P('name') || 'text', fillTemplate(String(P('text') ?? ''), Object.assign(Object.create(s.vars), e.data))); break;
         case 'runFuncOn': {
           let found = false; const args = { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 };
-          for (const t of whoOf(s, e, ctx.other, P('on'), P('object'))) { const r = callScriptFunction(t, P('name'), args, e); if (r.ok) { found = true; if (P('store')) s.setVar(P('store'), r.v); } }
+          const store = P('store'), late = store ? (v) => s.setVar(store, v) : null; // (a Function that Waits before returning stores its result when it gets there)
+          for (const t of whoOf(s, e, ctx.other, P('on'), P('object'))) { const r = callScriptFunction(t, P('name'), args, e, late); if (r.ok) { found = true; if (store && !r.later) s.setVar(store, r.v); } }
           return follow(n, found ? 'then' : 'not found', ctx);
         }
         case 'setObjVar': {
@@ -23863,8 +23871,12 @@ registerBehavior('graph', {
         }
         case 'listFill': { const a0 = Math.round(+I('from') || 0), b0 = Math.round(+I('to') || 0), st = b0 >= a0 ? 1 : -1, a = []; for (let i = a0; st > 0 ? i <= b0 : i >= b0; i += st) { a.push(i); if (a.length >= 1000) break; } listSave(s, P('name'), a); break; }
         case 'forEachList': { const a = [...listOf(s, P('name'))].slice(0, 1000); return seq(n, ctx, a.length, (i) => ({ index: i + 1, item: a[i] })); }
-        case 'funcReturn': if (ctx.ret) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; } return;
-        case 'runFunc': { const v = callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }); if (P('store')) s.setVar(P('store'), v); break; }
+        case 'funcReturn': if (ctx.ret && !ctx.ret.done) { ctx.ret.v = +I('value') || 0; ctx.ret.done = true; ctx.ret.late?.(); } return; // (after a Wait: the Run Function waiting on it carries on now)
+        case 'runFunc': { // a Function with a Wait in it: carry on (and store its result) once it Returns
+          let rel = null, sync = true; const store = P('store');
+          callFunction(s, e, ctx, P('name'), { a: +I('a') || 0, b: +I('b') || 0, c: +I('c') || 0 }, (v, late) => { if (store) s.setVar(store, v); if (late || !sync) { if (!e.dead) follow(n, 'then', { ...ctx, steps: 0 }); rel?.(); } else sync = 'now'; });
+          if (sync === 'now') break; sync = false; rel = hold(ctx); return;
+        }
         case 'callLater': {
           const name = P('name'), v = +I('value') || 0, all = P('on') === 'everything';
           s.after(Math.max(0, +I('seconds') || 0), () => { if (!e.dead || all) s.emit('graphCall', name, all ? () => true : (q) => q === e, e, v); }); break;
@@ -24406,7 +24418,7 @@ registerBehavior('graph', {
         }
         if (g.nodes.some((n) => n.type === 'funcDef')) (e._fns ||= []).push({ // other objects' scripts and Triggers can call this script's Functions
           has: (name) => g.nodes.some((n) => n.type === 'funcDef' && param(n, 'name') === name),
-          call: (name, args, from) => callFunction(s, e, { s, e, other: from, steps: 0 }, name, args),
+          call: (name, args, from, onDone) => callFunction(s, e, { s, e, other: from, steps: 0 }, name, args, onDone),
         });
         if (has('onVarReaches')) {
           const test = (n, v) => { const a = +v || 0, b = +param(n, 'value') || 0; return { '≥': a >= b, '≤': a <= b, '=': a === b, '>': a > b, '<': a < b }[param(n, 'op')] ?? false; };

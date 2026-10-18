@@ -28,7 +28,9 @@ export const pinArgs = (q, sep, f = (v) => v) => [['fx', f(q.fx)], ['fy', f(q.fy
   .filter(Boolean).map(([k, v]) => `${k}${sep}${v}`).join(', ');
 export { btnExtras, tok as tokOr };
 /** A thing narrower than the page, on its own line (left / centre / right). */
-export const placeOf = (x) => (x.pin && x.pin.m < 0 && x.pin.w && ['box', 'button', 'image', 'avatar'].includes(x.kind) ? { fx: x.pin.fx, w: x.pin.w } : null);
+export const placeOf = (x) => (x.pin && x.pin.m < 0 && x.pin.w && ['box', 'button', 'image', 'avatar'].includes(x.kind) ? { fx: x.pin.fx, w: x.kind === 'button' ? Math.max(x.pin.w, labelW(x)) : x.pin.w } : null);
+/** About how wide a button's words are (so a link like “Forgot password?” is never cut short). */
+export const labelW = (x) => Math.round(String(x.label || '').length * (x.size || 17) * 0.6 + (x.plain ? 8 : 24));
 
 /** Page class / file names that don't clash. */
 function names(model) {

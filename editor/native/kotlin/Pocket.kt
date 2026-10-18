@@ -478,12 +478,13 @@ fun PButton(label: String, look: Look = Look.Filled, bg: String? = null, fg: Str
     val shape = RoundedCornerShape(radius.dp)
     val f = p.resolve(fg)
     val pad = PaddingValues(horizontal = 8.dp)
-    val text: @Composable () -> Unit = { Text(app.fill(label), fontSize = size.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    // the words shrink to fit rather than being cut short
+    val text: @Composable () -> Unit = { androidx.compose.foundation.text.BasicText(app.fill(label), style = androidx.compose.ui.text.TextStyle(fontWeight = FontWeight.ExtraBold, color = LocalContentColor.current), maxLines = 1, autoSize = androidx.compose.foundation.text.TextAutoSize.StepBased(minFontSize = 10.sp, maxFontSize = size.sp)) }
     when (look) {
         Look.Filled -> Button(onClick, m, shape = shape, contentPadding = pad, colors = ButtonDefaults.buttonColors(containerColor = p.resolve(bg) ?: p.accent, contentColor = f ?: p.onAccent)) { text() }
         Look.Danger -> OutlinedButton(onClick, m, shape = shape, contentPadding = pad, colors = ButtonDefaults.outlinedButtonColors(contentColor = f ?: p.danger, containerColor = p.resolve(bg) ?: p.card), border = androidx.compose.foundation.BorderStroke(2.dp, p.resolve(stroke) ?: p.danger)) { text() }
         Look.Outlined -> OutlinedButton(onClick, m, shape = shape, contentPadding = pad, colors = ButtonDefaults.outlinedButtonColors(contentColor = f ?: p.accent, containerColor = p.resolve(bg) ?: Color.Transparent), border = androidx.compose.foundation.BorderStroke(2.dp, p.resolve(stroke) ?: f ?: p.accent)) { text() }
-        Look.Plain -> TextButton(onClick, m, contentPadding = pad, colors = ButtonDefaults.textButtonColors(contentColor = f ?: p.accent)) { text() }
+        Look.Plain -> TextButton(onClick, m, contentPadding = PaddingValues(horizontal = 4.dp), colors = ButtonDefaults.textButtonColors(contentColor = f ?: p.accent)) { text() }
     }
 }
 

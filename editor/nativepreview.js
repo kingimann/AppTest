@@ -3,7 +3,7 @@
 // Pocket.kt, Pocket.swift): pages, tabs, back, Data Lists, Forms, stats, {variables}. Material look for Flutter and Kotlin,
 // iOS look for SwiftUI. Nothing is compiled here: Download gives the real project.
 import { appModel, PALETTES } from './appmodel.js';
-import { names } from './nativecode.js';
+import { names, labelW } from './nativecode.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -253,7 +253,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   function placed(x, P, entry) {
     const el = element(x, P, entry), q = x.pin;
     if (!q || q.m >= 0 || !q.w || !['box', 'button', 'image', 'avatar'].includes(x.kind)) return el;
-    return h('div', { class: 'npv-place', style: `justify-content:${q.fx === 0 ? 'flex-start' : q.fx === 1 ? 'flex-end' : 'center'}` }, h('div', { style: `width:${q.w}px;max-width:100%` }, el));
+    return h('div', { class: 'npv-place', style: `justify-content:${q.fx === 0 ? 'flex-start' : q.fx === 1 ? 'flex-end' : 'center'}` }, h('div', { style: `width:${x.kind === 'button' ? Math.max(q.w, labelW(x)) : q.w}px;max-width:100%` }, el));
   }
 
   function list(x, P) {

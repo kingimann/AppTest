@@ -495,7 +495,7 @@ struct PButton: View {
         let fill = look == .filled ? (p.resolve(bg) ?? p.accent) : look == .plain ? Color.clear : (p.resolve(bg) ?? (look == .danger ? p.card : Color.clear))
         let line = look == .danger ? (p.resolve(stroke) ?? p.danger) : look == .outlined ? (p.resolve(stroke) ?? f) : Color.clear
         Button(action: action) {
-            Text(app.fill(label)).font(.system(size: size, weight: .heavy)).lineLimit(1).frame(maxWidth: .infinity, minHeight: height)
+            Text(app.fill(label)).font(.system(size: size, weight: .heavy)).lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, look == .plain ? 2 : 8).frame(maxWidth: .infinity, minHeight: height) // (the words shrink to fit rather than being cut short)
                 .foregroundColor(f)
                 .background(RoundedRectangle(cornerRadius: radius).fill(fill))
                 .overlay(RoundedRectangle(cornerRadius: radius).stroke(line, lineWidth: 2))

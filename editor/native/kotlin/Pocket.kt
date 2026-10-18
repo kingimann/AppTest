@@ -508,3 +508,316 @@ fun TodoBox(name: String, type: String) {
         Text("$type: to build natively", color = p.sub)
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Social building blocks: a feed, a composer, stories, messages, profiles, a marketplace, notifications…
+// They read and change the same data collections as the app (Posts, Messages, Stories, Listings, Profiles…).
+// ---------------------------------------------------------------------------------------------------------------
+
+val me: String get() = show(app.get("playerHandle")).ifEmpty { "me" }
+val meName: String get() = show(app.get("playerName")).ifEmpty { "Me" }
+fun Row.s(k: String): String = show(this[k])
+private val avatarColors = listOf(0xFFEF4444, 0xFFF59E0B, 0xFF10B981, 0xFF3B82F6, 0xFF8B5CF6, 0xFFEC4899, 0xFF14B8A6, 0xFFF97316)
+fun avatarColor(s: String): Color = Color(avatarColors[s.sumOf { it.code } % avatarColors.size])
+fun firstMedia(m: Any?): String = show(m).split("|").first().trim()
+fun isUrl(s: String): Boolean = s.startsWith("http:") || s.startsWith("https:")
+fun colorOf(r: Row, seed: String): Color = app.light.resolve(r.s("color").takeIf { it.startsWith("#") }) ?: avatarColor(seed)
+
+/** Opens a person's profile page (it shows {profile} and {profile_name}). */
+fun openProfile(page: String, handle: String, name: String) {
+    if (page.isEmpty()) return
+    app.vars["profile"] = handle
+    app.vars["profile_name"] = name
+    app.go(page)
+}
+
+@Composable
+fun Avatar(name: String, seed: String, size: Int = 40, label: String? = null) {
+    Box(Modifier.size(size.dp).background(avatarColor(seed.ifEmpty { name }), CircleShape), contentAlignment = Alignment.Center) {
+        Text(label ?: name.trim().take(1).uppercase().ifEmpty { "?" }, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = (size * 0.42).sp)
+    }
+}
+
+/** A post's picture: an emoji on the post's colour (a photo link shows 🖼️: add an image library such as Coil to load it). */
+@Composable
+fun Media(r: Row, height: Int = 200, radius: Int = 12) {
+    val m = firstMedia(r["media"])
+    if (m.isEmpty()) return
+    Box(Modifier.fillMaxWidth().height(height.dp).background(colorOf(r, r.s("handle") + m), RoundedCornerShape(radius.dp)), contentAlignment = Alignment.Center) {
+        Text(if (isUrl(m)) "🖼️" else m, fontSize = (height * 0.4).sp)
+    }
+}
+
+@Composable
+private fun Empty(text: String) {
+    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text(text, color = LocalPalette.current.sub, textAlign = TextAlign.Center) }
+}
+
+/** Posts, newest first: like, repost, save; tap the author for their profile. look: timeline, reels or grid. */
+@Composable
+fun SocialFeed(collection: String = "Posts", look: String = "timeline", filter: String = "", search: String = "", columns: Int = 3, profilePage: String = "", empty: String = "No posts yet") {
+    val p = LocalPalette.current
+    val rows = app.query(collection, filter, if (search.isEmpty()) "" else show(app.get(search)))
+    if (rows.isEmpty()) { Empty(empty); return }
+    fun toggle(r: Row, flag: String, count: String? = null) {
+        val now = !isOn(r[flag])
+        val change = mutableMapOf<String, Any?>(flag to now)
+        if (count != null) change[count] = maxOf(0.0, (num(r[count]) ?: 0.0) + if (now) 1.0 else -1.0)
+        app.updateRecord(collection, r.s("_id"), change)
+    }
+    if (look == "grid") {
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (line in rows.chunked(columns)) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (r in line) Box(Modifier.weight(1f).clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }) {
+                    if (firstMedia(r["media"]).isEmpty()) Text(r.s("text"), maxLines = 4, fontSize = 11.sp, color = p.text, modifier = Modifier.fillMaxWidth().height(120.dp).background(p.field).padding(6.dp)) else Media(r, 120, 6)
+                }
+                repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        return
+    }
+    @Composable
+    fun RowScope.action(label: String, lit: Boolean, color: Color, onClick: () -> Unit) =
+        TextButton(onClick, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text(label, color = if (lit) color else p.sub, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        for (r in rows) Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }, verticalAlignment = Alignment.CenterVertically) {
+                Avatar(r.s("author"), r.s("handle"))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(r.s("author") + if (isOn(r["verified"])) " ✓" else "", fontWeight = FontWeight.ExtraBold, color = p.text)
+                    Text("@${r.s("handle")}" + if (r.s("location").isEmpty()) "" else " · ${r.s("location")}", color = p.sub, fontSize = 14.sp)
+                }
+            }
+            if (r.s("text").isNotEmpty()) Text(r.s("text"), color = p.text, fontSize = 16.sp)
+            Media(r, if (look == "reels") 380 else 200)
+            Row(Modifier.fillMaxWidth()) {
+                action("💬 ${show(num(r["comments"]) ?: 0.0)}", false, p.accent) {}
+                action("🔁 ${show(num(r["reposts"]) ?: 0.0)}", isOn(r["reposted"]), Color(0xFF10B981)) { toggle(r, "reposted", "reposts") }
+                action("${if (isOn(r["liked"])) "❤️" else "🤍"} ${show(num(r["likes"]) ?: 0.0)}", isOn(r["liked"]), p.danger) { toggle(r, "liked", "likes") }
+                action(if (isOn(r["saved"])) "🔖 Saved" else "🔖", isOn(r["saved"]), p.accent) { toggle(r, "saved") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SendBox(placeholder: String, button: String, onSend: (String) -> Unit) {
+    val p = LocalPalette.current
+    var text by remember { mutableStateOf("") }
+    Row(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        TextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text(placeholder) }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
+        Button({ if (text.isNotBlank()) { onSend(text.trim()); text = "" } }, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent)) { Text(button) }
+    }
+}
+
+/** A box to write a post: Post adds it to the top of the feed. */
+@Composable
+fun Composer(collection: String = "Posts", placeholder: String = "What’s happening?") =
+    SendBox(placeholder, "Post") { app.addRecord(collection, mapOf("author" to meName, "handle" to me, "text" to it, "likes" to 0.0, "comments" to 0.0, "reposts" to 0.0, "liked" to false, "reposted" to false, "saved" to false)) }
+
+/** Story circles; tap one to see it. */
+@Composable
+fun Stories(collection: String = "Stories") {
+    val p = LocalPalette.current
+    var open by remember { mutableStateOf<Row?>(null) }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        for (r in app.query(collection)) Column(Modifier.clickable { open = r }, horizontalAlignment = Alignment.CenterHorizontally) {
+            val m = firstMedia(r["media"])
+            Box(Modifier.size(62.dp).border(3.dp, p.accent, CircleShape).padding(5.dp)) { Avatar(r.s("author"), r.s("handle"), 52, if (m.isEmpty() || isUrl(m)) null else m) }
+            Text(r.s("author").substringBefore(" "), fontSize = 11.sp, color = p.text)
+        }
+    }
+    open?.let { r ->
+        AlertDialog(
+            onDismissRequest = { open = null }, containerColor = colorOf(r, r.s("handle")),
+            confirmButton = { TextButton({ open = null }) { Text("Close", color = Color.White) } },
+            title = { Text(r.s("author"), color = Color.White, fontWeight = FontWeight.ExtraBold) },
+            text = { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Text(firstMedia(r["media"]), fontSize = 96.sp); Text(r.s("text"), color = Color.White, textAlign = TextAlign.Center) } },
+        )
+    }
+}
+
+/** The name to show for a chat: the other person in it. */
+fun chatName(collection: String, id: String): String =
+    app.rows(collection).firstOrNull { it.s("chat") == id && it.s("handle") != me }?.s("author")
+        ?: id.removePrefix("dm-").split("-").filter { it != me }.joinToString(", ").ifEmpty { id }
+
+/** Conversations, latest first: tap one to open it on the chat page. */
+@Composable
+fun Inbox(collection: String = "Messages", openPage: String = "chat") {
+    val p = LocalPalette.current
+    val latest = app.query(collection).filter { it.s("chat").isNotEmpty() }.distinctBy { it.s("chat") }
+    if (latest.isEmpty()) { Empty("No messages yet"); return }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (r in latest) {
+            val name = chatName(collection, r.s("chat"))
+            Row(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).clickable { app.vars["chat"] = r.s("chat"); app.vars["chatTitle"] = name; app.go(openPage) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Avatar(name, name, 46)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(name, fontWeight = FontWeight.Bold, color = p.text)
+                    Text((if (r.s("handle") == me) "You: " else "") + r.s("text"), color = p.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** The messages of the open chat ({chat}), and a box to send one. */
+@Composable
+fun Chat(collection: String = "Messages") {
+    val p = LocalPalette.current
+    val id = show(app.get("chat"))
+    val rows = app.query(collection, sort = "oldest first").filter { it.s("chat") == id }
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (rows.isEmpty()) Empty("Say hello 👋")
+        for (r in rows) {
+            val mine = r.s("handle") == me
+            Box(Modifier.fillMaxWidth(), contentAlignment = if (mine) Alignment.CenterEnd else Alignment.CenterStart) {
+                Text(r.s("text"), color = if (mine) p.onAccent else p.text, fontSize = 16.sp, modifier = Modifier.widthIn(max = 280.dp).background(if (mine) p.accent else p.card, RoundedCornerShape(18.dp)).padding(horizontal = 12.dp, vertical = 8.dp))
+            }
+        }
+        Spacer(Modifier.height(4.dp))
+        SendBox("Message", "Send") { if (id.isNotEmpty()) app.addRecord(collection, mapOf("chat" to id, "author" to meName, "handle" to me, "text" to it)) }
+    }
+}
+
+/** A profile header: cover, picture, name, @handle, bio and counts. */
+@Composable
+fun ProfileHeader(name: String = "{playerName}", handle: String = "{playerHandle}", bio: String = "", stats: List<Pair<String, String>> = emptyList(), cover: String = "@accent") {
+    val p = LocalPalette.current
+    val n = app.fill(name)
+    val h = app.fill(handle)
+    val own = mapOf("posts_count" to app.rows("Posts").count { it.s("handle") == h }.toDouble(), "points" to (num(app.get("points")) ?: 0.0))
+    Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(bottom = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.fillMaxWidth().height(80.dp).background(p.resolve(cover) ?: p.accent, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)))
+        Box(Modifier.offset(y = (-38).dp).border(3.dp, p.card, CircleShape)) { Avatar(n, h, 76) }
+        Column(Modifier.offset(y = (-30).dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(n, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+            Text("@$h", color = p.sub)
+            if (bio.isNotEmpty()) Text(app.fill(bio), color = p.text, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp, start = 12.dp, end = 12.dp))
+            if (stats.isNotEmpty()) Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                for ((label, value) in stats) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(app.fill(value, own), fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, color = p.text)
+                    Text(label, color = p.sub, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+fun price(r: Row): String = if (r.s("price").toDoubleOrNull() != null) "$" + r.s("price") else r.s("price")
+
+/** Things for sale in a grid: tap one for its details and to message the seller. */
+@Composable
+fun Marketplace(collection: String = "Listings", chatPage: String = "") {
+    val p = LocalPalette.current
+    var open by remember { mutableStateOf<Row?>(null) }
+    val rows = app.query(collection)
+    if (rows.isEmpty()) { Empty("Nothing for sale yet"); return }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (line in rows.chunked(2)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (r in line) Column(Modifier.weight(1f).background(p.card, RoundedCornerShape(14.dp)).clickable { open = r }.padding(6.dp)) {
+                Media(r, 120)
+                Text(price(r) + if (isOn(r["sold"])) " · Sold" else "", fontWeight = FontWeight.ExtraBold, color = p.text)
+                Text(r.s("title"), maxLines = 1, overflow = TextOverflow.Ellipsis, color = p.text)
+                Text(r.s("location"), maxLines = 1, overflow = TextOverflow.Ellipsis, color = p.sub, fontSize = 12.sp)
+            }
+            if (line.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
+    open?.let { r ->
+        AlertDialog(
+            onDismissRequest = { open = null },
+            title = { Text(r.s("title"), fontWeight = FontWeight.ExtraBold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Media(r, 140)
+                    Text(price(r), fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
+                    Text(listOf(r.s("condition"), r.s("location"), if (r.s("seller").isEmpty()) "" else "Seller: ${r.s("seller")}").filter { it.isNotEmpty() }.joinToString(" · "), color = p.sub)
+                    if (r.s("description").isNotEmpty()) Text(r.s("description"))
+                }
+            },
+            confirmButton = {
+                if (chatPage.isNotEmpty() && r.s("handle") != me) TextButton({
+                    open = null
+                    app.vars["chat"] = "dm-" + listOf(me, r.s("handle")).sorted().joinToString("-")
+                    app.vars["chatTitle"] = r.s("seller").ifEmpty { r.s("handle") }
+                    app.go(chatPage)
+                }) { Text("Message seller") }
+            },
+            dismissButton = { TextButton({ open = null }) { Text("Close") } },
+        )
+    }
+}
+
+/** Likes, comments, follows and reposts for me, newest first. */
+@Composable
+fun Activity(collection: String = "Notifications", profilePage: String = "") {
+    val p = LocalPalette.current
+    val icons = mapOf("like" to "❤️", "comment" to "💬", "follow" to "👤", "repost" to "🔁", "mention" to "@")
+    val rows = app.query(collection).filter { it.s("to").isEmpty() || it.s("to") == me }
+    if (rows.isEmpty()) { Empty("No notifications yet"); return }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (r in rows) Row(
+            Modifier.fillMaxWidth().background(if (isOn(r["read"])) p.card else p.accent.copy(alpha = 0.1f), RoundedCornerShape(16.dp))
+                .clickable { app.updateRecord(collection, r.s("_id"), mapOf("read" to true)); openProfile(profilePage, r.s("from"), r.s("from_name")) }.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(icons[r.s("type")] ?: "🔔", fontSize = 24.sp)
+            Spacer(Modifier.width(12.dp))
+            Text(r.s("from_name").ifEmpty { r.s("from") } + " " + r.s("text"), color = p.text)
+        }
+    }
+}
+
+/** People (Profiles), A to Z: tap one for their profile. */
+@Composable
+fun People(collection: String = "Profiles", profilePage: String = "") {
+    val p = LocalPalette.current
+    val rows = app.query(collection, sort = "name (a-z)").filter { it.s("handle") != me }
+    if (rows.isEmpty()) { Empty("No one here yet"); return }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (r in rows) Row(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).clickable { openProfile(profilePage, r.s("handle"), r.s("name")) }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Avatar(r.s("name"), r.s("handle"), 46)
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(r.s("name") + if (isOn(r["verified"])) " ✓" else "", fontWeight = FontWeight.Bold, color = p.text)
+                Text("@${r.s("handle")}" + if (r.s("bio").isEmpty()) "" else " · ${r.s("bio")}", color = p.sub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Milestones worked out from my posts, the likes on them and my followers. */
+@Composable
+fun Achievements() {
+    val p = LocalPalette.current
+    val mine = app.rows("Posts").filter { it.s("handle") == me }
+    val likes = mine.sumOf { num(it["likes"]) ?: 0.0 }
+    val followers = num(app.get("followers")) ?: 0.0
+    val list = listOf(Triple("✍️", "First post", mine.size.toDouble() to 1.0), Triple("📚", "10 posts", mine.size.toDouble() to 10.0), Triple("❤️", "First like", likes to 1.0), Triple("🔥", "100 likes", likes to 100.0), Triple("⭐", "1,000 followers", followers to 1000.0))
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((ic, label, progress) in list) {
+            val (have, need) = progress
+            Row(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (have >= need) ic else "🔒", fontSize = 24.sp)
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(label, fontWeight = FontWeight.Bold, color = if (have >= need) p.text else p.sub)
+                    Text(if (have >= need) "Unlocked" else "${show(minOf(have, need))} / ${show(need)}", color = p.sub, fontSize = 14.sp)
+                }
+            }
+        }
+    }
+}
+
+/** The most used #hashtags; tap one to search for it. */
+@Composable
+fun Trending(collection: String = "Posts", searchVar: String = "") {
+    val counts = app.rows(collection).flatMap { r -> Regex("#\\w+").findAll(r.s("text")).map { it.value }.toList() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(8)
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for ((tag, n) in counts) AssistChip(onClick = { if (searchVar.isNotEmpty()) app.set(searchVar, tag) }, label = { Text("$tag · $n") })
+    }
+}

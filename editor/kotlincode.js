@@ -34,6 +34,17 @@ function kElement(x, ind, fill) {
     case 'items': return `StaticList(listOf(${x.items.map(ks).join(', ')}))`;
     case 'image': return `TodoBox("Picture", "image") // TODO: show ${x.src.slice(0, 60)} (add an image library such as Coil 3)`;
     case 'row': return `PCard {\n${x.children.map((c) => pad + '    ' + kElement(c, ind + 4, false)).join('\n')}\n${pad}}`;
+    case 'feed': return `SocialFeed(${ks(x.collection)}${x.look !== 'timeline' ? `, look = ${ks(x.look)}` : ''}${x.filter ? `, filter = ${ks(x.filter)}` : ''}${x.search ? `, search = ${ks(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns = ${x.columns}` : ''}${x.profilePage ? `, profilePage = ${ks(x.profilePage)}` : ''}, empty = ${ks(x.empty)})`;
+    case 'composer': return `Composer(${ks(x.collection)}, placeholder = ${ks(x.placeholder)})`;
+    case 'stories': return `Stories(${ks(x.collection)})`;
+    case 'inbox': return `Inbox(${ks(x.collection)}, openPage = ${ks(x.openPage)})`;
+    case 'chat': return `Chat(${ks(x.collection)})`;
+    case 'profile': return `ProfileHeader(name = ${ks(x.name)}, handle = ${ks(x.handle)}${x.bio ? `, bio = ${ks(x.bio)}` : ''}${x.stats.length ? `, stats = listOf(${x.stats.map((s) => `${ks(s.label)} to ${ks(s.value)}`).join(', ')})` : ''}, cover = ${ks(tokenColor(x.cover) || '@accent')})`;
+    case 'market': return `Marketplace(${ks(x.collection)}${x.chatPage ? `, chatPage = ${ks(x.chatPage)}` : ''})`;
+    case 'activity': return `Activity(${ks(x.collection)}${x.profilePage ? `, profilePage = ${ks(x.profilePage)}` : ''})`;
+    case 'people': return `People(${ks(x.collection)}${x.profilePage ? `, profilePage = ${ks(x.profilePage)}` : ''})`;
+    case 'achievements': return 'Achievements()';
+    case 'trending': return `Trending(${ks(x.collection)}${x.searchVar ? `, searchVar = ${ks(x.searchVar)}` : ''})`;
     default: return `TodoBox(${ks(x.name)}, ${ks(x.type)}) // TODO: build the ${x.type} natively`;
   }
 }

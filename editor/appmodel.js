@@ -19,6 +19,19 @@ function elementOf(e, kids, todo) {
     return { kind: 'button', label: text?.value || e.name || 'Button', action: p.action || 'message', value: p.value ?? '', amount: p.amount ?? 1,
       fab: sh.type === 'circle' && /bottom/.test(e.anchor || ''), outlined: !!sh.stroke && (!sh.fill || /card|bg/.test(String(sh.fill))), fill: color(sh.fill), color: color(text?.color) };
   }
+  // social components: native versions that read the same data collections
+  if ((b = B('uiFeed'))) { const p = P(b); return { kind: 'feed', collection: p.collection || 'Posts', look: p.look || 'timeline', filter: p.filter || '', search: p.searchVar || '', columns: +p.gridColumns || 3, profilePage: p.profilePage || '', empty: p.empty || 'No posts yet', fill: e.stretch === 'both' || !!e.stretch }; }
+  if ((b = B('uiComposer'))) { const p = P(b); return { kind: 'composer', collection: p.collection || 'Posts', placeholder: p.placeholder || 'What’s happening?' }; }
+  if ((b = B('uiStories'))) { const p = P(b); return { kind: 'stories', collection: p.collection || 'Stories' }; }
+  if ((b = B('uiInbox'))) { const p = P(b); return { kind: 'inbox', collection: p.collection || 'Messages', openPage: p.openPage || 'chat', fill: true }; }
+  if ((b = B('uiChat'))) { const p = P(b); return { kind: 'chat', collection: p.collection || 'Messages', fill: true }; }
+  if ((b = B('uiProfile'))) { const p = P(b); return { kind: 'profile', name: p.name || '{playerName}', handle: p.handle || '{playerHandle}', bio: p.bio || '', stats: String(p.stats || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((x) => x[0]).map(([label, value]) => ({ label, value: value || '' })).concat(p.stats ? [] : [{ label: 'Posts', value: '{posts_count}' }]), cover: String(p.cover || '@accent').match(/#[0-9a-f]{6}/i)?.[0] || p.cover || '@accent', own: !!p.own }; }
+  if ((b = B('uiMarketplace'))) { const p = P(b); return { kind: 'market', collection: p.collection || 'Listings', chatPage: p.chatPage || '', fill: true }; }
+  if ((b = B('uiActivity'))) { const p = P(b); return { kind: 'activity', collection: p.collection || 'Notifications', profilePage: p.profilePage || '', fill: true }; }
+  if ((b = B('uiBookmarks'))) return { kind: 'feed', collection: 'Posts', look: 'timeline', filter: 'saved = yes', search: '', columns: 3, profilePage: '', empty: 'Nothing saved yet: tap 🔖 on a post', fill: true };
+  if ((b = B('uiFriends')) || (b = B('uiWhoToFollow'))) { const p = P(b); return { kind: 'people', collection: 'Profiles', profilePage: p.profilePage || '', fill: true }; }
+  if ((b = B('uiAchievements'))) return { kind: 'achievements' };
+  if ((b = B('uiTrending'))) { const p = P(b); return { kind: 'trending', collection: p.collection || 'Posts', searchVar: p.searchVar || p.var || '' }; }
   if ((b = B('uiList'))) { const p = P(b); if ((p.source || 'these items') === 'these items') return { kind: 'items', items: String(p.items || '').split('\n').map((s) => s.trim()).filter(Boolean) }; }
   const UI = (e.behaviors || []).filter((x) => /^ui|^data/.test(x.type) && !['uiShowIf', 'dataStat'].includes(x.type));
   if (UI.length) { todo.push({ name: e.name || UI[0].type, type: UI[0].type }); return { kind: 'todo', name: e.name || UI[0].type, type: UI[0].type }; }

@@ -139,6 +139,17 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
       case 'image': return h('img', { class: 'npv-img', src: x.src, alt: '', style: `height:${x.h}px` });
       case 'list': return list(x, P);
       case 'form': return form(x, P, entry);
+      case 'feed': return feed(x, P);
+      case 'composer': return composer(x, entry);
+      case 'stories': return stories(x);
+      case 'inbox': return inbox(x);
+      case 'chat': return chat(x, entry);
+      case 'profile': return profile(x, P);
+      case 'market': return market(x);
+      case 'activity': return activity(x);
+      case 'people': return people(x);
+      case 'achievements': return achievements();
+      case 'trending': return trending(x);
       default: return h('div', { class: 'npv-todo' }, h('b', {}, x.name), h('small', {}, `${x.type}: a TODO placeholder in the native code`));
     }
   }
@@ -177,6 +188,107 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
         : h('input', { class: 'npv-input', 'data-k': 'f:' + f.key, type: ['number', 'money'].includes(f.type) ? 'number' : 'text', placeholder: f.name, value: show(F.values[f.key]), oninput: (e) => set(f.key, e.target.value) }),
     ]), h('button', { class: 'npv-pbtn filled', 'data-save': '', onclick: save }, A.fill(x.saveLabel)));
   }
+  // ---------- social: the same rules as the native SocialFeed, Chat, Profile… building blocks ----------
+  const me = () => show(A.vars.playerHandle) || 'me', meName = () => show(A.vars.playerName) || 'Me';
+  const AV = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+  const avColor = (s) => AV[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length];
+  const avatar = (name, handle, size = 40) => h('span', { class: 'npv-av', style: `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${avColor(handle || name)}` }, (show(name).trim()[0] || '?').toUpperCase());
+  const firstMedia = (m) => show(m).split('|')[0].trim();
+  const media = (r, height) => { const m = firstMedia(r.media); if (!m) return null; const bg = /^#[0-9a-f]{6}$/i.test(show(r.color)) ? r.color : avColor(r.handle || r.title || m);
+    return /^(https?:|data:)/.test(m) ? h('img', { class: 'npv-media', src: m, alt: '', style: `height:${height}px` }) : h('div', { class: 'npv-media', style: `height:${height}px;background:${bg};font-size:${Math.round(height * 0.4)}px` }, m); };
+  const openProfile = (page, handle, name) => { if (!page) return; A.vars.profile = handle; A.vars.profile_name = name; A.go(page); drawPhone(); };
+  const toggle = (coll, r, flag, count) => { const on = !isOn(r[flag]); A.updateRecord(coll, r._id, count ? { [flag]: on, [count]: Math.max(0, (num(r[count]) || 0) + (on ? 1 : -1)) } : { [flag]: on }); drawPhone(); };
+  function feed(x) {
+    const rows = A.query(x.collection, x.filter, x.search ? show(A.vars[x.search]) : '', 'newest first');
+    if (!rows.length) return h('div', { class: 'npv-empty' }, x.empty);
+    if (x.look === 'grid') return h('div', { class: 'npv-grid', style: `grid-template-columns:repeat(${x.columns},1fr)` }, rows.map((r) => h('div', { class: 'npv-tile', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, media(r, 110) || h('div', { class: 'npv-media', style: 'height:110px' }, show(r.text).slice(0, 40)))));
+    return h('div', { class: 'npv-feed' }, rows.map((r) => h('div', { class: 'npv-post', 'data-id': r._id },
+      h('div', { class: 'npv-phead', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, avatar(r.author, r.handle),
+        h('div', { class: 'npv-rowt' }, h('b', {}, show(r.author), isOn(r.verified) && h('span', { class: 'npv-ver' }, ' ✓')), h('small', {}, '@' + show(r.handle) + (r.location ? ' · ' + show(r.location) : '')))),
+      r.text && h('div', { class: 'npv-ptext' }, show(r.text)),
+      media(r, x.look === 'reels' ? 380 : 200),
+      h('div', { class: 'npv-acts2' },
+        h('button', { 'data-act': 'comments' }, '💬 ' + show(num(r.comments) || 0)),
+        h('button', { 'data-act': 'repost', class: isOn(r.reposted) ? 'on good' : '', onclick: () => toggle(x.collection, r, 'reposted', 'reposts') }, '🔁 ' + show(num(r.reposts) || 0)),
+        h('button', { 'data-act': 'like', class: isOn(r.liked) ? 'on bad' : '', onclick: () => toggle(x.collection, r, 'liked', 'likes') }, (isOn(r.liked) ? '❤️ ' : '🤍 ') + show(num(r.likes) || 0)),
+        h('button', { 'data-act': 'save', class: isOn(r.saved) ? 'on' : '', onclick: () => toggle(x.collection, r, 'saved') }, isOn(r.saved) ? '🔖 Saved' : '🔖')))));
+  }
+  function composer(x, entry) {
+    const post = () => { const t = show(entry.draft).trim(); if (!t) return; A.addRecord(x.collection, { author: meName(), handle: me(), text: t, likes: 0, comments: 0, reposts: 0, liked: false, reposted: false, saved: false }); entry.draft = ''; drawPhone(); };
+    return h('div', { class: 'npv-compose' }, avatar(meName(), me()),
+      h('input', { class: 'npv-input', 'data-k': 'compose', placeholder: x.placeholder, value: show(entry.draft), oninput: (e) => { entry.draft = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') post(); } }),
+      h('button', { class: 'npv-pbtn filled small', 'data-post': '', onclick: post }, 'Post'));
+  }
+  let story = null;
+  function stories(x) {
+    const rows = A.query(x.collection);
+    return h('div', { class: 'npv-stories' }, rows.map((r) => h('button', { class: 'npv-story', onclick: () => { story = r; drawPhone(); } },
+      h('span', { class: 'npv-ring' }, h('span', { class: 'npv-av', style: `width:56px;height:56px;font-size:26px;background:${/^#/.test(show(r.color)) ? r.color : avColor(r.handle)}` }, firstMedia(r.media) && !/^(https?:|data:)/.test(firstMedia(r.media)) ? firstMedia(r.media) : (show(r.author)[0] || '?'))),
+      h('small', {}, show(r.author).split(' ')[0]))));
+  }
+  const chats = (coll) => { const by = new Map(); for (const r of A.query(coll, '', '', 'newest first')) if (r.chat && !by.has(r.chat)) by.set(r.chat, r); return [...by.values()]; };
+  const chatName = (coll, id) => { const o = A.rows(coll).find((r) => r.chat === id && show(r.handle) !== me()); return o ? show(o.author) : show(id).replace(/^dm-/, '').split('-').filter((s) => s !== me()).join(', ') || show(id); };
+  function inbox(x) {
+    const L = chats(x.collection);
+    if (!L.length) return h('div', { class: 'npv-empty' }, 'No messages yet');
+    return h('div', { class: 'npv-feed' }, L.map((r) => { const name = chatName(x.collection, r.chat);
+      return h('div', { class: 'npv-row', 'data-chat': r.chat, onclick: () => { A.vars.chat = r.chat; A.vars.chatTitle = name; A.go(x.openPage); drawPhone(); } }, avatar(name, name, 46),
+        h('div', { class: 'npv-rowt' }, h('b', {}, name), h('small', {}, (show(r.handle) === me() ? 'You: ' : '') + show(r.text)))); }));
+  }
+  function chat(x, entry) {
+    const id = show(A.vars.chat), L = A.query(x.collection, '', '', 'oldest first').filter((r) => show(r.chat) === id);
+    const send = () => { const t = show(entry.draft).trim(); if (!t || !id) return; A.addRecord(x.collection, { chat: id, author: meName(), handle: me(), text: t }); entry.draft = ''; drawPhone(); };
+    return h('div', { class: 'npv-chat' }, L.length ? L.map((r) => h('div', { class: 'npv-bub' + (show(r.handle) === me() ? ' mine' : '') }, show(r.text))) : h('div', { class: 'npv-empty' }, 'Say hello 👋'),
+      h('div', { class: 'npv-compose' }, h('input', { class: 'npv-input', 'data-k': 'chat', placeholder: 'Message', value: show(entry.draft), oninput: (e) => { entry.draft = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') send(); } }),
+        h('button', { class: 'npv-pbtn filled small', 'data-send': '', onclick: send }, 'Send')));
+  }
+  function profile(x, P) {
+    const name = A.fill(x.name), handle = A.fill(x.handle), own = { posts_count: A.rows('Posts').filter((r) => show(r.handle) === handle).length, points: num(A.vars.points) || 0 };
+    return h('div', { class: 'npv-prof' }, h('div', { class: 'npv-cover', style: `background:${col(x.cover, P) || P.accent}` }), avatar(name, handle, 76),
+      h('b', { class: 'npv-pname' }, name), h('small', { class: 'npv-sub' }, '@' + handle), x.bio && h('div', {}, A.fill(x.bio)),
+      x.stats.length && h('div', { class: 'npv-stats' }, x.stats.map((s) => h('div', {}, h('b', {}, A.fill(s.value, own)), h('small', {}, s.label)))));
+  }
+  let listing = null;
+  function market(x) {
+    const L = A.query(x.collection);
+    if (!L.length) return h('div', { class: 'npv-empty' }, 'Nothing for sale yet');
+    return h('div', { class: 'npv-grid', style: 'grid-template-columns:1fr 1fr' }, L.map((r) => h('div', { class: 'npv-listing', onclick: () => { listing = { x, r }; drawPhone(); } }, media(r, 120),
+      h('b', {}, (num(r.price) != null ? '$' + show(r.price) : show(r.price)) + (isOn(r.sold) ? ' · Sold' : '')), h('small', {}, show(r.title)), h('small', { class: 'npv-sub' }, show(r.location)))));
+  }
+  const ACT_IC = { like: '❤️', comment: '💬', follow: '👤', repost: '🔁', mention: '@' };
+  function activity(x) {
+    const L = A.query(x.collection, '', '', 'newest first').filter((r) => !r.to || show(r.to) === me());
+    if (!L.length) return h('div', { class: 'npv-empty' }, 'No notifications yet');
+    return h('div', { class: 'npv-feed' }, L.map((r) => h('div', { class: 'npv-row' + (isOn(r.read) ? '' : ' unread'), onclick: () => { A.updateRecord(x.collection, r._id, { read: true }); if (x.profilePage) openProfile(x.profilePage, r.from, r.from_name); else drawPhone(); } },
+      h('span', { class: 'npv-rowic' }, ACT_IC[r.type] || '🔔'), h('div', { class: 'npv-rowt' }, h('span', {}, h('b', {}, show(r.from_name || r.from)), ' ' + show(r.text))))));
+  }
+  function people(x) {
+    const L = A.query(x.collection, '', '', 'name (a-z)').filter((r) => show(r.handle) !== me());
+    if (!L.length) return h('div', { class: 'npv-empty' }, 'No one here yet');
+    return h('div', { class: 'npv-feed' }, L.map((r) => h('div', { class: 'npv-row', onclick: () => openProfile(x.profilePage, r.handle, r.name) }, avatar(r.name, r.handle, 46),
+      h('div', { class: 'npv-rowt' }, h('b', {}, show(r.name), isOn(r.verified) && h('span', { class: 'npv-ver' }, ' ✓')), h('small', {}, '@' + show(r.handle) + (r.bio ? ' · ' + show(r.bio) : ''))))));
+  }
+  const milestones = () => { const mine = A.rows('Posts').filter((r) => show(r.handle) === me()), likes = mine.reduce((a, r) => a + (num(r.likes) || 0), 0), fol = num(A.vars.followers) || 0;
+    return [['✍️', 'First post', mine.length, 1], ['📚', '10 posts', mine.length, 10], ['❤️', 'First like', likes, 1], ['🔥', '100 likes', likes, 100], ['⭐', '1,000 followers', fol, 1000]]; };
+  function achievements() {
+    return h('div', { class: 'npv-feed' }, milestones().map(([ic, label, have, need]) => h('div', { class: 'npv-row' + (have >= need ? '' : ' locked') },
+      h('span', { class: 'npv-rowic' }, have >= need ? ic : '🔒'), h('div', { class: 'npv-rowt' }, h('b', {}, label), h('small', {}, have >= need ? 'Unlocked' : `${Math.min(have, need)} / ${need}`)))));
+  }
+  const hashtags = (coll) => { const n = new Map(); for (const r of A.rows(coll)) for (const t of show(r.text).match(/#\w+/g) || []) n.set(t, (n.get(t) || 0) + 1); return [...n].sort((a, b) => b[1] - a[1]).slice(0, 8); };
+  function trending(x) {
+    const T = hashtags(x.collection);
+    return h('div', { class: 'npv-chips' }, T.length ? T.map(([t, n]) => h('button', { class: 'npv-chip', onclick: () => { if (x.searchVar) { A.set(x.searchVar, t); drawPhone(); } } }, `${t} · ${n}`)) : h('small', { class: 'npv-sub' }, 'No hashtags yet'));
+  }
+  function overlay() {
+    if (story) { const r = story; return h('div', { class: 'npv-over', onclick: () => { story = null; drawPhone(); } }, h('div', { class: 'npv-storyv', style: `background:${/^#/.test(show(r.color)) ? r.color : avColor(r.handle)}` },
+      h('b', {}, show(r.author)), h('div', { class: 'npv-big' }, firstMedia(r.media)), h('div', {}, show(r.text)))); }
+    if (listing) { const { x, r } = listing; return h('div', { class: 'npv-over', onclick: (e) => { if (e.target === e.currentTarget) { listing = null; drawPhone(); } } }, h('div', { class: 'npv-sheet2' }, media(r, 150),
+      h('b', {}, show(r.title)), h('div', { class: 'npv-price' }, num(r.price) != null ? '$' + show(r.price) : show(r.price)), h('small', { class: 'npv-sub' }, [r.condition, r.location, r.seller && 'Seller: ' + show(r.seller)].filter(Boolean).map(show).join(' · ')),
+      r.description && h('div', {}, show(r.description)),
+      x.chatPage && show(r.handle) !== me() && h('button', { class: 'npv-pbtn filled', 'data-msg-seller': '', onclick: () => { A.vars.chat = 'dm-' + [me(), show(r.handle)].sort().join('-'); A.vars.chatTitle = show(r.seller || r.handle); listing = null; A.go(x.chatPage); drawPhone(); } }, 'Message seller'),
+      h('button', { class: 'npv-pbtn outlined', onclick: () => { listing = null; drawPhone(); } }, 'Close'))); }
+    return null;
+  }
   function act(action, value, amount) { const msg = A.run(action, value, amount); note = msg; drawPhone(); }
 
   function drawPhone() {
@@ -194,6 +306,7 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
         h('b', { class: 'npv-btitle' }, A.fill(page.title)), h('span', { class: 'npv-back-sp' })),
       h('div', { class: 'npv-page' + (fills ? ' fills' : ''), 'data-page': page.value }, page.items.map((x) => element(x, P, entry))),
       page.fab && h('button', { class: 'npv-fab', 'aria-label': 'Add', onclick: () => act(page.fab.action, page.fab.value, page.fab.amount) }, '+'),
+      overlay(),
       model.tabs.length && !stack.length && h('div', { class: 'npv-tabs' }, model.tabs.map((t, i) => {
         const n = t.badge ? num(A.vars[t.badge]) || 0 : 0;
         return h('button', { class: 'npv-tab' + (i === A.tab ? ' on' : ''), 'data-tab': t.page, onclick: () => { A.go(t.page); drawPhone(); } }, h('span', { class: 'npv-tabic' }, svgIcon(t.icon), n > 0 && h('i', {}, n > 99 ? '99+' : n)), h('small', {}, t.label));

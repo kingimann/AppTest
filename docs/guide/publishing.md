@@ -208,6 +208,8 @@ What becomes native code:
 | Text inputs, switches (Dark mode too), cards, plain lists, web pictures | native controls |
 | Data collections and their sample records, Data Stats | `AppState`, saved on the phone |
 
+**Try it first: File › Native App Preview…** (or *Preview & test the native app* in this section) opens your app the way the native code builds it, right in the editor. Pick **Flutter**, **Kotlin** or **SwiftUI** at the top: Flutter and Kotlin show the Material look, SwiftUI the iOS look. Tap around, add, edit, tick and delete records, search, switch tabs and Dark mode: the preview follows the same rules as the native runtimes, with the app's sample data (**Reset** starts again). **Code** shows every file the export writes (on a wide screen, next to the app); **This page** jumps to the code for the page on screen, and **Copy** copies a file. **Download** gives the real project. Nothing is compiled in the preview: build the download to run it on a phone.
+
 Anything else (a Social Feed, Chat, a game…) becomes a placeholder marked **TODO**, and the README lists them. Build Settings shows how many pages convert and which parts will be placeholders before you download. The pages are generated from your project; the runtime (`lib/pocket.dart`, `App/Pocket.swift` or `Pocket.kt`) is a fixed, readable file with the state and the building blocks. Change both as you like: from then on the code is yours.
 
 ## In-app purchases

@@ -117,7 +117,7 @@ Lists live in variables and show in text as `1, 2, 3`. Positions start at **1**.
 
 ## View as code
 
-**⋯ › View as Code…** in the node editor writes the script out as JavaScript-style code, to read, learn from or paste into a note:
+**⋯ › View as Code…** in the node editor writes the script out as code, to read, learn from or paste into a note. Tabs at the top pick the language: **JavaScript**, **Dart (Flutter)**, **Kotlin** or **Swift** (the editor remembers your choice). Dart, Kotlin and Swift use `app.get` / `app.set` / `app.add` for game variables, the same API as the native app exports. In JavaScript:
 
 - each event becomes an `on("start", async () => { … })` handler, and each **Function** an `async function name(a, b, c) { … }`;
 - **If** becomes `if / else`, the loops become `for` / `while`, **Wait** is `await wait(…)`, **Return Value** is `return`, and game variables are `vars.name`;

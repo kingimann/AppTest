@@ -550,3 +550,458 @@ struct TodoBox: View {
         .background(RoundedRectangle(cornerRadius: 16).stroke(Color.secondary.opacity(0.4), lineWidth: 2))
     }
 }
+
+// MARK: - Social building blocks
+// A feed, a composer, stories, messages, profiles, a marketplace, notifications… They read and change the same
+// data collections as the app (Posts, Messages, Stories, Listings, Profiles…).
+
+extension Dictionary where Key == String, Value == Val {
+    func s(_ k: String) -> String { self[k]?.text ?? "" }
+    func on(_ k: String) -> Bool { self[k]?.isOn ?? false }
+    func n(_ k: String) -> Double { self[k]?.number ?? 0 }
+}
+
+extension AppState {
+    var me: String { let h = get("playerHandle")?.text ?? ""; return h.isEmpty ? "me" : h }
+    var meName: String { let n = get("playerName")?.text ?? ""; return n.isEmpty ? "Me" : n }
+    /// Opens a person's profile page (it shows {profile} and {profile_name}).
+    func openProfile(_ page: String, _ handle: String, _ name: String) {
+        guard !page.isEmpty else { return }
+        vars["profile"] = .s(handle)
+        vars["profile_name"] = .s(name)
+        go(page)
+    }
+    /// The latest message of each chat, newest first.
+    func latestChats(_ collection: String) -> [Row] {
+        var seen = Set<String>(), out: [Row] = []
+        for r in query(collection) where !r.s("chat").isEmpty && !seen.contains(r.s("chat")) { seen.insert(r.s("chat")); out.append(r) }
+        return out
+    }
+    /// The name to show for a chat: the other person in it.
+    func chatName(_ collection: String, _ id: String) -> String {
+        if let r = rows(collection).first(where: { $0.s("chat") == id && $0.s("handle") != me }) { return r.s("author") }
+        let who = id.replacingOccurrences(of: "dm-", with: "").split(separator: "-").map(String.init).filter { $0 != me }.joined(separator: ", ")
+        return who.isEmpty ? id : who
+    }
+}
+
+private let avatarColors: [UInt32] = [0xEF4444, 0xF59E0B, 0x10B981, 0x3B82F6, 0x8B5CF6, 0xEC4899, 0x14B8A6, 0xF97316]
+func avatarColor(_ s: String) -> Color { Color(hex: avatarColors[s.utf16.reduce(0) { $0 + Int($1) } % avatarColors.count]) }
+func firstMedia(_ m: String) -> String { (m.components(separatedBy: "|").first ?? "").trimmingCharacters(in: .whitespaces) }
+func isUrl(_ s: String) -> Bool { s.hasPrefix("http:") || s.hasPrefix("https:") }
+func colorOf(_ r: Row, _ seed: String, _ p: Palette) -> Color { r.s("color").hasPrefix("#") ? (p.resolve(r.s("color")) ?? avatarColor(seed)) : avatarColor(seed) }
+
+struct Avatar: View {
+    let name: String, seed: String
+    var size: CGFloat = 40
+    var label: String? = nil
+    var body: some View {
+        let first = name.trimmingCharacters(in: .whitespaces).prefix(1).uppercased()
+        Text(label ?? (first.isEmpty ? "?" : first))
+            .font(.system(size: size * 0.42, weight: .heavy)).foregroundColor(.white)
+            .frame(width: size, height: size).background(Circle().fill(avatarColor(seed.isEmpty ? name : seed)))
+    }
+}
+
+/// A post's picture: a photo from the web, or an emoji on the post's colour.
+struct Media: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let row: Row
+    var height: CGFloat = 200
+    var radius: CGFloat = 12
+    var body: some View {
+        let m = firstMedia(row.s("media"))
+        if isUrl(m) {
+            AsyncImage(url: URL(string: m)) { $0.resizable().scaledToFill() } placeholder: { Color.gray.opacity(0.2) }
+                .frame(maxWidth: .infinity).frame(height: height).clipShape(RoundedRectangle(cornerRadius: radius))
+        } else if !m.isEmpty {
+            Text(m).font(.system(size: height * 0.4)).frame(maxWidth: .infinity).frame(height: height)
+                .background(RoundedRectangle(cornerRadius: radius).fill(colorOf(row, row.s("handle") + m, app.palette(scheme))))
+        }
+    }
+}
+
+struct EmptyNote: View {
+    let text: String
+    var body: some View { Text(text).foregroundColor(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(32) }
+}
+
+/// Posts, newest first: like, repost, save; tap the author for their profile. look: timeline, reels or grid.
+struct SocialFeed: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Posts", look = "timeline", filter = "", search = ""
+    var columns = 3
+    var profilePage = "", empty = "No posts yet"
+
+    func toggle(_ r: Row, _ flag: String, _ count: String? = nil) {
+        let now = !r.on(flag)
+        var change: Row = [flag: .b(now)]
+        if let count { change[count] = .n(max(0, r.n(count) + (now ? 1 : -1))) }
+        app.updateRecord(collection, r.s("_id"), change)
+    }
+
+    func action(_ label: String, _ lit: Bool, _ color: Color, _ tap: @escaping () -> Void) -> some View {
+        Button(action: tap) { Text(label).font(.subheadline.bold()).lineLimit(1).foregroundColor(lit ? color : app.palette(scheme).sub).frame(maxWidth: .infinity) }.buttonStyle(.plain)
+    }
+
+    func post(_ r: Row) -> some View {
+        let p = app.palette(scheme)
+        return VStack(alignment: .leading, spacing: 8) {
+            Button { app.openProfile(profilePage, r.s("handle"), r.s("author")) } label: {
+                HStack(spacing: 10) {
+                    Avatar(name: r.s("author"), seed: r.s("handle"))
+                    VStack(alignment: .leading) {
+                        Text(r.s("author") + (r.on("verified") ? " ✓" : "")).bold().foregroundColor(p.text)
+                        Text("@" + r.s("handle") + (r.s("location").isEmpty ? "" : " · " + r.s("location"))).font(.subheadline).foregroundColor(p.sub)
+                    }
+                    Spacer()
+                }
+            }.buttonStyle(.plain)
+            if !r.s("text").isEmpty { Text(r.s("text")).foregroundColor(p.text) }
+            Media(row: r, height: look == "reels" ? 380 : 200)
+            HStack {
+                action("💬 " + Val.n(r.n("comments")).text, false, p.accent) {}
+                action("🔁 " + Val.n(r.n("reposts")).text, r.on("reposted"), .green) { toggle(r, "reposted", "reposts") }
+                action((r.on("liked") ? "❤️ " : "🤍 ") + Val.n(r.n("likes")).text, r.on("liked"), p.danger) { toggle(r, "liked", "likes") }
+                action(r.on("saved") ? "🔖 Saved" : "🔖", r.on("saved"), p.accent) { toggle(r, "saved") }
+            }
+        }
+        .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+    }
+
+    var body: some View {
+        let rows = app.query(collection, filter: filter, search: search.isEmpty ? "" : (app.get(search)?.text ?? ""))
+        if rows.isEmpty {
+            EmptyNote(text: empty)
+        } else if look == "grid" {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, columns)), spacing: 4) {
+                ForEach(rows, id: \.self) { r in
+                    Button { app.openProfile(profilePage, r.s("handle"), r.s("author")) } label: {
+                        if firstMedia(r.s("media")).isEmpty { Text(r.s("text")).font(.caption).lineLimit(4).frame(maxWidth: .infinity, minHeight: 120).background(Color.gray.opacity(0.15)) }
+                        else { Media(row: r, height: 120, radius: 6) }
+                    }.buttonStyle(.plain)
+                }
+            }
+        } else {
+            VStack(spacing: 10) { ForEach(rows, id: \.self) { post($0) } }
+        }
+    }
+}
+
+/// A text box with a button (the composer and the chat).
+struct SendBox: View {
+    @Environment(\.colorScheme) var scheme
+    @EnvironmentObject var app: AppState
+    let placeholder: String, button: String
+    let send: (String) -> Void
+    @State var text = ""
+    var body: some View {
+        let p = app.palette(scheme)
+        HStack(spacing: 8) {
+            TextField(placeholder, text: $text).padding(10).background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground))).onSubmit(go)
+            Button(button, action: go).bold().padding(.horizontal, 14).padding(.vertical, 10).foregroundColor(p.onAccent).background(RoundedRectangle(cornerRadius: 12).fill(p.accent))
+        }
+        .padding(8).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+    }
+    func go() {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.isEmpty else { return }
+        send(t)
+        text = ""
+    }
+}
+
+/// A box to write a post: Post adds it to the top of the feed.
+struct Composer: View {
+    @EnvironmentObject var app: AppState
+    var collection = "Posts", placeholder = "What’s happening?"
+    var body: some View {
+        SendBox(placeholder: placeholder, button: "Post") { t in
+            app.addRecord(collection, ["author": .s(app.meName), "handle": .s(app.me), "text": .s(t), "likes": .n(0), "comments": .n(0), "reposts": .n(0), "liked": .b(false), "reposted": .b(false), "saved": .b(false)])
+        }
+    }
+}
+
+/// Story circles; tap one to see it.
+struct Stories: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Stories"
+    @State var open: Row? = nil
+    var body: some View {
+        let p = app.palette(scheme)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(app.query(collection), id: \.self) { r in
+                    let m = firstMedia(r.s("media"))
+                    Button { open = r } label: {
+                        VStack(spacing: 4) {
+                            Avatar(name: r.s("author"), seed: r.s("handle"), size: 56, label: m.isEmpty || isUrl(m) ? nil : m)
+                                .padding(3).overlay(Circle().stroke(LinearGradient(colors: [.orange, .pink, .purple], startPoint: .bottomLeading, endPoint: .topTrailing), lineWidth: 3))
+                            Text(r.s("author").components(separatedBy: " ").first ?? "").font(.caption2).foregroundColor(p.text)
+                        }
+                    }.buttonStyle(.plain)
+                }
+            }.padding(.vertical, 2)
+        }
+        .sheet(isPresented: Binding(get: { open != nil }, set: { if !$0 { open = nil } })) {
+            if let r = open {
+                VStack(spacing: 20) {
+                    Text(r.s("author")).font(.title3.bold())
+                    Spacer()
+                    Text(firstMedia(r.s("media"))).font(.system(size: 110))
+                    Spacer()
+                    Text(r.s("text")).multilineTextAlignment(.center)
+                }
+                .foregroundColor(.white).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(colorOf(r, r.s("handle"), p).ignoresSafeArea())
+                .onTapGesture { open = nil }
+            }
+        }
+    }
+}
+
+/// Conversations, latest first: tap one to open it on the chat page.
+struct Inbox: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Messages", openPage = "chat"
+    var body: some View {
+        let p = app.palette(scheme)
+        let latest = app.latestChats(collection)
+        if latest.isEmpty {
+            EmptyNote(text: "No messages yet")
+        } else {
+            VStack(spacing: 8) {
+                ForEach(latest, id: \.self) { r in
+                    let name = app.chatName(collection, r.s("chat"))
+                    Button { app.vars["chat"] = .s(r.s("chat")); app.vars["chatTitle"] = .s(name); app.go(openPage) } label: {
+                        HStack(spacing: 12) {
+                            Avatar(name: name, seed: name, size: 46)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(name).bold().foregroundColor(p.text)
+                                Text((r.s("handle") == app.me ? "You: " : "") + r.s("text")).foregroundColor(p.sub).lineLimit(1)
+                            }
+                            Spacer()
+                        }
+                        .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// The messages of the open chat ({chat}), and a box to send one.
+struct Chat: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Messages"
+    var body: some View {
+        let p = app.palette(scheme), id = app.get("chat")?.text ?? ""
+        let rows = app.query(collection, sort: "oldest first").filter { $0.s("chat") == id }
+        VStack(spacing: 6) {
+            if rows.isEmpty { EmptyNote(text: "Say hello 👋") }
+            ForEach(rows, id: \.self) { r in
+                let mine = r.s("handle") == app.me
+                HStack {
+                    if mine { Spacer(minLength: 60) }
+                    Text(r.s("text")).padding(.horizontal, 12).padding(.vertical, 8).foregroundColor(mine ? p.onAccent : p.text)
+                        .background(RoundedRectangle(cornerRadius: 18).fill(mine ? p.accent : p.card))
+                    if !mine { Spacer(minLength: 60) }
+                }
+            }
+            SendBox(placeholder: "Message", button: "Send") { t in
+                if !id.isEmpty { app.addRecord(collection, ["chat": .s(id), "author": .s(app.meName), "handle": .s(app.me), "text": .s(t)]) }
+            }
+            .padding(.top, 4)
+        }
+    }
+}
+
+/// A profile header: cover, picture, name, @handle, bio and counts.
+struct ProfileHeader: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var name = "{playerName}", handle = "{playerHandle}", bio = ""
+    var stats: [(String, String)] = []
+    var cover = "@accent"
+    var body: some View {
+        let p = app.palette(scheme), n = app.fill(name), h = app.fill(handle)
+        let own: Row = ["posts_count": .n(Double(app.rows("Posts").filter { $0.s("handle") == h }.count)), "points": .n(app.get("points")?.number ?? 0)]
+        VStack(spacing: 4) {
+            Rectangle().fill(p.resolve(cover) ?? p.accent).frame(height: 80)
+            Avatar(name: n, seed: h, size: 76).overlay(Circle().stroke(p.card, lineWidth: 3)).padding(.top, -38)
+            Text(n).font(.title2.bold()).foregroundColor(p.text)
+            Text("@" + h).foregroundColor(p.sub)
+            if !bio.isEmpty { Text(app.fill(bio)).multilineTextAlignment(.center).foregroundColor(p.text).padding(.horizontal, 12) }
+            if !stats.isEmpty {
+                HStack(spacing: 24) {
+                    ForEach(Array(stats.enumerated()), id: \.offset) { _, s in
+                        VStack { Text(app.fill(s.1, own)).bold().foregroundColor(p.text); Text(s.0).font(.caption).foregroundColor(p.sub) }
+                    }
+                }.padding(.top, 6)
+            }
+        }
+        .padding(.bottom, 14).frame(maxWidth: .infinity)
+        .background(p.card).clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+/// Things for sale in a grid: tap one for its details and to message the seller.
+struct Marketplace: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Listings", chatPage = ""
+    @State var open: Row? = nil
+    static func price(_ r: Row) -> String { Double(r.s("price")) != nil ? "$" + r.s("price") : r.s("price") }
+    var body: some View {
+        let p = app.palette(scheme), rows = app.query(collection)
+        if rows.isEmpty {
+            EmptyNote(text: "Nothing for sale yet")
+        } else {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(rows, id: \.self) { r in
+                    Button { open = r } label: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Media(row: r, height: 120)
+                            Text(Marketplace.price(r) + (r.on("sold") ? " · Sold" : "")).bold().foregroundColor(p.text)
+                            Text(r.s("title")).lineLimit(1).foregroundColor(p.text)
+                            Text(r.s("location")).font(.caption).lineLimit(1).foregroundColor(p.sub)
+                        }
+                        .padding(6).background(RoundedRectangle(cornerRadius: 14).fill(p.card))
+                    }.buttonStyle(.plain)
+                }
+            }
+            .sheet(isPresented: Binding(get: { open != nil }, set: { if !$0 { open = nil } })) {
+                if let r = open { details(r).presentationDetents([.medium, .large]) }
+            }
+        }
+    }
+    func details(_ r: Row) -> some View {
+        let info = [r.s("condition"), r.s("location"), r.s("seller").isEmpty ? "" : "Seller: " + r.s("seller")].filter { !$0.isEmpty }.joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 8) {
+            Media(row: r, height: 150)
+            Text(r.s("title")).font(.title3.bold())
+            Text(Marketplace.price(r)).font(.title.bold())
+            Text(info).foregroundColor(.secondary)
+            if !r.s("description").isEmpty { Text(r.s("description")) }
+            Spacer()
+            if !chatPage.isEmpty && r.s("handle") != app.me {
+                PButton("Message seller") {
+                    open = nil
+                    app.vars["chat"] = .s("dm-" + [app.me, r.s("handle")].sorted().joined(separator: "-"))
+                    app.vars["chatTitle"] = .s(r.s("seller").isEmpty ? r.s("handle") : r.s("seller"))
+                    app.go(chatPage)
+                }
+            }
+        }
+        .padding(20)
+    }
+}
+
+/// Likes, comments, follows and reposts for me, newest first.
+struct Activity: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Notifications", profilePage = ""
+    static let icons = ["like": "❤️", "comment": "💬", "follow": "👤", "repost": "🔁", "mention": "@"]
+    var body: some View {
+        let p = app.palette(scheme), me = app.me
+        let rows = app.query(collection).filter { $0.s("to").isEmpty || $0.s("to") == me }
+        if rows.isEmpty {
+            EmptyNote(text: "No notifications yet")
+        } else {
+            VStack(spacing: 8) {
+                ForEach(rows, id: \.self) { r in
+                    Button { app.updateRecord(collection, r.s("_id"), ["read": .b(true)]); app.openProfile(profilePage, r.s("from"), r.s("from_name")) } label: {
+                        HStack(spacing: 12) {
+                            Text(Activity.icons[r.s("type")] ?? "🔔").font(.title2)
+                            Text(r.s("from_name").isEmpty ? r.s("from") : r.s("from_name")).bold().foregroundColor(p.text) + Text(" " + r.s("text")).foregroundColor(p.text)
+                            Spacer()
+                        }
+                        .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(r.on("read") ? p.card : p.accent.opacity(0.12)))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// People (Profiles), A to Z: tap one for their profile.
+struct People: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Profiles", profilePage = ""
+    var body: some View {
+        let p = app.palette(scheme), me = app.me
+        let rows = app.query(collection, sort: "name (a-z)").filter { $0.s("handle") != me }
+        if rows.isEmpty {
+            EmptyNote(text: "No one here yet")
+        } else {
+            VStack(spacing: 8) {
+                ForEach(rows, id: \.self) { r in
+                    Button { app.openProfile(profilePage, r.s("handle"), r.s("name")) } label: {
+                        HStack(spacing: 12) {
+                            Avatar(name: r.s("name"), seed: r.s("handle"), size: 46)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(r.s("name") + (r.on("verified") ? " ✓" : "")).bold().foregroundColor(p.text)
+                                Text("@" + r.s("handle") + (r.s("bio").isEmpty ? "" : " · " + r.s("bio"))).foregroundColor(p.sub).lineLimit(1)
+                            }
+                            Spacer()
+                        }
+                        .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
+/// Milestones worked out from my posts, the likes on them and my followers.
+struct Achievements: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var body: some View {
+        let p = app.palette(scheme), me = app.me
+        let mine = app.rows("Posts").filter { $0.s("handle") == me }
+        let likes = mine.reduce(0.0) { $0 + $1.n("likes") }, followers = app.get("followers")?.number ?? 0, posts = Double(mine.count)
+        let list: [(String, String, Double, Double)] = [("✍️", "First post", posts, 1), ("📚", "10 posts", posts, 10), ("❤️", "First like", likes, 1), ("🔥", "100 likes", likes, 100), ("⭐", "1,000 followers", followers, 1000)]
+        VStack(spacing: 8) {
+            ForEach(list.indices, id: \.self) { i in
+                let m = list[i], done = m.2 >= m.3
+                HStack(spacing: 12) {
+                    Text(done ? m.0 : "🔒").font(.title2)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(m.1).bold().foregroundColor(done ? p.text : p.sub)
+                        Text(done ? "Unlocked" : Val.n(min(m.2, m.3)).text + " / " + Val.n(m.3).text).font(.subheadline).foregroundColor(p.sub)
+                    }
+                    Spacer()
+                }
+                .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+            }
+        }
+    }
+}
+
+/// The most used #hashtags; tap one to search for it.
+struct Trending: View {
+    @EnvironmentObject var app: AppState
+    var collection = "Posts", searchVar = ""
+    var body: some View {
+        var counts: [String: Int] = [:]
+        for r in app.rows(collection) {
+            for word in r.s("text").split(whereSeparator: { $0 == " " || $0 == "\n" }) where word.hasPrefix("#") && word.count > 1 { counts[String(word), default: 0] += 1 }
+        }
+        let top = counts.keys.sorted { (counts[$0] ?? 0) > (counts[$1] ?? 0) }.prefix(8)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(Array(top), id: \.self) { tag in
+                    Button("\(tag) · \(counts[tag] ?? 0)") { if !searchVar.isEmpty { app.set(searchVar, .s(tag)) } }.buttonStyle(.bordered)
+                }
+            }
+        }
+    }
+}

@@ -2445,6 +2445,45 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-phone.ios .npv-tab.on { color: var(--accent); }
 .npv-tabic i { position: absolute; top: -2px; right: 8px; background: var(--danger); color: #fff; font-style: normal; font-size: 10px; font-weight: 800; border-radius: 9px; padding: 1px 5px; }
 .npv-phone.material .npv-fab ~ .npv-tabs, .npv-tabs ~ .npv-fab { bottom: 86px; }
+/* native preview: social building blocks */
+.npv-av { display: inline-grid; place-items: center; border-radius: 50%; color: #fff; font-weight: 800; flex: none; overflow: hidden; }
+.npv-feed { display: flex; flex-direction: column; gap: 10px; }
+.npv-feed, .npv-post, .npv-grid, .npv-compose, .npv-chat, .npv-prof, .npv-feed > .npv-row, .npv-chips { flex: none; }
+.npv-post { background: var(--card); border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.npv-phone.ios .npv-post { border-radius: 12px; }
+.npv-phead { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.npv-ver { color: var(--accent); }
+.npv-ptext { white-space: pre-wrap; }
+.npv-media { display: grid; place-items: center; width: 100%; border-radius: 12px; object-fit: cover; background: var(--field); overflow: hidden; color: #fff; text-align: center; }
+.npv-acts2 { display: flex; justify-content: space-between; }
+.npv-acts2 button { border: 0; background: transparent; color: var(--sub); font: inherit; font-size: 14px; font-weight: 700; padding: 4px 6px; cursor: pointer; }
+.npv-acts2 button.on { color: var(--accent); } .npv-acts2 button.on.bad { color: var(--danger); } .npv-acts2 button.on.good { color: var(--good); }
+.npv-grid { display: grid; gap: 4px; }
+.npv-tile { cursor: pointer; } .npv-tile .npv-media { border-radius: 6px; }
+.npv-compose { display: flex; align-items: center; gap: 8px; background: var(--card); border-radius: 16px; padding: 8px; }
+.npv-compose .npv-input { padding: 10px 12px; }
+.npv-pbtn.small { min-height: 40px; padding: 0 16px; font-size: 14px; border-radius: 12px; }
+.npv-stories { display: flex; gap: 12px; overflow-x: auto; padding: 2px 0; flex: none; }
+.npv-story { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 0; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.npv-ring { padding: 2px; border-radius: 50%; background: linear-gradient(45deg, #f59e0b, #ec4899, #8b5cf6); display: grid; }
+.npv-ring .npv-av { border: 2px solid var(--bg); }
+.npv-story small { font-size: 11px; }
+.npv-chat { display: flex; flex-direction: column; gap: 6px; }
+.npv-bub { align-self: flex-start; max-width: 78%; background: var(--card); padding: 8px 12px; border-radius: 18px 18px 18px 4px; white-space: pre-wrap; }
+.npv-bub.mine { align-self: flex-end; background: var(--accent); color: var(--onAccent); border-radius: 18px 18px 4px 18px; }
+.npv-chat .npv-compose { margin-top: 8px; }
+.npv-prof { display: flex; flex-direction: column; align-items: center; gap: 4px; text-align: center; background: var(--card); border-radius: 16px; padding-bottom: 14px; overflow: hidden; }
+.npv-cover { align-self: stretch; height: 80px; margin-bottom: -38px; }
+.npv-prof .npv-av { border: 3px solid var(--card); }
+.npv-pname { font-size: 20px; } .npv-sub { color: var(--sub); }
+.npv-stats { display: flex; gap: 22px; margin-top: 6px; } .npv-stats div { display: flex; flex-direction: column; } .npv-stats small { color: var(--sub); font-size: 12px; }
+.npv-listing { background: var(--card); border-radius: 14px; padding: 6px 6px 10px; display: flex; flex-direction: column; gap: 2px; cursor: pointer; min-width: 0; }
+.npv-listing small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npv-row.unread { box-shadow: inset 3px 0 0 var(--accent); } .npv-row.locked { opacity: .6; }
+.npv-storyv { width: 100%; height: 100%; border-radius: 18px; color: #fff; display: flex; flex-direction: column; justify-content: space-between; padding: 22px; text-align: center; cursor: pointer; }
+.npv-big { font-size: 110px; }
+.npv-sheet2 { align-self: flex-end; width: 100%; background: var(--card); color: var(--text); border-radius: 20px; padding: 16px; display: flex; flex-direction: column; gap: 8px; }
+.npv-price { font-size: 22px; font-weight: 800; }
 /* Native game preview */
 .npv-phone.game { background: #000; }
 .npv-frame { flex: 1; width: 100%; border: 0; background: #000; }

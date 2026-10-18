@@ -549,3 +549,400 @@ class TodoBox extends StatelessWidget {
     );
   }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Social building blocks: a feed, a composer, stories, messages, profiles, a marketplace, notifications…
+// They read and change the same data collections as the app (Posts, Messages, Stories, Listings, Profiles…).
+// ---------------------------------------------------------------------------------------------------------------
+
+String get me => AppState.show(app.get('playerHandle')).isEmpty ? 'me' : AppState.show(app.get('playerHandle'));
+String get meName => AppState.show(app.get('playerName')).isEmpty ? 'Me' : AppState.show(app.get('playerName'));
+String sv(Map<String, Object?> r, String k) => AppState.show(r[k]);
+bool isOn(Object? v) => v == true || v == 1 || v == 'yes' || v == 'true';
+num nv(Object? v) => v is num ? v : num.tryParse('${v ?? ''}') ?? 0;
+const _avatarColors = [0xFFEF4444, 0xFFF59E0B, 0xFF10B981, 0xFF3B82F6, 0xFF8B5CF6, 0xFFEC4899, 0xFF14B8A6, 0xFFF97316];
+Color avatarColor(String s) => Color(_avatarColors[s.codeUnits.fold<int>(0, (a, c) => a + c) % _avatarColors.length]);
+String firstMedia(Object? m) => AppState.show(m).split('|').first.trim();
+bool isUrl(String s) => s.startsWith('http:') || s.startsWith('https:');
+Color colorOf(Map<String, Object?> r, String seed) => pal0.resolve(sv(r, 'color')) ?? avatarColor(seed);
+Palette get pal0 => app.light;
+
+/// Opens a person's profile page (it shows {profile} and {profile_name}).
+void openProfile(String page, String handle, String name) {
+  if (page.isEmpty) return;
+  app.vars['profile'] = handle;
+  app.vars['profile_name'] = name;
+  app.go(page);
+}
+
+class Avatar extends StatelessWidget {
+  const Avatar(this.name, this.seed, {super.key, this.size = 40, this.label});
+  final String name, seed;
+  final double size;
+  final String? label;
+  @override
+  Widget build(BuildContext context) => CircleAvatar(
+        radius: size / 2,
+        backgroundColor: avatarColor(seed.isEmpty ? name : seed),
+        child: Text(label ?? (name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase()), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: size * 0.42)),
+      );
+}
+
+/// A post's picture: a photo from the web, or an emoji on the post's colour.
+class Media extends StatelessWidget {
+  const Media(this.row, {super.key, this.height = 200, this.radius = 12});
+  final Map<String, Object?> row;
+  final double height, radius;
+  @override
+  Widget build(BuildContext context) {
+    final m = firstMedia(row['media']);
+    if (m.isEmpty) return const SizedBox.shrink();
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: isUrl(m)
+          ? Image.network(m, height: height, width: double.infinity, fit: BoxFit.cover)
+          : Container(height: height, width: double.infinity, alignment: Alignment.center, color: colorOf(row, sv(row, 'handle') + m), child: Text(m, style: TextStyle(fontSize: height * 0.4))),
+    );
+  }
+}
+
+/// Posts, newest first: like, repost, save; tap the author for their profile. look: timeline, reels or grid.
+class SocialFeed extends StatelessWidget {
+  const SocialFeed({super.key, this.collection = 'Posts', this.look = 'timeline', this.filter = '', this.search = '', this.columns = 3, this.profilePage = '', this.empty = 'No posts yet'});
+  final String collection, look, filter, search, profilePage, empty;
+  final int columns;
+
+  void _toggle(Map<String, Object?> r, String flag, [String? count]) {
+    final now = !isOn(r[flag]);
+    final change = <String, Object?>{flag: now};
+    if (count != null) change[count] = (nv(r[count]) + (now ? 1 : -1)).clamp(0, 1 << 31);
+    app.updateRecord(collection, sv(r, '_id'), change);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), rows = app.query(collection, filter: filter, search: search.isEmpty ? '' : AppState.show(app.get(search)));
+    if (rows.isEmpty) return Padding(padding: const EdgeInsets.all(32), child: Text(empty, textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
+    if (look == 'grid') {
+      return GridView.count(
+        crossAxisCount: columns, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 4, crossAxisSpacing: 4,
+        children: [for (final r in rows) GestureDetector(onTap: () => openProfile(profilePage, sv(r, 'handle'), sv(r, 'author')), child: firstMedia(r['media']).isEmpty ? Container(color: p.field, padding: const EdgeInsets.all(6), child: Text(sv(r, 'text'), maxLines: 4, style: const TextStyle(fontSize: 11))) : Media(r, height: 120, radius: 6))],
+      );
+    }
+    Widget action(String label, bool lit, Color color, VoidCallback? tap) => Flexible(child: TextButton(
+          onPressed: tap ?? () {},
+          style: TextButton.styleFrom(foregroundColor: lit ? color : p.sub, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 36)),
+          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+        ));
+    return Column(children: [
+      for (final r in rows)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 10),
+          child: Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            InkWell(
+              onTap: () => openProfile(profilePage, sv(r, 'handle'), sv(r, 'author')),
+              child: Row(children: [
+                Avatar(sv(r, 'author'), sv(r, 'handle')),
+                const SizedBox(width: 10),
+                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('${sv(r, 'author')}${isOn(r['verified']) ? ' ✓' : ''}', style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text('@${sv(r, 'handle')}${sv(r, 'location').isEmpty ? '' : ' · ${sv(r, 'location')}'}', style: TextStyle(color: p.sub)),
+                ])),
+              ]),
+            ),
+            if (sv(r, 'text').isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(sv(r, 'text'), style: const TextStyle(fontSize: 16))),
+            if (firstMedia(r['media']).isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Media(r, height: look == 'reels' ? 380 : 200)),
+            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+              action('💬 ${AppState.show(nv(r['comments']))}', false, p.accent, null),
+              action('🔁 ${AppState.show(nv(r['reposts']))}', isOn(r['reposted']), Colors.green, () => _toggle(r, 'reposted', 'reposts')),
+              action('${isOn(r['liked']) ? '❤️' : '🤍'} ${AppState.show(nv(r['likes']))}', isOn(r['liked']), p.danger, () => _toggle(r, 'liked', 'likes')),
+              action(isOn(r['saved']) ? '🔖 Saved' : '🔖', isOn(r['saved']), p.accent, () => _toggle(r, 'saved')),
+            ]),
+          ]))),
+        ),
+    ]);
+  }
+}
+
+/// A box to write a post: Post adds it to the top of the feed.
+class Composer extends StatefulWidget {
+  const Composer({super.key, this.collection = 'Posts', this.placeholder = 'What’s happening?'});
+  final String collection, placeholder;
+  @override
+  State<Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<Composer> {
+  final c = TextEditingController();
+  @override
+  void dispose() { c.dispose(); super.dispose(); }
+  void post() {
+    final t = c.text.trim();
+    if (t.isEmpty) return;
+    app.addRecord(widget.collection, {'author': meName, 'handle': me, 'text': t, 'likes': 0, 'comments': 0, 'reposts': 0, 'liked': false, 'reposted': false, 'saved': false});
+    c.clear();
+  }
+  @override
+  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(8), child: Row(children: [
+        Avatar(meName, me),
+        const SizedBox(width: 8),
+        Expanded(child: TextField(controller: c, decoration: InputDecoration(hintText: widget.placeholder, isDense: true), onSubmitted: (_) => post())),
+        const SizedBox(width: 8),
+        FilledButton(onPressed: post, child: const Text('Post')),
+      ])));
+}
+
+/// Story circles; tap one to see it.
+class Stories extends StatelessWidget {
+  const Stories({super.key, this.collection = 'Stories'});
+  final String collection;
+  @override
+  Widget build(BuildContext context) {
+    final rows = app.query(collection);
+    return SizedBox(
+      height: 92,
+      child: ListView(scrollDirection: Axis.horizontal, children: [
+        for (final r in rows)
+          GestureDetector(
+            onTap: () => showDialog<void>(context: context, builder: (_) => Dialog(
+              backgroundColor: colorOf(r, sv(r, 'handle')),
+              child: SizedBox(height: 460, child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                Text(sv(r, 'author'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
+                Text(firstMedia(r['media']), style: const TextStyle(fontSize: 110)),
+                Text(sv(r, 'text'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 16)),
+              ]))),
+            )),
+            child: Padding(padding: const EdgeInsets.only(right: 12), child: Column(children: [
+              Container(
+                padding: const EdgeInsets.all(3),
+                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFF8B5CF6)])),
+                child: CircleAvatar(radius: 28, backgroundColor: colorOf(r, sv(r, 'handle')), child: Text(isUrl(firstMedia(r['media'])) || firstMedia(r['media']).isEmpty ? '${sv(r, 'author')}?'[0] : firstMedia(r['media']), style: const TextStyle(fontSize: 26, color: Colors.white))),
+              ),
+              const SizedBox(height: 4),
+              Text(sv(r, 'author').split(' ').first, style: const TextStyle(fontSize: 11)),
+            ])),
+          ),
+      ]),
+    );
+  }
+}
+
+/// The name to show for a chat: the other person in it.
+String chatName(String collection, String id) {
+  for (final r in app.rows(collection)) { if (sv(r, 'chat') == id && sv(r, 'handle') != me) return sv(r, 'author'); }
+  final who = id.replaceFirst('dm-', '').split('-').where((s) => s != me).join(', ');
+  return who.isEmpty ? id : who;
+}
+
+/// Conversations, latest first: tap one to open it on the chat page.
+class Inbox extends StatelessWidget {
+  const Inbox({super.key, this.collection = 'Messages', this.openPage = 'chat'});
+  final String collection, openPage;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), latest = <String, Map<String, Object?>>{};
+    for (final r in app.query(collection)) { latest.putIfAbsent(sv(r, 'chat'), () => r); }
+    latest.remove('');
+    if (latest.isEmpty) return Padding(padding: const EdgeInsets.all(32), child: Text('No messages yet', textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
+    return Column(children: [
+      for (final e in latest.entries)
+        Card(child: ListTile(
+          leading: Avatar(chatName(collection, e.key), chatName(collection, e.key)),
+          title: Text(chatName(collection, e.key), style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('${sv(e.value, 'handle') == me ? 'You: ' : ''}${sv(e.value, 'text')}', maxLines: 1, overflow: TextOverflow.ellipsis),
+          onTap: () { app.vars['chat'] = e.key; app.vars['chatTitle'] = chatName(collection, e.key); app.go(openPage); },
+        )),
+    ]);
+  }
+}
+
+/// The messages of the open chat ({chat}), and a box to send one.
+class Chat extends StatefulWidget {
+  const Chat({super.key, this.collection = 'Messages'});
+  final String collection;
+  @override
+  State<Chat> createState() => _ChatState();
+}
+
+class _ChatState extends State<Chat> {
+  final c = TextEditingController();
+  @override
+  void dispose() { c.dispose(); super.dispose(); }
+  void send() {
+    final t = c.text.trim(), id = AppState.show(app.get('chat'));
+    if (t.isEmpty || id.isEmpty) return;
+    app.addRecord(widget.collection, {'chat': id, 'author': meName, 'handle': me, 'text': t});
+    c.clear();
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), id = AppState.show(app.get('chat'));
+    final rows = app.query(widget.collection, sort: 'oldest first').where((r) => sv(r, 'chat') == id).toList();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      if (rows.isEmpty) Padding(padding: const EdgeInsets.all(32), child: Text('Say hello 👋', textAlign: TextAlign.center, style: TextStyle(color: p.sub))),
+      for (final r in rows)
+        Align(
+          alignment: sv(r, 'handle') == me ? Alignment.centerRight : Alignment.centerLeft,
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            constraints: const BoxConstraints(maxWidth: 280),
+            decoration: BoxDecoration(color: sv(r, 'handle') == me ? p.accent : p.card, borderRadius: BorderRadius.circular(18)),
+            child: Text(sv(r, 'text'), style: TextStyle(color: sv(r, 'handle') == me ? p.onAccent : p.text, fontSize: 16)),
+          ),
+        ),
+      const SizedBox(height: 8),
+      Row(children: [
+        Expanded(child: TextField(controller: c, decoration: const InputDecoration(hintText: 'Message', isDense: true), onSubmitted: (_) => send())),
+        const SizedBox(width: 8),
+        FilledButton(onPressed: send, child: const Text('Send')),
+      ]),
+    ]);
+  }
+}
+
+/// A profile header: cover, picture, name, @handle, bio and counts.
+class ProfileHeader extends StatelessWidget {
+  const ProfileHeader({super.key, this.name = '{playerName}', this.handle = '{playerHandle}', this.bio = '', this.stats = const [], this.cover = '@accent'});
+  final String name, handle, bio, cover;
+  final List<(String, String)> stats;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), n = app.fill(name), h = app.fill(handle);
+    final own = {'posts_count': app.rows('Posts').where((r) => sv(r, 'handle') == h).length, 'points': nv(app.get('points'))};
+    return Card(clipBehavior: Clip.antiAlias, child: Column(children: [
+      Container(height: 80, color: p.resolve(cover) ?? p.accent),
+      Transform.translate(offset: const Offset(0, -38), child: Container(decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.card, width: 3)), child: Avatar(n, h, size: 76))),
+      Transform.translate(offset: const Offset(0, -30), child: Column(children: [
+        Text(n, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+        Text('@$h', style: TextStyle(color: p.sub)),
+        if (bio.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(app.fill(bio), textAlign: TextAlign.center)),
+        if (stats.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 10), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+          for (final s in stats) Padding(padding: const EdgeInsets.symmetric(horizontal: 12), child: Column(children: [
+            Text(app.fill(s.$2, own), style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+            Text(s.$1, style: TextStyle(color: p.sub, fontSize: 12)),
+          ])),
+        ])),
+      ])),
+    ]));
+  }
+}
+
+/// Things for sale in a grid: tap one for its details and to message the seller.
+class Marketplace extends StatelessWidget {
+  const Marketplace({super.key, this.collection = 'Listings', this.chatPage = ''});
+  final String collection, chatPage;
+  static String price(Map<String, Object?> r) => num.tryParse(sv(r, 'price')) != null ? '\$${sv(r, 'price')}' : sv(r, 'price');
+  void _details(BuildContext context, Map<String, Object?> r) => showModalBottomSheet<void>(context: context, builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Media(r, height: 150),
+          const SizedBox(height: 8),
+          Text(sv(r, 'title'), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+          Text(price(r), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+          Text([sv(r, 'condition'), sv(r, 'location'), if (sv(r, 'seller').isNotEmpty) 'Seller: ${sv(r, 'seller')}'].where((s) => s.isNotEmpty).join(' · ')),
+          if (sv(r, 'description').isNotEmpty) Padding(padding: const EdgeInsets.only(top: 6), child: Text(sv(r, 'description'))),
+          const SizedBox(height: 12),
+          if (chatPage.isNotEmpty && sv(r, 'handle') != me)
+            PButton('Message seller', onTap: () {
+              Navigator.pop(ctx);
+              app.vars['chat'] = 'dm-${([me, sv(r, 'handle')]..sort()).join('-')}';
+              app.vars['chatTitle'] = sv(r, 'seller').isEmpty ? sv(r, 'handle') : sv(r, 'seller');
+              app.go(chatPage);
+            }),
+        ]),
+      ));
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), rows = app.query(collection);
+    if (rows.isEmpty) return Padding(padding: const EdgeInsets.all(32), child: Text('Nothing for sale yet', textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
+    return GridView.count(
+      crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 8, crossAxisSpacing: 8, childAspectRatio: 0.72,
+      children: [
+        for (final r in rows)
+          InkWell(onTap: () => _details(context, r), child: Card(child: Padding(padding: const EdgeInsets.all(6), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Media(r, height: 120),
+            const SizedBox(height: 4),
+            Text('${price(r)}${isOn(r['sold']) ? ' · Sold' : ''}', style: const TextStyle(fontWeight: FontWeight.w800)),
+            Text(sv(r, 'title'), maxLines: 1, overflow: TextOverflow.ellipsis),
+            Text(sv(r, 'location'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.sub, fontSize: 12)),
+          ])))),
+      ],
+    );
+  }
+}
+
+/// Likes, comments, follows and reposts for me, newest first.
+class Activity extends StatelessWidget {
+  const Activity({super.key, this.collection = 'Notifications', this.profilePage = ''});
+  final String collection, profilePage;
+  static const icons = {'like': '❤️', 'comment': '💬', 'follow': '👤', 'repost': '🔁', 'mention': '@'};
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), rows = app.query(collection).where((r) => sv(r, 'to').isEmpty || sv(r, 'to') == me).toList();
+    if (rows.isEmpty) return Padding(padding: const EdgeInsets.all(32), child: Text('No notifications yet', textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
+    return Column(children: [
+      for (final r in rows)
+        Card(child: ListTile(
+          leading: Text(icons[sv(r, 'type')] ?? '🔔', style: const TextStyle(fontSize: 24)),
+          title: Text.rich(TextSpan(children: [TextSpan(text: sv(r, 'from_name').isEmpty ? sv(r, 'from') : sv(r, 'from_name'), style: const TextStyle(fontWeight: FontWeight.w800)), TextSpan(text: ' ${sv(r, 'text')}')])),
+          tileColor: isOn(r['read']) ? null : p.accent.withValues(alpha: 0.08),
+          onTap: () { app.updateRecord(collection, sv(r, '_id'), {'read': true}); openProfile(profilePage, sv(r, 'from'), sv(r, 'from_name')); },
+        )),
+    ]);
+  }
+}
+
+/// People (Profiles), A to Z: tap one for their profile.
+class People extends StatelessWidget {
+  const People({super.key, this.collection = 'Profiles', this.profilePage = ''});
+  final String collection, profilePage;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), rows = app.query(collection, sort: 'name (a-z)').where((r) => sv(r, 'handle') != me).toList();
+    if (rows.isEmpty) return Padding(padding: const EdgeInsets.all(32), child: Text('No one here yet', textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
+    return Column(children: [
+      for (final r in rows)
+        Card(child: ListTile(
+          leading: Avatar(sv(r, 'name'), sv(r, 'handle')),
+          title: Text('${sv(r, 'name')}${isOn(r['verified']) ? ' ✓' : ''}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: Text('@${sv(r, 'handle')}${sv(r, 'bio').isEmpty ? '' : ' · ${sv(r, 'bio')}'}', maxLines: 1, overflow: TextOverflow.ellipsis),
+          onTap: () => openProfile(profilePage, sv(r, 'handle'), sv(r, 'name')),
+        )),
+    ]);
+  }
+}
+
+/// Milestones worked out from my posts, the likes on them and my followers.
+class Achievements extends StatelessWidget {
+  const Achievements({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), mine = app.rows('Posts').where((r) => sv(r, 'handle') == me).toList();
+    final likes = mine.fold<num>(0, (a, r) => a + nv(r['likes'])), followers = nv(app.get('followers'));
+    final list = [('✍️', 'First post', mine.length, 1), ('📚', '10 posts', mine.length, 10), ('❤️', 'First like', likes, 1), ('🔥', '100 likes', likes, 100), ('⭐', '1,000 followers', followers, 1000)];
+    return Column(children: [
+      for (final (ic, label, have, need) in list)
+        Card(child: ListTile(
+          leading: Text(have >= need ? ic : '🔒', style: const TextStyle(fontSize: 24)),
+          title: Text(label, style: TextStyle(fontWeight: FontWeight.w700, color: have >= need ? p.text : p.sub)),
+          subtitle: Text(have >= need ? 'Unlocked' : '${AppState.show(have < need ? have : need)} / $need'),
+        )),
+    ]);
+  }
+}
+
+/// The most used #hashtags; tap one to search for it.
+class Trending extends StatelessWidget {
+  const Trending({super.key, this.collection = 'Posts', this.searchVar = ''});
+  final String collection, searchVar;
+  @override
+  Widget build(BuildContext context) {
+    final n = <String, int>{};
+    for (final r in app.rows(collection)) { for (final m in RegExp(r'#\w+').allMatches(sv(r, 'text'))) { n[m[0]!] = (n[m[0]!] ?? 0) + 1; } }
+    final top = n.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+    return Wrap(spacing: 8, runSpacing: 8, children: [
+      for (final e in top.take(8)) ActionChip(label: Text('${e.key} · ${e.value}'), onPressed: () { if (searchVar.isNotEmpty) app.set(searchVar, e.key); }),
+    ]);
+  }
+}

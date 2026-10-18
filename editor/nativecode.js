@@ -41,6 +41,17 @@ function dartElement(x, ind) {
     case 'items': return `StaticList([${x.items.map(ds).join(', ')}])`;
     case 'image': return `PImage(${ds(x.src)}, height: ${x.h})`;
     case 'row': return `PCard(children: [\n${x.children.map((c) => pad + '  ' + dartElement(c, ind + 2)).join(',\n')},\n${pad}])`;
+    case 'feed': return `SocialFeed(collection: ${ds(x.collection)}${x.look !== 'timeline' ? `, look: ${ds(x.look)}` : ''}${x.filter ? `, filter: ${ds(x.filter)}` : ''}${x.search ? `, search: ${ds(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns: ${x.columns}` : ''}${x.profilePage ? `, profilePage: ${ds(x.profilePage)}` : ''}, empty: ${ds(x.empty)})`;
+    case 'composer': return `Composer(collection: ${ds(x.collection)}, placeholder: ${ds(x.placeholder)})`;
+    case 'stories': return `Stories(collection: ${ds(x.collection)})`;
+    case 'inbox': return `Inbox(collection: ${ds(x.collection)}, openPage: ${ds(x.openPage)})`;
+    case 'chat': return `Chat(collection: ${ds(x.collection)})`;
+    case 'profile': return `ProfileHeader(name: ${ds(x.name)}, handle: ${ds(x.handle)}${x.bio ? `, bio: ${ds(x.bio)}` : ''}${x.stats.length ? `, stats: [${x.stats.map((s) => `(${ds(s.label)}, ${ds(s.value)})`).join(', ')}]` : ''}, cover: ${ds(tokenColor(x.cover) || '@accent')})`;
+    case 'market': return `Marketplace(collection: ${ds(x.collection)}${x.chatPage ? `, chatPage: ${ds(x.chatPage)}` : ''})`;
+    case 'activity': return `Activity(collection: ${ds(x.collection)}${x.profilePage ? `, profilePage: ${ds(x.profilePage)}` : ''})`;
+    case 'people': return `People(collection: ${ds(x.collection)}${x.profilePage ? `, profilePage: ${ds(x.profilePage)}` : ''})`;
+    case 'achievements': return 'const Achievements()';
+    case 'trending': return `Trending(collection: ${ds(x.collection)}${x.searchVar ? `, searchVar: ${ds(x.searchVar)}` : ''})`;
     default: return `TodoBox(${ds(x.name)}, ${ds(x.type)}) /* TODO: build the ${x.type} natively */`;
   }
 }
@@ -256,6 +267,17 @@ function swiftElement(x, ind) {
     case 'items': return `StaticList([${x.items.map(ss).join(', ')}])`;
     case 'image': return `PImage(${ss(x.src)}, height: ${x.h})`;
     case 'row': return `PCard {\n${x.children.map((c) => pad + '    ' + swiftElement(c, ind + 4)).join('\n')}\n${pad}}`;
+    case 'feed': return `SocialFeed(collection: ${ss(x.collection)}${x.look !== 'timeline' ? `, look: ${ss(x.look)}` : ''}${x.filter ? `, filter: ${ss(x.filter)}` : ''}${x.search ? `, search: ${ss(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns: ${x.columns}` : ''}${x.profilePage ? `, profilePage: ${ss(x.profilePage)}` : ''}, empty: ${ss(x.empty)})`;
+    case 'composer': return `Composer(collection: ${ss(x.collection)}, placeholder: ${ss(x.placeholder)})`;
+    case 'stories': return `Stories(collection: ${ss(x.collection)})`;
+    case 'inbox': return `Inbox(collection: ${ss(x.collection)}, openPage: ${ss(x.openPage)})`;
+    case 'chat': return `Chat(collection: ${ss(x.collection)})`;
+    case 'profile': return `ProfileHeader(name: ${ss(x.name)}, handle: ${ss(x.handle)}${x.bio ? `, bio: ${ss(x.bio)}` : ''}${x.stats.length ? `, stats: [${x.stats.map((s) => `(${ss(s.label)}, ${ss(s.value)})`).join(', ')}]` : ''}, cover: ${ss(tokenColor(x.cover) || '@accent')})`;
+    case 'market': return `Marketplace(collection: ${ss(x.collection)}${x.chatPage ? `, chatPage: ${ss(x.chatPage)}` : ''})`;
+    case 'activity': return `Activity(collection: ${ss(x.collection)}${x.profilePage ? `, profilePage: ${ss(x.profilePage)}` : ''})`;
+    case 'people': return `People(collection: ${ss(x.collection)}${x.profilePage ? `, profilePage: ${ss(x.profilePage)}` : ''})`;
+    case 'achievements': return 'Achievements()';
+    case 'trending': return `Trending(collection: ${ss(x.collection)}${x.searchVar ? `, searchVar: ${ss(x.searchVar)}` : ''})`;
     default: return `TodoBox(${ss(x.name)}, ${ss(x.type)}) // TODO: build the ${x.type} natively`;
   }
 }

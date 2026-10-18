@@ -273,7 +273,7 @@ function pbxproj(o, name) {
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				${debug ? 'ENABLE_TESTABILITY = YES;\n				GCC_OPTIMIZATION_LEVEL = 0;\n				GCC_PREPROCESSOR_DEFINITIONS = (\n					"DEBUG=1",\n					"$(inherited)",\n				);\n				ONLY_ACTIVE_ARCH = YES;\n				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";\n				SWIFT_OPTIMIZATION_LEVEL = "-Onone";' : 'ENABLE_NS_ASSERTIONS = NO;\n				SWIFT_COMPILATION_MODE = wholemodule;\n				VALIDATE_PRODUCT = YES;'}
-				IPHONEOS_DEPLOYMENT_TARGET = 15.0;
+				IPHONEOS_DEPLOYMENT_TARGET = ${o.iosTarget || '15.0'};
 				MTL_ENABLE_DEBUG_INFO = ${debug ? 'INCLUDE_SOURCE' : 'NO'};
 				SDKROOT = iphoneos;`;
   const target = () => `
@@ -518,6 +518,22 @@ Inspect the running game from Safari on your Mac: **Develop â€º (your device) â€
 }
 
 /** Every file of the Xcode project, inside a folder named after the game. icon: 1024 RGB PNG bytes. */
+/** An Xcode project around your own App/ files (the native SwiftUI export): appFiles are { name (inside App/), data }. */
+export function xcodeShell(o, { icon }, appFiles) {
+  const name = codeName(o.name), dir = name + '/', [r, g, b] = hexRGB(o.splashBg);
+  const color = { colors: [{ color: { 'color-space': 'srgb', components: { red: (r / 255).toFixed(3), green: (g / 255).toFixed(3), blue: (b / 255).toFixed(3), alpha: '1.000' } }, idiom: 'universal' }], info: { author: 'xcode', version: 1 } };
+  return [
+    { name: dir + '.gitignore', data: 'xcuserdata/\nDerivedData/\n*.xcuserstate\nbuild/\n' },
+    { name: dir + name + '.xcodeproj/project.pbxproj', data: pbxproj(o, name) },
+    { name: dir + 'Info.plist', data: infoPlist(o) },
+    ...appFiles.map((f) => ({ name: dir + 'App/' + f.name, data: f.data })),
+    { name: dir + 'App/PrivacyInfo.xcprivacy', data: privacyManifest() },
+    { name: dir + 'App/Assets.xcassets/Contents.json', data: JSON.stringify({ info: { author: 'xcode', version: 1 } }, null, 2) },
+    { name: dir + 'App/Assets.xcassets/AppIcon.appiconset/Contents.json', data: JSON.stringify({ images: [{ filename: 'icon-1024.png', idiom: 'universal', platform: 'ios', size: '1024x1024' }], info: { author: 'xcode', version: 1 } }, null, 2) },
+    { name: dir + 'App/Assets.xcassets/AppIcon.appiconset/icon-1024.png', data: icon },
+    { name: dir + 'App/Assets.xcassets/LaunchBackground.colorset/Contents.json', data: JSON.stringify(color, null, 2) },
+  ];
+}
 export function xcodeFiles(o, { html, icon }) {
   const name = codeName(o.name), dir = name + '/', [r, g, b] = hexRGB(o.splashBg);
   const color = { colors: [{ color: { 'color-space': 'srgb', components: { red: (r / 255).toFixed(3), green: (g / 255).toFixed(3), blue: (b / 255).toFixed(3), alpha: '1.000' } }, idiom: 'universal' }], info: { author: 'xcode', version: 1 } };

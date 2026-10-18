@@ -28,7 +28,10 @@ import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import * as CM from './codemagic.js';
 import { expoFiles } from './expo.js';
-import { xcodeFiles, androidFiles } from './native.js';
+import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
+import { flutterNativeFiles, swiftNativeFiles, nativeReadme } from './nativecode.js';
+import { appModel } from './appmodel.js';
+import { flutterFiles } from './flutter.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -7414,6 +7417,44 @@ async function exportAndroid() {
     noteBuild('android', zip.size); toast(`Android Studio project ready (${kb(zip.size)}): unzip it and choose File › Open in Android Studio. README.md has the steps.`);
   } catch (err) { toast('Could not make the Android Studio project: ' + err.message); }
 }
+async function exportFlutter() {
+  const so = nativeOpts();
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.game (letters, numbers, dots)');
+  try {
+    toast('Making the Flutter project…');
+    const o = buildOpts(), b = await buildHTML({ native: true }), kit = await storeKitFiles(o);
+    const icon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data, iconFg = await makeSplash(o, 432, 0.62, true).then(dataBytes); // (no transparency: iOS rejects it) · Android's adaptive foreground
+    const files = flutterFiles({ ...so, app: !!root.settings?.app }, { html: b.html, icon, iconFg }), dir = files[0].name.split('/')[0] + '/';
+    const zip = downloadZip([...files, ...kit.map((f) => ({ ...f, name: dir + f.name }))], slug(so.name) + '-flutter.zip');
+    noteBuild('flutter', zip.size); toast(`Flutter project ready (${kb(zip.size)}): unzip it, run dart run tool/setup.dart, then flutter run. README.md has the steps.`);
+  } catch (err) { toast('Could not make the Flutter project: ' + err.message); }
+}
+/** Native code: the app as Flutter widgets or SwiftUI views (no web view). */
+async function exportNative(kind) {
+  const so = nativeOpts();
+  if (!root.settings?.app) return toast('Native code is made from apps. For a game, use the Flutter or Xcode project.');
+  if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.app (letters, numbers, dots)');
+  try {
+    toast(kind === 'flutter' ? 'Writing the Flutter code…' : 'Writing the SwiftUI code…');
+    const o = buildOpts(), { game } = buildGameJSON(), kit = await storeKitFiles(o);
+    const icon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data;
+    const runtime = await (await fetch(new URL(kind === 'flutter' ? './native/flutter/pocket.dart' : './native/swift/Pocket.swift', import.meta.url))).text();
+    let files, model, zipName;
+    if (kind === 'flutter') {
+      ({ files, model } = flutterNativeFiles(game, so, { runtime, icon }));
+      zipName = slug(so.name) + '-flutter-native.zip';
+    } else {
+      const xo = { ...so, iosTarget: '16.0', xcodeName: codeName(so.name) }, r = swiftNativeFiles(game, xo, { runtime });
+      model = r.model; files = [...xcodeShell(xo, { icon }, r.files), { name: codeName(so.name) + '/README.md', data: nativeReadme(model, xo, 'swift') }];
+      zipName = slug(so.name) + '-swiftui.zip';
+    }
+    const dir = files[0].name.split('/')[0] + '/';
+    const zip = downloadZip([...files, ...kit.map((f) => ({ ...f, name: dir + f.name }))], zipName);
+    noteBuild('native', zip.size);
+    const todo = new Set(model.todo.map((t) => t.name)).size;
+    toast(`${kind === 'flutter' ? 'Flutter' : 'SwiftUI'} code ready (${kb(zip.size)}): ${model.pages.length} pages${todo ? `, ${todo} placeholder${todo > 1 ? 's' : ''} to build (see README.md)` : ''}.`);
+  } catch (err) { toast('Could not write the native code: ' + err.message); }
+}
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
 // ---- previews: the project on its own (no editor), and on a real phone ----
 /** Standalone Preview: the project in its own tab (or a phone-size window) with no editor around it. Playing again updates it. */
@@ -7627,7 +7668,7 @@ function noteBuild(target, size) {
   const B = (root.build ||= {}), v = B.version || BUILD_DEFAULTS.version;
   B.last = { target, at: Date.now(), size, version: v };
   B.history = [{ target, at: B.last.at, size, version: v }, ...(B.history || [])].slice(0, 12); // Build Settings › Recent builds
-  if (['store', 'expo', 'xcode', 'android'].includes(target)) B.lastStoreVersion = v;
+  if (['store', 'expo', 'xcode', 'android', 'flutter'].includes(target)) B.lastStoreVersion = v;
   changed(); if ($('.dialog .build-sec')) setTimeout(() => { const db = $('.dialog .db'), sc = db?.scrollTop; openBuildSettings(); if ($('.dialog .db')) $('.dialog .db').scrollTop = sc; }, 50);
 }
 const BUILD_TARGETS = [
@@ -7637,6 +7678,8 @@ const BUILD_TARGETS = [
   ['expo', 'bolt', 'Expo app', 'An Expo project to build and publish with EAS.', 'Download Expo project (.zip)'],
   ['xcode', 'phone', 'Xcode project', 'An iOS app to open in Xcode on a Mac: run it on your iPhone and upload to the App Store.', 'Download Xcode project (.zip)'],
   ['android', 'phone', 'Android Studio project', 'An Android app to open in Android Studio: run it on your phone and upload to Google Play.', 'Download Android Studio project (.zip)'],
+  ['native', 'script', 'Native code (apps)', 'Your app written out as real Flutter widgets or SwiftUI views, with no web view: pages, tabs, lists, forms and data, to keep building in code.', 'Download native Flutter code (.zip)'],
+  ['flutter', 'phone', 'Flutter project', 'One Flutter (Dart) project for iOS and Android: flutter run on your phone, then publish to both stores.', 'Download Flutter project (.zip)'],
   ['itch', 'gamepad', 'itch.io', 'An HTML5 upload for itch.io, with a cover image and the page settings.', 'Download for itch.io (.zip)'],
 ];
 const ICON_EMOJI = ['🎮', '🚀', '⭐', '👾', '🐱', '🐶', '🦄', '🐉', '🧩', '🏎️', '⚔️', '🏰', '💎', '🍀', '🎵', '📝', '✅', '💰', '📚', '❤️'];
@@ -7651,7 +7694,7 @@ function bumpVersion(v, big) {
 /** What to look at before building: each check is ok / warn / bad (bad stops a store build), with a Fix where one helps. */
 function buildChecks(o, target, jump) {
   const B = () => (root.build ||= {}), out = [], add = (lvl, text, fix) => out.push({ lvl, text, fix });
-  const name = (o.title || root.name || '').trim(), store = ['store', 'expo', 'xcode', 'android'].includes(target);
+  const name = (o.title || root.name || '').trim(), store = ['store', 'expo', 'xcode', 'android', 'flutter'].includes(target);
   if (!name || /^(untitled|my game|new game|my app|new app)( \d+)?$/i.test(name)) add('warn', `The name is still “${name || 'empty'}”`, ['Change', () => jump('title')]);
   else add('ok', `Name: ${name}`);
   if (!o.icon && (o.iconEmoji || '🎮') === '🎮' && hexOr(o.iconBg, '#3a8dff') === '#3a8dff') add('warn', 'Still the default icon', ['Pick one', () => jump('icon')]);
@@ -7720,7 +7763,7 @@ function openBuildSettings() {
 
   const target = BUILD_TARGETS.some((t) => t[0] === o.target) ? o.target : 'html', T = BUILD_TARGETS.find((t) => t[0] === target);
   let showAll = false; try { showAll = localStorage.getItem('pocket.build.all') === '1'; } catch { /* storage unavailable */ }
-  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'], native: ['xcode', 'android'], listing: ['store', 'expo', 'xcode', 'android', 'itch'], expo: ['expo'], itch: ['itch'] }[k] || []).includes(target); // sections that only matter for some kinds of build
+  const want = (k) => showAll || ({ web: ['html', 'web'], stores: ['store', 'expo'], native: ['xcode', 'android', 'flutter', 'native'], listing: ['store', 'expo', 'xcode', 'android', 'flutter', 'itch'], expo: ['expo'], itch: ['itch'] }[k] || []).includes(target); // sections that only matter for some kinds of build
   const jump = (key) => { // scroll to a field (or section) and highlight it
     const el = $(`.dialog [data-bkey="${key}"]`) || $(`.dialog #bs-${key}`); if (!el) return;
     const fs = el.closest('.fsec'); if (fs?.classList.contains('closed')) fs.foldTo(true); // open its section first
@@ -7740,7 +7783,7 @@ function openBuildSettings() {
       h('button', { type: 'button', class: 'bc-reco', onclick: () => { Object.assign(B(), { compress: true, showFps: false, showErrors: false, startLevel: '1', keepAwake: true, pauseHidden: true, backGesture: true, noMenu: true }); changed(); redo(); toast('Recommended settings on'); } }, icon('star'), 'Use the recommended settings'));
   };
   const last = o.last;
-  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, xcode: exportXcode, android: exportAndroid, itch: exportItch }[target];
+  const go = { html: exportHTML, web: exportWebApp, store: exportStoreProject, expo: exportExpoProject, xcode: exportXcode, android: exportAndroid, flutter: exportFlutter, native: () => exportNative('flutter'), itch: exportItch }[target];
   const homeMock = h('div', { class: 'home-mock' }, ['light', 'dark'].map((m) => h('div', { class: 'hm ' + m }, h('img', { class: 'hm-ic', alt: '' }), h('small', {}, (o.shortName || o.title || root.name || 'Game').slice(0, 12)))));
   makeIcon(o, 120).then((u) => homeMock.querySelectorAll('.hm-ic').forEach((i) => { i.src = u; }));
   const sections = [['app', 'App'], ['icon', 'Icon'], ['loading', 'Loading'], ['levels', 'Levels'], ['player', 'Player'], want('web') && ['web', 'Web app'], want('stores') && ['stores', 'Stores'], want('expo') && ['expo', 'Expo'], want('native') && ['native', 'Native'], want('itch') && ['itch', 'itch.io'], want('listing') && ['listing', 'Listing'], want('listing') && ['shots', 'Shots'], ['size', 'Size'], ['testing', 'Testing']].filter(Boolean);
@@ -7858,6 +7901,27 @@ function openBuildSettings() {
     ]),
     want('native') && sec('Xcode & Android Studio', 'phone', (() => {
       const so = storeOpts(), idOk = validAppId(so.appId), ios = target === 'xcode';
+      if (target === 'native') {
+        const isApp = !!root.settings?.app, m = isApp ? appModel(buildGameJSON().game) : null, todo = m ? [...new Set(m.todo.map((t) => t.name))] : [];
+        return [
+          h('p', { class: 'desc' }, 'Your app written out as code: a Flutter app (Dart widgets, iOS and Android) or a SwiftUI app (Xcode, iOS 16+). No web view: pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and your data collections (saved on the phone) become native code that you keep building on. Games and things with no native version yet stay as placeholders marked TODO.'),
+          !isApp && h('p', { class: 'desc warn' }, 'Native code is made from apps (pages, lists, forms). For a game, use the Flutter project or the Xcode / Android Studio projects: they run it in a web view.'),
+          m && h('p', { class: 'desc' }, `${m.pages.length} page${m.pages.length === 1 ? '' : 's'}${m.tabs.length ? `, ${m.tabs.length} tabs` : ''}, ${m.collections.length} data collection${m.collections.length === 1 ? '' : 's'}.` + (todo.length ? ` Placeholders for: ${todo.slice(0, 8).join(', ')}${todo.length > 8 ? '…' : ''}.` : ' Everything has a native version.')),
+          Cr('appId', { label: 'App ID (bundle ID / applicationId)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.app. It can never change after the first store release.' }),
+          !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.app (each part starts with a letter).'),
+          h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk || !isApp, onclick: () => exportNative('flutter') }, icon('download'), 'Native Flutter code (.zip)')),
+          h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk || !isApp, onclick: () => exportNative('swift') }, icon('download'), 'Native SwiftUI code (.zip)')),
+        ];
+      }
+      if (target === 'flutter') return [
+        h('p', { class: 'desc' }, 'A Flutter project (Dart): the game in a full-screen WebView, with phone notifications, haptics, in-app purchases, permissions and the Back button answered in Dart. One project for iOS and Android. Unzip it, run dart run tool/setup.dart once (it makes the iOS and Android folders and sets the ID, name, icon and permissions), then flutter run.'),
+        Cr('appId', { label: 'App ID (bundle ID / applicationId)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.game. It can never change after the first store release.' }),
+        !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.game (each part starts with a letter).'),
+        C('buildNumber', { label: 'Build number (the +N in pubspec.yaml)', type: 'number', step: 1, infoText: 'Raise it for every upload, even with the same version.' }),
+        C('storeFullscreen', { label: 'Full screen (hide the status bar)', type: 'bool' }),
+        h('p', { class: 'desc' }, `Version ${o.version || '1.0'} (from App above) · ${so.orientation || 'either way up'} · Flutter 3.38 or newer · icon from Icon above. store-listing/ has the listing text and pictures.`),
+        h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk, onclick: exportFlutter }, icon('download'), 'Download Flutter project (.zip)')),
+      ];
       return [
         h('p', { class: 'desc' }, ios
           ? 'A plain Xcode project (Swift, no CocoaPods or npm): the game in a full-screen WebView, with phone notifications, haptics and permissions built in. Unzip it on a Mac with Xcode 16 or newer, open the .xcodeproj, pick your iPhone and press Run. Product › Archive uploads it to App Store Connect.'

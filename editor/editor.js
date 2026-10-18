@@ -32,6 +32,7 @@ import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
 import { flutterNativeFiles, swiftNativeFiles, nativeReadme } from './nativecode.js';
 import { appModel } from './appmodel.js';
 import { kotlinNativeFiles } from './kotlincode.js';
+import { openNativePreview } from './nativepreview.js';
 import { flutterFiles } from './flutter.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
@@ -6133,6 +6134,7 @@ function openFileMenu() {
     { icon: 'globe', label: 'Test in Safari', k: 'the built web app', fn: testInSafari },
     { icon: 'link', label: 'Copy test link', k: 'open it on your iPhone', fn: copyTestLink },
     { icon: 'gear', label: 'Build Settings…', fn: openBuildSettings },
+    root.settings?.app && { icon: 'phone', label: 'Native App Preview…', k: 'Flutter · Kotlin · SwiftUI', fn: openNativeApp },
     '-',
     { icon: 'clock', label: 'Restore Earlier Version…', fn: openRestorePoints },
     { icon: 'save', label: 'Back Up All Games', k: 'one file', fn: backupAll },
@@ -7430,6 +7432,27 @@ async function exportFlutter() {
     noteBuild('flutter', zip.size); toast(`Flutter project ready (${kb(zip.size)}): unzip it, run dart run tool/setup.dart, then flutter run. README.md has the steps.`);
   } catch (err) { toast('Could not make the Flutter project: ' + err.message); }
 }
+/** The native project's files: Flutter, SwiftUI (an Xcode project) or Kotlin Multiplatform. */
+async function nativeFilesFor(kind, so, game, icon) {
+  const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });
+  const runtime = await (await get({ flutter: './native/flutter/pocket.dart', swift: './native/swift/Pocket.swift', kotlin: './native/kotlin/Pocket.kt' }[kind])).text();
+  if (kind === 'kotlin') {
+    const wrapper = { jar: new Uint8Array(await (await get('./native/kotlin/wrapper/gradle-wrapper.jar')).arrayBuffer()), gradlew: await (await get('./native/kotlin/wrapper/gradlew')).text(), gradlewBat: await (await get('./native/kotlin/wrapper/gradlew.bat')).text() };
+    const r = kotlinNativeFiles(game, { ...so, slug: slug(so.name) }, { runtime, wrapper, icon });
+    return { ...r, zipName: slug(so.name) + '-kotlin.zip' };
+  }
+  if (kind === 'flutter') return { ...flutterNativeFiles(game, so, { runtime, icon }), zipName: slug(so.name) + '-flutter-native.zip' };
+  const xo = { ...so, iosTarget: '16.0', xcodeName: codeName(so.name) }, r = swiftNativeFiles(game, xo, { runtime });
+  return { model: r.model, files: [...xcodeShell(xo, { icon }, r.files), { name: codeName(so.name) + '/README.md', data: nativeReadme(r.model, xo, 'swift') }], zipName: slug(so.name) + '-swiftui.zip' };
+}
+/** Native App Preview: try the app the way the Flutter / Kotlin / SwiftUI exports build it, and read their code. */
+function openNativeApp() {
+  if (!root.settings?.app) return toast('The native preview is for apps (pages, lists, forms). Make an app from New Project › Apps.');
+  saveNow();
+  const so = nativeOpts(); if (!validAppId(so.appId)) so.appId = suggestAppId(buildOpts().author, so.name);
+  const { game } = buildGameJSON();
+  openNativePreview({ game, toast, download: (kind) => exportNative(kind), files: async (kind) => (await nativeFilesFor(kind, so, game, new Uint8Array(0))).files });
+}
 /** Native code: the app as Flutter widgets or SwiftUI views (no web view). */
 async function exportNative(kind) {
   const so = nativeOpts();
@@ -7439,21 +7462,7 @@ async function exportNative(kind) {
     toast(`Writing the ${{ flutter: 'Flutter', swift: 'SwiftUI', kotlin: 'Kotlin' }[kind]} code…`);
     const o = buildOpts(), { game } = buildGameJSON(), kit = await storeKitFiles(o);
     const icon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data;
-    const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });
-    const runtime = await (await get({ flutter: './native/flutter/pocket.dart', swift: './native/swift/Pocket.swift', kotlin: './native/kotlin/Pocket.kt' }[kind])).text();
-    let files, model, zipName;
-    if (kind === 'kotlin') {
-      const wrapper = { jar: new Uint8Array(await (await get('./native/kotlin/wrapper/gradle-wrapper.jar')).arrayBuffer()), gradlew: await (await get('./native/kotlin/wrapper/gradlew')).text(), gradlewBat: await (await get('./native/kotlin/wrapper/gradlew.bat')).text() };
-      ({ files, model } = kotlinNativeFiles(game, { ...so, slug: slug(so.name) }, { runtime, wrapper, icon }));
-      zipName = slug(so.name) + '-kotlin.zip';
-    } else if (kind === 'flutter') {
-      ({ files, model } = flutterNativeFiles(game, so, { runtime, icon }));
-      zipName = slug(so.name) + '-flutter-native.zip';
-    } else {
-      const xo = { ...so, iosTarget: '16.0', xcodeName: codeName(so.name) }, r = swiftNativeFiles(game, xo, { runtime });
-      model = r.model; files = [...xcodeShell(xo, { icon }, r.files), { name: codeName(so.name) + '/README.md', data: nativeReadme(model, xo, 'swift') }];
-      zipName = slug(so.name) + '-swiftui.zip';
-    }
+    const { files, model, zipName } = await nativeFilesFor(kind, so, game, icon);
     const dir = files[0].name.split('/')[0] + '/';
     const zip = downloadZip([...files, ...kit.map((f) => ({ ...f, name: dir + f.name }))], zipName);
     noteBuild('native', zip.size);
@@ -7915,7 +7924,8 @@ function openBuildSettings() {
           m && h('p', { class: 'desc' }, `${m.pages.length} page${m.pages.length === 1 ? '' : 's'}${m.tabs.length ? `, ${m.tabs.length} tabs` : ''}, ${m.collections.length} data collection${m.collections.length === 1 ? '' : 's'}.` + (todo.length ? ` Placeholders for: ${todo.slice(0, 8).join(', ')}${todo.length > 8 ? '…' : ''}.` : ' Everything has a native version.')),
           Cr('appId', { label: 'App ID (bundle ID / applicationId)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.app. It can never change after the first store release.' }),
           !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.app (each part starts with a letter).'),
-          h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk || !isApp, onclick: () => exportNative('flutter') }, icon('download'), 'Native Flutter code (.zip)')),
+          h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !isApp, onclick: () => { closeLayer(); openNativeApp(); } }, icon('play'), 'Preview & test the native app')),
+          h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk || !isApp, onclick: () => exportNative('flutter') }, icon('download'), 'Native Flutter code (.zip)')),
           h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk || !isApp, onclick: () => exportNative('swift') }, icon('download'), 'Native SwiftUI code (.zip)')),
           h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk || !isApp, onclick: () => exportNative('kotlin') }, icon('download'), 'Native Kotlin code: Android + iOS (.zip)')),
         ];

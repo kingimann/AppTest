@@ -2354,3 +2354,94 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .ne-code .c-num { color: #f7c06b; }
 .ne-code .c-kw { color: #c792ea; font-weight: 600; }
 .ne-code .c-var { color: #4fc3f7; }
+.ne-code-langs { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 10px; scrollbar-width: none; }
+.ne-code-langs .ne-chip { flex: none; border: 1px solid var(--line, #333); background: transparent; color: var(--text); border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.ne-code-langs .ne-chip.on { background: var(--accent, #4fa3ff); border-color: transparent; color: #fff; }
+/* Native App Preview (Flutter / Kotlin / SwiftUI) */
+.npv { position: fixed; inset: 0; z-index: 900; background: var(--bg, #0e1014); color: var(--text, #e8e8ea); display: flex; flex-direction: column; font-family: inherit; }
+.npv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: calc(env(safe-area-inset-top) + 10px) 14px 10px; border-bottom: 1px solid var(--line, #2a2f38); }
+.npv-title { display: flex; flex-direction: column; margin-right: auto; }
+.npv-title small { color: var(--muted, #9ca3af); font-size: 12px; }
+.npv-seg { display: inline-flex; background: var(--panel2, #1b1e25); border-radius: 10px; padding: 3px; }
+.npv-seg button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 13px; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; }
+.npv-seg button.on { background: var(--accent, #4fa3ff); color: #fff; }
+.npv-acts { display: flex; gap: 6px; }
+.npv-btn { border: 1px solid var(--line, #2a2f38); background: transparent; color: inherit; font: inherit; font-size: 13px; font-weight: 600; padding: 7px 11px; border-radius: 9px; cursor: pointer; }
+.npv-btn.primary { background: var(--accent, #4fa3ff); border-color: transparent; color: #fff; }
+.npv-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.npv[data-view="app"] .npv-code { display: none; }
+.npv[data-view="code"] .npv-app { display: none; }
+@media (min-width: 900px) { .npv-body { grid-template-columns: 420px minmax(0, 1fr); } .npv .npv-app, .npv .npv-code { display: flex !important; } }
+.npv-app { display: flex; flex-direction: column; align-items: center; gap: 10px; overflow: auto; padding: 16px; }
+.npv-note { color: var(--muted, #9ca3af); font-size: 12px; text-align: center; max-width: 360px; }
+.npv-code { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line, #2a2f38); }
+.npv-ctools { display: flex; gap: 6px; padding: 10px; align-items: center; }
+.npv-files { flex: 1; min-width: 0; background: var(--panel2, #1b1e25); color: inherit; border: 1px solid var(--line, #2a2f38); border-radius: 9px; padding: 7px; font: inherit; font-size: 13px; }
+.npv-pre { flex: 1; margin: 0; overflow: auto; background: #0f1117; color: #d7dae0; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 10px 14px; white-space: pre; user-select: text; -webkit-user-select: text; }
+.npv-pre .c-com { color: #7f8796; font-style: italic; } .npv-pre .c-str { color: #a5d6a7; } .npv-pre .c-num { color: #f7c06b; } .npv-pre .c-kw { color: #c792ea; font-weight: 600; }
+/* the phone */
+.npv-phone { position: relative; width: 360px; max-width: 100%; height: 720px; max-height: calc(100vh - 160px); flex: none; border-radius: 36px; border: 10px solid #111; background: var(--bg); color: var(--text); overflow: hidden; display: flex; flex-direction: column; font: 15px/1.35 Roboto, system-ui, -apple-system, sans-serif; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+.npv-phone.ios { font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; }
+.npv-status { display: flex; justify-content: space-between; padding: 8px 20px 2px; font-size: 12px; font-weight: 700; background: var(--card); }
+.npv-bar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 8px; background: var(--card); border-bottom: 1px solid var(--line); }
+.npv-phone.material .npv-btitle { font-size: 20px; font-weight: 800; flex: 1; }
+.npv-phone.ios .npv-btitle { flex: 1; text-align: center; font-size: 17px; font-weight: 700; }
+.npv-back, .npv-back-sp { min-width: 40px; }
+.npv-back { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 18px; cursor: pointer; padding: 8px; }
+.npv-phone.material .npv-back { color: var(--text); font-size: 22px; }
+.npv-phone.material .npv-back-sp:last-child { display: none; }
+.npv-page { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 14px 90px; display: flex; flex-direction: column; gap: 12px; }
+.npv-page.fills { overflow: hidden; padding-bottom: 0; }
+.npv-text { white-space: pre-wrap; }
+.npv-pbtn { min-height: 50px; border-radius: 16px; font: inherit; font-size: 16px; font-weight: 800; cursor: pointer; border: 2px solid transparent; }
+.npv-phone.ios .npv-pbtn { border-radius: 14px; }
+.npv-pbtn.filled { background: var(--accent); color: var(--onAccent); }
+.npv-pbtn.outlined { background: transparent; border-color: var(--accent); color: var(--accent); }
+.npv-pbtn.danger { background: var(--card); border-color: var(--danger); color: var(--danger); }
+.npv-field { display: flex; align-items: center; gap: 8px; background: var(--field); border-radius: 12px; padding: 0 12px; }
+.npv-field input, .npv-input { flex: 1; min-width: 0; border: 0; background: var(--field); color: var(--text); font: inherit; padding: 13px 0; outline: none; }
+.npv-input { width: 100%; box-sizing: border-box; border-radius: 12px; padding: 13px 12px; resize: vertical; }
+.npv-ic { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.npv-field .npv-ic { color: var(--sub); width: 18px; height: 18px; }
+.npv-toggle { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.npv-toggle input { appearance: none; width: 48px; height: 28px; border-radius: 14px; background: var(--line); position: relative; cursor: pointer; flex: none; transition: background .2s; }
+.npv-toggle input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #fff; transition: transform .2s; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.npv-toggle input:checked { background: var(--accent); }
+.npv-toggle input:checked::after { transform: translateX(20px); }
+.npv-card { background: var(--card); border-radius: 16px; padding: 12px 16px; }
+.npv-card.row { display: flex; align-items: center; gap: 12px; } .npv-card.row > :first-child { flex: 1; }
+.npv-li { padding: 6px 0; }
+.npv-img { width: 100%; object-fit: cover; border-radius: 16px; }
+.npv-list { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; padding-bottom: 90px; }
+.npv-list.fill, .npv-form.fill, .npv-empty.fill { flex: 1; min-height: 0; }
+.npv-phone.ios .npv-list { gap: 0; background: var(--card); border-radius: 12px; padding-bottom: 0; align-self: stretch; }
+.npv-row { display: flex; align-items: center; gap: 10px; background: var(--card); border-radius: 16px; padding: 10px 12px; cursor: pointer; }
+.npv-phone.ios .npv-row { border-radius: 0; border-bottom: 1px solid var(--line); }
+.npv-rowt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.npv-rowt b, .npv-rowt small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.npv-rowt small { color: var(--sub); }
+.npv-row.done .npv-rowt b { text-decoration: line-through; color: var(--sub); }
+.npv-rowic { font-size: 24px; }
+.npv-check { width: 22px; height: 22px; accent-color: var(--accent); flex: none; }
+.npv-del { border: 0; background: transparent; cursor: pointer; opacity: .55; font-size: 15px; }
+.npv-chev { color: var(--sub); font-size: 22px; }
+.npv-empty { color: var(--sub); text-align: center; padding: 32px 12px; }
+.npv-form { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; padding-bottom: 24px; }
+.npv-flabel { color: var(--sub); font-weight: 700; font-size: 13px; margin: 8px 0 0 4px; }
+.npv-form .npv-pbtn { margin-top: 18px; }
+.npv-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.npv-chip { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 10px; padding: 8px 14px; font: inherit; font-size: 14px; cursor: pointer; }
+.npv-chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--card)); border-color: var(--accent); }
+.npv-todo { border: 2px dashed var(--line); border-radius: 16px; padding: 18px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
+.npv-todo small { color: var(--sub); }
+.npv-fab { position: absolute; right: 18px; bottom: 22px; width: 58px; height: 58px; border-radius: 50%; border: 0; background: var(--accent); color: var(--onAccent); font-size: 30px; cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,.3); }
+.npv-phone.material .npv-fab { border-radius: 18px; }
+.npv-tabs { display: flex; background: var(--card); border-top: 1px solid var(--line); padding: 6px 4px 14px; }
+.npv-tab { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; border: 0; background: transparent; color: var(--sub); font: inherit; cursor: pointer; }
+.npv-tab small { font-size: 11px; font-weight: 600; }
+.npv-tabic { position: relative; display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.npv-tab.on { color: var(--text); }
+.npv-phone.material .npv-tab.on .npv-tabic { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.npv-phone.ios .npv-tab.on { color: var(--accent); }
+.npv-tabic i { position: absolute; top: -2px; right: 8px; background: var(--danger); color: #fff; font-style: normal; font-size: 10px; font-weight: 800; border-radius: 9px; padding: 1px 5px; }
+.npv-phone.material .npv-fab ~ .npv-tabs, .npv-tabs ~ .npv-fab { bottom: 86px; }

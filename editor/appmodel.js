@@ -29,7 +29,7 @@ function elementOf(e, kids, todo) {
 }
 
 /** Where an element sits on its page, top to bottom (anchors at the bottom come last). */
-const orderOf = (e) => { const a = e.anchor || 'center', g = a.startsWith('top') ? 0 : a.startsWith('bottom') ? 2 : 1; return g * 100000 + (+e.y || 0) + (+e.x || 0) / PAGE_W; };
+const orderOf = (e) => { const a = e.anchor || 'center', g = a.startsWith('top') ? 0 : a.startsWith('bottom') ? 2 : 1, hx = a.endsWith('left') ? 0 : a.endsWith('right') ? 2 : 1; return g * 100000 + (+e.y || 0) + hx * 0.01 + (+e.x || 0) / PAGE_W * 0.001; }; // (top to bottom; in a row, left to right)
 
 /** game: the project JSON (as saved). */
 export function appModel(game) {

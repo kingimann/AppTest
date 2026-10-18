@@ -15,6 +15,12 @@ const hexArgb = (h) => '0xFF' + String(h).replace('#', '').padEnd(6, '0').slice(
 const snake = (s) => String(s).replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
 const lit = (v) => (typeof v === 'number' || typeof v === 'boolean' ? String(v) : null);
 const tokenColor = (c) => (c && (/^@\w+$/.test(c) || /^#[0-9a-f]{6}$/i.test(c)) ? c : '');
+/** A Data List's look settings that differ from the defaults (sep: ': ' for Dart / Swift, ' = ' for Kotlin). */
+export const listExtras = (x, sep, q = (v) => (typeof v === 'string' ? JSON.stringify(v) : String(v)), right = true) => [
+  right && x.right && ['right', q(x.right)], x.swipeDelete === false && ['swipeDelete', 'false'], x.rowH && x.rowH !== 64 && ['rowH', x.rowH], x.gap != null && +x.gap !== 8 && ['gap', +x.gap], x.radius != null && +x.radius !== 14 && ['radius', +x.radius], x.doneLook === false && ['doneLook', 'false'],
+].filter(Boolean).map(([k, v]) => `, ${k}${sep}${v}`).join('');
+/** Colour tokens kept as text for the runtime to resolve ("@bar", "#1d9bf0"); anything else → the fallback. */
+const tok = (c, fb) => tokenColor(c) || fb;
 
 /** Page class / file names that don't clash. */
 function names(model) {
@@ -34,16 +40,16 @@ function dartElement(x, ind) {
   switch (x.kind) {
     case 'text': return `PText(${ds(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ds(tokenColor(x.color))}` : ''})`;
     case 'button': return `PButton(${ds(x.label)}, onTap: () => app.run(${ds(x.action)}, ${dartValue(x.value)}${x.amount !== 1 && x.amount != null ? `, ${+x.amount || 0}` : ''})${x.outlined ? `, look: ${/danger/.test(x.color) ? 'Look.danger' : 'Look.outlined'}` : ''})`;
-    case 'list': return `RecordList(collection: ${ds(x.collection)}, title: ${ds(x.title)}${x.subtitle ? `, subtitle: ${ds(x.subtitle)}` : ''}${x.icon ? `, icon: ${ds(x.icon)}` : ''}${x.check ? `, check: ${ds(x.check)}` : ''}${x.search ? `, search: ${ds(x.search)}` : ''}${x.filter ? `, filter: ${ds(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort: ${ds(x.sort)}` : ''}${x.openPage ? `, openPage: ${ds(x.openPage)}` : ''}, empty: ${ds(x.empty)})`;
+    case 'list': return `RecordList(collection: ${ds(x.collection)}, title: ${ds(x.title)}${x.subtitle ? `, subtitle: ${ds(x.subtitle)}` : ''}${x.icon ? `, icon: ${ds(x.icon)}` : ''}${x.check ? `, check: ${ds(x.check)}` : ''}${x.search ? `, search: ${ds(x.search)}` : ''}${x.filter ? `, filter: ${ds(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort: ${ds(x.sort)}` : ''}${x.openPage ? `, openPage: ${ds(x.openPage)}` : ''}, empty: ${ds(x.empty)}${listExtras(x, ': ', ds)})`;
     case 'form': return `RecordForm(collection: ${ds(x.collection)}${x.fields.length ? `, fields: [${x.fields.map(ds).join(', ')}]` : ''}, mode: FormMode.${{ new: 'newRecord', edit: 'editOpened', auto: 'auto' }[x.mode]}, saveLabel: ${ds(x.saveLabel)}${x.after !== 'go back' ? `, after: ${ds(x.after)}` : ''}${x.page ? `, page: ${ds(x.page)}` : ''})`;
-    case 'input': return `VarField(${ds(x.var)}${x.placeholder ? `, placeholder: ${ds(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard: ${ds(x.keyboard)}` : ''})`;
+    case 'input': return `VarField(${ds(x.var)}${x.placeholder ? `, placeholder: ${ds(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard: ${ds(x.keyboard)}` : ''}${x.outlined ? ', outlined: true' : ''})`;
     case 'toggle': return `VarSwitch(${ds(x.var)}${x.label ? `, label: ${ds(x.label)}` : ''})`;
     case 'items': return `StaticList([${x.items.map(ds).join(', ')}])`;
     case 'image': return `PImage(${ds(x.src)}, height: ${x.h})`;
     case 'row': return `PCard(children: [\n${x.children.map((c) => pad + '  ' + dartElement(c, ind + 2)).join(',\n')},\n${pad}])`;
-    case 'feed': return `SocialFeed(collection: ${ds(x.collection)}${x.look !== 'timeline' ? `, look: ${ds(x.look)}` : ''}${x.filter ? `, filter: ${ds(x.filter)}` : ''}${x.search ? `, search: ${ds(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns: ${x.columns}` : ''}${x.profilePage ? `, profilePage: ${ds(x.profilePage)}` : ''}, empty: ${ds(x.empty)})`;
+    case 'feed': return `SocialFeed(collection: ${ds(x.collection)}${x.look !== 'timeline' ? `, look: ${ds(x.look)}` : ''}${x.filter ? `, filter: ${ds(x.filter)}` : ''}${x.search ? `, search: ${ds(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns: ${x.columns}` : ''}${x.profilePage ? `, profilePage: ${ds(x.profilePage)}` : ''}, empty: ${ds(x.empty)}${x.tabs?.length ? `, tabs: const [${x.tabs.map((t) => `FeedTab(${ds(t.label)}${t.only || t.look ? `, ${ds(t.only)}` : ''}${t.look ? `, ${ds(t.look)}` : ''})`).join(', ')}]` : ''}${x.actions ? `, actions: const [${x.actions.map(ds).join(', ')}]` : ''})`;
     case 'composer': return `Composer(collection: ${ds(x.collection)}, placeholder: ${ds(x.placeholder)})`;
-    case 'stories': return `Stories(collection: ${ds(x.collection)})`;
+    case 'stories': return `Stories(collection: ${ds(x.collection)}${x.yours === false ? ', yours: false' : ''})`;
     case 'inbox': return `Inbox(collection: ${ds(x.collection)}, openPage: ${ds(x.openPage)})`;
     case 'chat': return `Chat(collection: ${ds(x.collection)})`;
     case 'profile': return `ProfileHeader(name: ${ds(x.name)}, handle: ${ds(x.handle)}${x.bio ? `, bio: ${ds(x.bio)}` : ''}${x.stats.length ? `, stats: [${x.stats.map((s) => `(${ds(s.label)}, ${ds(s.value)})`).join(', ')}]` : ''}, cover: ${ds(tokenColor(x.cover) || '@accent')})`;
@@ -80,7 +86,8 @@ class ${cls} extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => PocketPage(
-      title: ${ds(p.title)},${model.appBar ? '' : '\n      appBar: false,'}${scroll ? '' : '\n      scroll: false,'}${fab}
+      title: ${ds(p.title)},
+      page: ${ds(p.value)},${model.appBar ? '' : '\n      appBar: false,'}${scroll ? '' : '\n      scroll: false,'}${fab}
       body: (context) => [
 ${parts.map((c) => '        ' + c + ',').join('\n')}
       ],
@@ -88,6 +95,10 @@ ${parts.map((c) => '        ' + c + ',').join('\n')}
 }
 `;
 }
+
+const dartBar = (m) => { const b = m.bar; if (!b) return 'const BarStyle()';
+  return `const BarStyle(look: ${ds(b.look)}, brandPages: [${b.brandPages.map(ds).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, actions: [${b.actions.map((a) => `BarAction(${ds(a.icon)}, ${ds(a.does)}${a.badge ? `, badge: ${ds(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ds).join(', ')}]` : ''})`).join(', ')}], bg: ${ds(tok(b.bg, '@bar'))}, text: ${ds(tok(b.text, '@text'))}, icon: ${ds(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
+const dartNav = (m) => (m.nav ? `const NavStyle(style: ${ds(m.nav.style)}, bar: ${ds(tok(m.nav.bar, '@bar'))}, active: ${ds(tok(m.nav.active, '@accent'))}, idle: ${ds(tok(m.nav.idle, '@sub'))})` : 'const NavStyle()');
 
 function dartMain(model, N) {
   const pal = (P) => `Palette({${Object.entries(P).map(([k, v]) => `${ds(k)}: Color(${hexArgb(v)})`).join(', ')}})`;
@@ -112,6 +123,8 @@ Future<void> main() async {
     vars: {${Object.entries(model.vars).map(([k, v]) => `${ds(k)}: ${dartValue(v)}`).join(', ')}},
     tabs: const [${model.tabs.map((t) => `\n      NavTab(${ds(t.label)}, Icons.${iconFor(t.icon, 0)}, ${ds(t.page)}${t.badge ? `, badge: ${ds(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n    ' : ''}],
     collections: const [${model.collections.map((c) => `\n      Collection(${ds(c.name)}, [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n    ' : ''}],
+    bar: ${dartBar(model)},
+    nav: ${dartNav(model)},
     stats: const [${model.stats.map((s) => `\n      Stat(${ds(s.var)}, ${ds(s.collection)}, ${ds(s.how)}${s.field && s.field !== 'field' ? `, field: ${ds(s.field)}` : ''}${s.filter ? `, filter: ${ds(s.filter)}` : ''}${s.format === 'money' ? ', money: true' : ''}),`).join('')}${model.stats.length ? '\n    ' : ''}],
   );
   await app.load();
@@ -260,16 +273,16 @@ function swiftElement(x, ind) {
   switch (x.kind) {
     case 'text': return `PText(${ss(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ss(tokenColor(x.color))}` : ''})`;
     case 'button': return `PButton(${ss(x.label)}${x.outlined ? `, look: ${/danger/.test(x.color) ? '.danger' : '.outlined'}` : ''}) { app.run(${ss(x.action)}, ${swiftVal(x.value)}${x.amount !== 1 && x.amount != null ? `, ${+x.amount || 0}` : ''}) }`;
-    case 'list': return `RecordList(collection: ${ss(x.collection)}, title: ${ss(x.title)}${x.subtitle ? `, subtitle: ${ss(x.subtitle)}` : ''}${x.icon ? `, icon: ${ss(x.icon)}` : ''}${x.check ? `, check: ${ss(x.check)}` : ''}${x.search ? `, search: ${ss(x.search)}` : ''}${x.filter ? `, filter: ${ss(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort: ${ss(x.sort)}` : ''}${x.openPage ? `, openPage: ${ss(x.openPage)}` : ''}, empty: ${ss(x.empty)})`;
+    case 'list': return `RecordList(collection: ${ss(x.collection)}, title: ${ss(x.title)}${x.subtitle ? `, subtitle: ${ss(x.subtitle)}` : ''}${x.right ? `, right: ${ss(x.right)}` : ''}${x.icon ? `, icon: ${ss(x.icon)}` : ''}${x.check ? `, check: ${ss(x.check)}` : ''}${x.search ? `, search: ${ss(x.search)}` : ''}${x.filter ? `, filter: ${ss(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort: ${ss(x.sort)}` : ''}${x.openPage ? `, openPage: ${ss(x.openPage)}` : ''}, empty: ${ss(x.empty)}${listExtras(x, ': ', ss, false)})`;
     case 'form': return `RecordForm(collection: ${ss(x.collection)}${x.fields.length ? `, fields: [${x.fields.map(ss).join(', ')}]` : ''}, mode: .${{ new: 'newRecord', edit: 'editOpened', auto: 'auto' }[x.mode]}, saveLabel: ${ss(x.saveLabel)}${x.after !== 'go back' ? `, after: ${ss(x.after)}` : ''}${x.page ? `, page: ${ss(x.page)}` : ''})`;
-    case 'input': return `VarField(${ss(x.var)}${x.placeholder ? `, placeholder: ${ss(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard: ${ss(x.keyboard)}` : ''})`;
+    case 'input': return `VarField(${ss(x.var)}${x.placeholder ? `, placeholder: ${ss(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard: ${ss(x.keyboard)}` : ''}${x.outlined ? ', outlined: true' : ''})`;
     case 'toggle': return `VarSwitch(${ss(x.var)}${x.label ? `, label: ${ss(x.label)}` : ''})`;
     case 'items': return `StaticList([${x.items.map(ss).join(', ')}])`;
     case 'image': return `PImage(${ss(x.src)}, height: ${x.h})`;
     case 'row': return `PCard {\n${x.children.map((c) => pad + '    ' + swiftElement(c, ind + 4)).join('\n')}\n${pad}}`;
-    case 'feed': return `SocialFeed(collection: ${ss(x.collection)}${x.look !== 'timeline' ? `, look: ${ss(x.look)}` : ''}${x.filter ? `, filter: ${ss(x.filter)}` : ''}${x.search ? `, search: ${ss(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns: ${x.columns}` : ''}${x.profilePage ? `, profilePage: ${ss(x.profilePage)}` : ''}, empty: ${ss(x.empty)})`;
+    case 'feed': return `SocialFeed(collection: ${ss(x.collection)}${x.look !== 'timeline' ? `, look: ${ss(x.look)}` : ''}${x.filter ? `, filter: ${ss(x.filter)}` : ''}${x.search ? `, search: ${ss(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns: ${x.columns}` : ''}${x.profilePage ? `, profilePage: ${ss(x.profilePage)}` : ''}, empty: ${ss(x.empty)}${x.tabs?.length ? `, tabs: [${x.tabs.map((t) => `FeedTab(${ss(t.label)}${t.only || t.look ? `, ${ss(t.only)}` : ''}${t.look ? `, ${ss(t.look)}` : ''})`).join(', ')}]` : ''}${x.actions ? `, actions: [${x.actions.map(ss).join(', ')}]` : ''})`;
     case 'composer': return `Composer(collection: ${ss(x.collection)}, placeholder: ${ss(x.placeholder)})`;
-    case 'stories': return `Stories(collection: ${ss(x.collection)})`;
+    case 'stories': return `Stories(collection: ${ss(x.collection)}${x.yours === false ? ', yours: false' : ''})`;
     case 'inbox': return `Inbox(collection: ${ss(x.collection)}, openPage: ${ss(x.openPage)})`;
     case 'chat': return `Chat(collection: ${ss(x.collection)})`;
     case 'profile': return `ProfileHeader(name: ${ss(x.name)}, handle: ${ss(x.handle)}${x.bio ? `, bio: ${ss(x.bio)}` : ''}${x.stats.length ? `, stats: [${x.stats.map((s) => `(${ss(s.label)}, ${ss(s.value)})`).join(', ')}]` : ''}, cover: ${ss(tokenColor(x.cover) || '@accent')})`;
@@ -281,6 +294,9 @@ function swiftElement(x, ind) {
     default: return `TodoBox(${ss(x.name)}, ${ss(x.type)}) // TODO: build the ${x.type} natively`;
   }
 }
+
+const swiftBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
+  return `BarStyle(look: ${ss(b.look)}, brandPages: [${b.brandPages.map(ss).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, actions: [${b.actions.map((a) => `BarAction(icon: ${ss(a.icon)}, does: ${ss(a.does)}${a.badge ? `, badge: ${ss(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ss).join(', ')}]` : ''})`).join(', ')}], bg: ${ss(tok(b.bg, '@bar'))}, text: ${ss(tok(b.text, '@text'))}, icon: ${ss(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
 
 function swiftPage(p, cls, model) {
   const fills = p.items.some((x) => x.fill && (x.kind === 'list' || x.kind === 'form'));
@@ -296,7 +312,7 @@ struct ${cls}: View {
     @EnvironmentObject var app: AppState
 
     var body: some View {
-        PocketPage(title: ${ss(p.title)}${scroll ? '' : ', scroll: false'}${fab}) {
+        PocketPage(title: ${ss(p.title)}, page: ${ss(p.value)}${scroll ? '' : ', scroll: false'}${fab}) {
 ${parts.map((c) => '            ' + c).join('\n')}
         }
     }
@@ -325,7 +341,9 @@ struct ${appName}: App {
         vars: [${Object.entries(model.vars).map(([k, v]) => `${ss(k)}: ${swiftVal(v)}`).join(', ') || ':'}],
         tabs: [${model.tabs.map((t) => `\n            NavTab(label: ${ss(t.label)}, icon: ${ss(iconFor(t.icon, 1))}, page: ${ss(t.page)}${t.badge ? `, badge: ${ss(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}],
         collections: [${model.collections.map((c) => `\n            Collection(name: ${ss(c.name)}, fields: [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}],
-        stats: [${model.stats.map((s) => `\n            Stat(variable: ${ss(s.var)}, collection: ${ss(s.collection)}, how: ${ss(s.how)}${s.field && s.field !== 'field' ? `, field: ${ss(s.field)}` : ''}${s.filter ? `, filter: ${ss(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}]
+        stats: [${model.stats.map((s) => `\n            Stat(variable: ${ss(s.var)}, collection: ${ss(s.collection)}, how: ${ss(s.how)}${s.field && s.field !== 'field' ? `, field: ${ss(s.field)}` : ''}${s.filter ? `, filter: ${ss(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}],
+        bar: ${swiftBar(model)},
+        nav: ${model.nav ? `NavStyle(style: ${ss(model.nav.style)}, bar: ${ss(tok(model.nav.bar, '@bar'))}, active: ${ss(tok(model.nav.active, '@accent'))}, idle: ${ss(tok(model.nav.idle, '@sub'))})` : 'NavStyle()'}
     )
 
     var body: some Scene {

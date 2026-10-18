@@ -10,9 +10,9 @@ function elementOf(e, kids, todo) {
   const color = (c) => (c == null || c === '' ? '' : String(c));
   const text = e.text && String(e.text.value ?? '') !== '' ? { value: String(e.text.value), size: +e.text.size || 16, weight: String(e.text.weight || '600'), color: color(e.text.color) } : null;
   let b;
-  if ((b = B('uiDataList'))) { const p = P(b); return { kind: 'list', collection: p.collection || '', title: p.title || '{title}', subtitle: p.subtitle || '', icon: p.icon || '', check: p.check || '', search: p.search || '', filter: p.filter || '', sort: p.sort || 'newest first', openPage: p.openPage || '', empty: p.empty || 'Nothing here yet', fill: e.stretch === 'both' }; }
+  if ((b = B('uiDataList'))) { const p = P(b); return { kind: 'list', collection: p.collection || '', title: p.title || '{title}', subtitle: p.subtitle || '', icon: p.icon || '', check: p.check || '', search: p.search || '', filter: p.filter || '', sort: p.sort || 'newest first', openPage: p.openPage || '', empty: p.empty || 'Nothing here yet', right: p.right || '', swipeDelete: p.swipeDelete !== false, rowH: +p.rowH || 64, gap: p.gap ?? 8, radius: p.radius ?? 14, doneLook: p.doneLook !== false, fill: e.stretch === 'both' }; }
   if ((b = B('uiForm'))) { const p = P(b); return { kind: 'form', collection: p.collection || '', fields: String(p.fields || '').split(',').map((s) => s.trim()).filter(Boolean).map(fieldKey), mode: /always adds/.test(p.mode || '') ? 'new' : /always changes/.test(p.mode || '') ? 'edit' : 'auto', saveLabel: p.saveLabel || 'Save', after: p.after || 'go back', page: p.page || '', fill: e.stretch === 'both' }; }
-  if ((b = B('uiInput')) || (b = B('uiSearchBar'))) { const p = P(b); return { kind: 'input', var: p.var || 'text', placeholder: p.placeholder || '', keyboard: p.kind || (b.type === 'uiSearchBar' ? 'search' : 'text') }; }
+  if ((b = B('uiInput')) || (b = B('uiSearchBar'))) { const p = P(b); return { kind: 'input', var: p.var || 'text', placeholder: p.placeholder || '', keyboard: p.kind || (b.type === 'uiSearchBar' ? 'search' : 'text'), outlined: !!e.shape?.stroke }; }
   if ((b = B('uiToggle'))) { const p = P(b); return { kind: 'toggle', var: p.var || 'on', label: text?.value || p.onText || '', start: !!p.start }; }
   if ((b = B('button'))) {
     const p = P(b), sh = e.shape || {};
@@ -20,9 +20,11 @@ function elementOf(e, kids, todo) {
       fab: sh.type === 'circle' && /bottom/.test(e.anchor || ''), outlined: !!sh.stroke && (!sh.fill || /card|bg/.test(String(sh.fill))), fill: color(sh.fill), color: color(text?.color) };
   }
   // social components: native versions that read the same data collections
-  if ((b = B('uiFeed'))) { const p = P(b); return { kind: 'feed', collection: p.collection || 'Posts', look: p.look || 'timeline', filter: p.filter || '', search: p.searchVar || '', columns: +p.gridColumns || 3, profilePage: p.profilePage || '', empty: p.empty || 'No posts yet', fill: e.stretch === 'both' || !!e.stretch }; }
+  if ((b = B('uiFeed'))) { const p = P(b); return { kind: 'feed', collection: p.collection || 'Posts', look: p.look || 'timeline', filter: p.filter || '', search: p.searchVar || '', columns: +p.gridColumns || 3, profilePage: p.profilePage || '', empty: p.empty || 'No posts yet', fill: e.stretch === 'both' || !!e.stretch,
+    tabs: String(p.tabs || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((t) => t[0]).map(([label, only = '', look = '']) => ({ label, only, look })),
+    actions: String(p.actions || 'comment, repost, like, share').split(',').map((x) => x.trim()).filter(Boolean) }; }
   if ((b = B('uiComposer'))) { const p = P(b); return { kind: 'composer', collection: p.collection || 'Posts', placeholder: p.placeholder || 'What’s happening?' }; }
-  if ((b = B('uiStories'))) { const p = P(b); return { kind: 'stories', collection: p.collection || 'Stories' }; }
+  if ((b = B('uiStories'))) { const p = P(b); return { kind: 'stories', collection: p.collection || 'Stories', yours: p.yours !== false }; }
   if ((b = B('uiInbox'))) { const p = P(b); return { kind: 'inbox', collection: p.collection || 'Messages', openPage: p.openPage || 'chat', fill: true }; }
   if ((b = B('uiChat'))) { const p = P(b); return { kind: 'chat', collection: p.collection || 'Messages', fill: true }; }
   if ((b = B('uiProfile'))) { const p = P(b); return { kind: 'profile', name: p.name || '{playerName}', handle: p.handle || '{playerHandle}', bio: p.bio || '', stats: String(p.stats || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((x) => x[0]).map(([label, value]) => ({ label, value: value || '' })).concat(p.stats ? [] : [{ label: 'Posts', value: '{posts_count}' }]), cover: String(p.cover || '@accent').match(/#[0-9a-f]{6}/i)?.[0] || p.cover || '@accent', own: !!p.own }; }
@@ -56,6 +58,15 @@ export function appModel(game) {
   const bar = ents.map((e) => beh(e, 'uiAppBar')).find(Boolean), barP = P(bar);
   const titles = {}; for (const line of String(barP.titles || '').split('\n')) { const m = line.match(/^\s*([^=]+?)\s*=\s*(.+?)\s*$/); if (m) titles[m[1]] = m[2]; }
   const nav = ents.map((e) => beh(e, 'uiBottomNav')).find(Boolean), navP = P(nav);
+  const rows = (v) => String(v || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]);
+  const bars = bar ? {
+    look: barP.look || 'standard', brandPages: String(barP.brandPages ?? 'home').split(',').map((x) => x.trim()).filter(Boolean),
+    align: barP.titleAlign && barP.titleAlign !== 'auto' ? barP.titleAlign : barP.style === 'centered' || (barP.look && !['standard', 'facebook', 'instagram'].includes(barP.look)) ? 'center' : 'left',
+    avatar: barP.leftAvatar === 'yes' || ((barP.leftAvatar || 'for the look') === 'for the look' && barP.look === 'x'),
+    actions: rows(barP.actions ?? 'bell | notifications | unread\nsearch | search').map(([icon, does = '', badge = '', only = '']) => ({ icon, does, badge, only: only.split(',').map((x) => x.trim()).filter(Boolean) })).slice(0, 5),
+    bg: barP.bg || '@bar', text: barP.text || '@text', icon: barP.iconColor || barP.text || '@text', border: barP.border !== false, size: +barP.titleSize || 19,
+  } : null;
+  const navs = nav ? { style: navP.style || 'pill', bar: navP.barColor || '@bar', active: navP.activeColor || '@accent', idle: navP.idleColor || '@sub' } : null;
   const tabs = String(navP.tabs || '').split('\n').map((l) => l.split('|').map((s) => s.trim())).filter((t) => t[0] && t[2] && !/^(msg|button|url):/.test(t[2])).map(([label, icon, page, badge]) => ({ label, icon: icon || 'circle', page, badge: badge || '' }));
 
   const pages = [];
@@ -75,12 +86,12 @@ export function appModel(game) {
 
   const collections = (game.collections || []).map((c) => ({
     name: c.name, fields: (c.fields || []).map((f) => ({ name: f.name, key: fieldKey(f.name), type: f.type || 'text', options: String(f.options || '').split(',').map((s) => s.trim()).filter(Boolean), def: f.default ?? '' })),
-    rows: (c.rows || []).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [fieldKey(k), v]))),
+    rows: (c.rows || []).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k === '_at' ? k : fieldKey(k), v]))), // (_at: when it was added; it keeps its name)
   }));
   const vars = {}; for (const [k, v] of Object.entries(game.vars || {})) if (k !== 'page' && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')) vars[k] = v;
   return {
     name: game.settings?.appName || game.name || 'My App', accent: game.settings?.appAccent || '#3a7bfd', theme: game.settings?.appTheme || 'follow the phone',
-    appBar: !!bar, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
+    appBar: !!bar, bar: bars, nav: navs, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
   };
 }
 

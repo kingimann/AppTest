@@ -136,7 +136,7 @@ Lists live in variables and show in text as `1, 2, 3`. Positions start at **1**.
 
 ## Several scripts in one component
 
-One Visual Script component can hold several scripts. Each runs side by side with its own events, functions and state. **Add Another Script** adds a blank one or one of your saved scripts (linked). With more than one, the card shows a row per script: on / off, name, what starts it, **Open**, and ⋯ (rename, duplicate, move, make main, save as reusable, unlink, delete).
+One Visual Script component can hold several scripts. Each runs side by side with its own events, functions and state. **Add Another Script** adds a blank one or one of your saved scripts (linked). With more than one, the card shows a row per script: on / off, name, what starts it, **Open**, and ⋯ (rename, duplicate, move, make main, save as reusable, unlink, delete). A script switched off never runs, the main one included, even when every script in the component is off.
 
 ## Reusable scripts
 

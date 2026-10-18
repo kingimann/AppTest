@@ -23212,7 +23212,7 @@ registerBehavior('graph', {
   ], links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }, { from: { node: 'n2', port: 'then' }, to: { node: 'n3', port: 'in' } }] } }],
   create(p) {
     const extra = (Array.isArray(p.scripts) ? p.scripts : []).filter((q) => q?.graph && !q.off);
-    if (extra.length) { // several scripts in one component: each runs on its own (own events, functions and state), side by side
+    if (extra.length || p.mainOff) { // several scripts in one component: each runs on its own (own events, functions and state), side by side (with the main one off and no other on, nothing runs)
       const subs = [...(p.mainOff ? [] : [{ graph: p.graph }]), ...extra].filter((q) => q.graph).map((q) => Behaviors.graph.create({ ...p, graph: q.graph, scripts: [], mainOff: false, _sk: q.id || '' }));
       const each = (k) => (...a) => { for (const b of subs) b[k]?.(...a); };
       return { uiAlways: true, subs, start: each('start'), update: each('update'), collide: each('collide'), separate: each('separate'), destroy: each('destroy'), _run: (id, ctx) => subs[0]?._run(id, ctx), _value: (id, ctx) => subs[0]?._value(id, ctx) };

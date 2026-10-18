@@ -450,6 +450,10 @@ scene.on('data', (collection, kind, record) => { /* kind: added, changed, delete
 
 On the phone, each collection is kept under the app's name, so two apps never share records. `keep: false` makes a collection forget its changes when the app closes.
 
+## Native code
+
+**Build Settings › Native code (apps)** writes your app out as a real **Flutter** app or a **SwiftUI** app, with no web view: the pages, the App Bar titles, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches, your collections and Data Stats. It's a starting point to keep building in code; parts with no native version yet (Social Feed, Chat…) become placeholders marked TODO. See *Publishing › Native code (apps)*.
+
 ## Tips
 
 - Use **Bottom Nav** for the app's main sections and **App Bar** for titles and Back.

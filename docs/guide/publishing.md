@@ -144,7 +144,7 @@ Want to build the app yourself, with no cloud service, npm or plugins? Pick **Xc
 - the permission texts your game needs (camera, microphone, location);
 - on Android, the Back button too.
 
-The **Xcode & Android Studio** section of Build Settings has the **Bundle ID** / **package name** (the App ID), the **build number** (raise it for every upload), full screen and, for Xcode, your **Apple Team ID** and iPhone-only or iPhone and iPad. Both buttons are there, so you can download either project from either target.
+The **Xcode & Android Studio** section of Build Settings (also shown for Flutter) has the **Bundle ID** / **package name** (the App ID), the **build number** (raise it for every upload), full screen and, for Xcode, your **Apple Team ID** and iPhone-only or iPhone and iPad. Both buttons are there, so you can download either project from either target.
 
 ### Xcode (iOS)
 
@@ -167,6 +167,48 @@ The download has a `YourGame-android/` folder and the `store-listing/` folder.
 
 Inside are a small Java app (`MainActivity.java` and `NotifyReceiver.java` for notifications), the game (`app/src/main/assets/index.html`), the adaptive icon and the older icon sizes, and the notification icon. It runs on Android 8 and newer and targets Android 16 (API 36), as Google Play asks. To update the game later, replace `index.html`.
 
+## Flutter
+
+Pick **Flutter project** in Build Settings for one Flutter (Dart) project that builds for **both iOS and Android**. Like the Xcode and Android Studio projects, the game runs in a full-screen web view (`webview_flutter`), and `lib/main.dart` answers the game's native calls in Dart:
+
+- phone notifications (now, at a time, every day at a time, or repeating; tapping one tells the game which), through `flutter_local_notifications`;
+- haptics;
+- in-app purchases through `in_app_purchase` (StoreKit and Google Play Billing), when the game sells products;
+- camera and microphone for the game, and the permission texts it needs;
+- the Back button on Android (the game goes back a page first).
+
+The download has a `your_game/` folder (with `store-listing/` inside).
+
+1. Install Flutter (`flutter doctor` should tick Android Studio and, on a Mac, Xcode).
+2. In the folder, run `dart run tool/setup.dart` once. It runs `flutter create` to make the `android/` and `ios/` folders, then sets the **App ID**, the name, the permissions, the screen orientation, the app icon and the launch colour. Running it again is safe.
+3. Run `flutter run` with a phone plugged in or a simulator open.
+4. To publish: `flutter build appbundle` for Google Play, and `flutter build ipa` (or **Product › Archive** in Xcode) for the App Store.
+
+The version comes from **App** in Build Settings and the build number from the Flutter section (both end up in `pubspec.yaml`). To update the game later, replace `assets/game/index.html` with a new download's.
+
+## Native code (apps)
+
+The Flutter, Xcode and Android Studio projects all run your project in a web view. For an **app**, pick **Native code (apps)** in Build Settings to get it written out as real native code instead, to keep building on in code:
+
+- **Native Flutter code**: a Flutter app (Dart widgets) for iOS and Android. Run `dart run tool/setup.dart`, then `flutter run`.
+- **Native SwiftUI code**: an Xcode project with a SwiftUI app (iOS 16 or newer). Open the `.xcodeproj` and press Run.
+
+What becomes native code:
+
+| In Pocket Engine | Native |
+| --- | --- |
+| Pages (Show If on `page`) | one widget / view per page, with Back |
+| App Bar titles | the page title in the navigation bar |
+| Bottom Nav | Flutter `NavigationBar` / SwiftUI `TabView` (badges too) |
+| Text with `{variables}` and `{record_field}` | text that fills them in |
+| Buttons: go to page, go back, new record, edit / delete the opened record, set / add to a variable | the same, through `app.run(...)` |
+| Data List (search, filter, sort, checkbox, open a page, swipe to delete) | `RecordList` |
+| Form (adds, or changes the opened record; text, numbers, dates, choices, yes/no) | `RecordForm` |
+| Text inputs, switches (Dark mode too), cards, plain lists, web pictures | native controls |
+| Data collections and their sample records, Data Stats | `AppState`, saved on the phone |
+
+Anything else (a Social Feed, Chat, a game…) becomes a placeholder marked **TODO**, and the README lists them. Build Settings shows how many pages convert and which parts will be placeholders before you download. The pages are generated from your project; the runtime (`lib/pocket.dart` or `App/Pocket.swift`) is a fixed, readable file with the state and the building blocks. Change both as you like: from then on the code is yours.
+
 ## In-app purchases
 
 Sell coins, unlocks (Remove Ads, a level pack) and subscriptions with the App Store and Google Play.
@@ -177,7 +219,7 @@ Sell coins, unlocks (Remove Ads, a level pack) and subscriptions with the App St
    - **Subscription** (VIP, monthly): also checked with **Owns Product**.
 2. In a script, use **Buy Product** (ports *bought*, *cancelled*, *failed*), **Restore Purchases** (*done*), **Owns Product** (true / false) and **Product Price** (the store's price in the player's money once known). Triggers have *Buy product* and *Restore purchases* actions. Scripts get the `purchase` event (`id`, `status`) and the messages `purchase bought` / `purchase cancelled` / `purchase failed` (with the product ID), plus `purchased` when an approval arrives later (Ask to Buy, a pending card payment).
 3. **Testing**: in the editor and test links, Buy Product shows a test sheet with *Buy*, *Cancel* and *Test a failed payment*. Nothing is charged. Unlocks are remembered on the device like real ones.
-4. **Builds**: the Xcode export answers with **StoreKit 2**. The Android Studio export adds **Google Play Billing 7** (`Billing.java`). The Expo export adds **expo-iap** (StoreKit 2 / Play Billing; needs an EAS or dev build, not Expo Go). Each README lists your products and the store steps:
+4. **Builds**: the Xcode export answers with **StoreKit 2**. The Android Studio export adds **Google Play Billing 7** (`Billing.java`). The Expo export adds **expo-iap** (StoreKit 2 / Play Billing; needs an EAS or dev build, not Expo Go). The Flutter export uses **in_app_purchase**. Each README lists your products and the store steps:
    - create each product with **the same ID** in App Store Connect (*Monetization › In-App Purchases*) and in Google Play Console (*Monetize › Products*, after uploading a testing build);
    - sign Apple's Paid Apps agreement;
    - test with an Apple Sandbox account and a Google Play license tester.

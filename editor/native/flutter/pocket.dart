@@ -475,7 +475,8 @@ class PButton extends StatelessWidget {
   final double height, radius, size;
   @override
   Widget build(BuildContext context) {
-    final p = pal(context), text = Text(app.fill(label), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: size, fontWeight: FontWeight.w800));
+    // the words shrink to fit rather than being cut short
+    final p = pal(context), text = FittedBox(fit: BoxFit.scaleDown, child: Text(app.fill(label), maxLines: 1, style: TextStyle(fontSize: size, fontWeight: FontWeight.w800)));
     final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius));
     final min = Size.fromHeight(height);
     final f = p.resolve(fg);
@@ -483,7 +484,7 @@ class PButton extends StatelessWidget {
       Look.filled => FilledButton(onPressed: onTap, style: FilledButton.styleFrom(minimumSize: min, shape: shape, padding: const EdgeInsets.symmetric(horizontal: 8), backgroundColor: p.resolve(bg) ?? p.accent, foregroundColor: f ?? p.onAccent), child: text),
       Look.danger => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(minimumSize: min, shape: shape, foregroundColor: f ?? p.danger, side: BorderSide(color: p.resolve(stroke) ?? p.danger, width: 2), backgroundColor: p.resolve(bg) ?? p.card), child: text),
       Look.outlined => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(minimumSize: min, shape: shape, padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: f ?? p.accent, backgroundColor: p.resolve(bg), side: BorderSide(color: p.resolve(stroke) ?? f ?? p.accent, width: 2)), child: text),
-      Look.plain => TextButton(onPressed: onTap, style: TextButton.styleFrom(minimumSize: min, foregroundColor: f ?? p.accent), child: text),
+      Look.plain => TextButton(onPressed: onTap, style: TextButton.styleFrom(minimumSize: min, padding: const EdgeInsets.symmetric(horizontal: 4), foregroundColor: f ?? p.accent), child: text),
     };
   }
 }

@@ -2202,6 +2202,7 @@ function iconFor(e) {
 /** Short component names shown under each object in the Hierarchy. */
 function compBadges(e) {
   const out = [];
+  if (e.note) out.push('📝 Note'); // (Inspector › ⋯ › Add a note)
   if (e.body) out.push(e.body.type === 'static' ? 'Static' : e.body.sensor ? 'Trigger' : 'Rigidbody');
   if (e.light) out.push('Light');
   if (e.model) out.push('Model');
@@ -2752,6 +2753,15 @@ function scrubber(labelEl, inputEl, get, set, step) {
   labelEl.addEventListener('pointerup', end); labelEl.addEventListener('pointercancel', end);
 }
 
+/** Number fields take sums: 10*2, 100/3, +5 (adds to what's there), *2, x/2 (x = what's there), 50% → 0.5. */
+const NUM_RE = /^-?(\d+\.?\d*|\.\d+)(e-?\d+)?$/i;
+function evalNum(str, cur) {
+  const t = String(str).trim().replace(/,/g, '.'); if (!t) return NaN; if (NUM_RE.test(t)) return parseFloat(t);
+  const m = /^([+*/])=?\s*(.+)$/.exec(t) || /^(-)=\s*(.+)$/.exec(t); let e = m ? `(${cur})${m[1]}(${m[2]})` : t;
+  e = e.replace(/\bx\b/gi, `(${cur})`).replace(/(\d+(?:\.\d+)?)%/g, '($1/100)').replace(/×/g, '*').replace(/÷/g, '/');
+  if (!/^[\d+\-*/().\se]+$/i.test(e)) return NaN;
+  try { const v = Function('"use strict";return (' + e + ')')(); return Number.isFinite(v) ? Math.round(v * 1000) / 1000 : NaN; } catch { return NaN; }
+}
 /** An input bound to target()[path]. spec: { type, label, options, def, structure, step } */
 /** The smallest a number field can be, from what it is: sizes, counts and times can't be negative; a font size is at least 1. */
 function minFor(path) {
@@ -2773,11 +2783,13 @@ function control(target, path, spec) {
   const um = !unit && spec.type === 'number' && text.match(/\s*\((s|sec|seconds|px|°|%|deg|degrees|ms|m|m\/s)\)$/); // Odin-style [SuffixLabel]: "Speed (px)" → a px chip in the field
   if (um) { unit = { sec: 's', seconds: 's', deg: '°', degrees: '°' }[um[1]] || um[1]; text = text.slice(0, um.index); }
   const label = h('label', { title: text }, text);
+  if (target()?.id && target().id === selectedId) inspReg.set(path, spec); // (so a pinned setting can be shown again at the top)
   { // right-click or hold a label: copy this value, paste one, or reset it
     const menu = (anchor) => popMenu(anchor, [{ cap: text || path },
       { icon: 'copy', label: 'Copy value', fn: () => { fieldClip = { type: spec.type || 'text', v: clone(get()) }; navigator.clipboard?.writeText(typeof fieldClip.v === 'object' ? JSON.stringify(fieldClip.v) : String(fieldClip.v ?? '')).catch(() => {}); toast('Value copied'); } },
       fieldClip && (fieldClip.type === (spec.type || 'text') || (spec.type || 'text') === 'text') && { icon: 'paste', label: `Paste ${typeof fieldClip.v === 'object' ? 'value' : `“${String(fieldClip.v).slice(0, 24)}”`}`, fn: () => { set(clone(fieldClip.v)); pushHistory(); changed({ inspector: true }); } },
-      spec.def !== undefined && { icon: 'rotate', label: 'Reset to default', fn: () => { set(spec.def === '' ? undefined : clone(spec.def)); pushHistory(); changed({ inspector: true }); } }]);
+      spec.def !== undefined && { icon: 'rotate', label: 'Reset to default', fn: () => { set(spec.def === '' ? undefined : clone(spec.def)); pushHistory(); changed({ inspector: true }); } },
+      target()?.id && { icon: 'flag', label: pinsOf(target().id).includes(path) ? 'Unpin from the top' : 'Pin to the top', fn: () => { togglePin(target().id, path); renderInspector(); } }]);
     label.addEventListener('contextmenu', (e) => { e.preventDefault(); menu(label); });
     label.addEventListener('pointerdown', (e) => { if (e.pointerType === 'mouse') return; const x0 = e.clientX, y0 = e.clientY; let moved = false; const mv = (m) => { if (Math.hypot(m.clientX - x0, m.clientY - y0) > 8) moved = true; }; label.addEventListener('pointermove', mv); const t = setTimeout(() => { if (!moved) { buzz(10); menu(label); } }, 560); const end = () => { clearTimeout(t); label.removeEventListener('pointermove', mv); }; label.addEventListener('pointerup', end, { once: true }); label.addEventListener('pointercancel', end, { once: true }); });
   }
@@ -2789,9 +2801,10 @@ function control(target, path, spec) {
       const lazy = () => { if (spec.lazy) renderInspector(); }; // other fields depend on this one: refresh when done typing
       const min = spec.min ?? (spec.range ? null : minFor(path)), name0 = text || path; // sizes can't go below 0 (a font size below 1)
       const setN = (n) => set(min != null && n < min ? min : n);
-      const inp = h('input', { type: 'number', inputMode: 'decimal', step: 'any', value: val ?? '', 'data-path': path, ...(min != null ? { min } : {}),
-        oninput: (e) => { const n = parseFloat(e.target.value), bad = min != null && n < min; inp.classList.toggle('bad', bad); inp.title = bad ? `${name0} can’t be below ${min}` : ''; if (!Number.isNaN(n) && !bad) { set(n); if (slider) slider.value = n; } },
-        onchange: (e) => { const n = parseFloat(e.target.value); if (min != null && !Number.isNaN(n) && n < min) { set(min); inp.value = min; if (slider) slider.value = min; toast(`${name0} can’t be below ${min}: set to ${min}`); } inp.classList.remove('bad'); inp.title = ''; lazy(); } });
+      const inp = h('input', { type: 'text', inputMode: 'decimal', autocomplete: 'off', spellcheck: false, value: val ?? '', 'data-path': path, ...(min != null ? { min } : {}),
+        oninput: (e) => { if (!NUM_RE.test(e.target.value.trim())) return; const n = parseFloat(e.target.value), bad = min != null && n < min; inp.classList.toggle('bad', bad); inp.title = bad ? `${name0} can’t be below ${min}` : ''; if (!Number.isNaN(n) && !bad) { set(n); if (slider) slider.value = n; } }, // (sums like 10*2 or +5 are worked out when you finish)
+        onkeydown: (e) => { if (e.key === 'ArrowUp' || e.key === 'ArrowDown') { e.preventDefault(); bump((e.key === 'ArrowUp' ? 1 : -1) * (e.shiftKey ? 10 : e.altKey ? 0.1 : 1)); } else if (e.key === 'Enter') e.target.blur(); },
+        onchange: (e) => { const raw = e.target.value.trim(); if (raw && !NUM_RE.test(raw)) { const v = evalNum(raw, +get() || 0); if (Number.isNaN(v)) { toast(`Couldn’t work out “${raw}”`); e.target.value = get() ?? ''; return; } e.target.value = v; set(v); if (slider) slider.value = v; } const n = parseFloat(e.target.value); if (min != null && !Number.isNaN(n) && n < min) { set(min); inp.value = min; if (slider) slider.value = min; toast(`${name0} can’t be below ${min}: set to ${min}`); } inp.classList.remove('bad'); inp.title = ''; lazy(); } });
       const bump = (d) => { let v = round((+get() || 0) + d * step, 3); if (spec.range) v = Math.min(spec.range[1], Math.max(spec.range[0], v)); if (min != null) v = Math.max(min, v); inp.value = v; if (slider) slider.value = v; set(v); buzz(4); lazy(); };
       el = h('div', { class: 'num' + (unit ? ' has-unit' : '') }, h('button', { type: 'button', 'aria-label': 'Decrease', onclick: () => bump(-1) }, '−'), unit ? h('span', { class: 'num-u' }, inp, h('i', { class: 'unit' }, unit)) : inp,
         h('button', { type: 'button', 'aria-label': 'Increase', onclick: () => bump(1) }, '+'));
@@ -3663,6 +3676,29 @@ function comp(title, kids, opts = {}) {
 }
 
 let inspQuery = '';
+/** Pinned settings: per object, kept in the editor's preferences; shown in a card at the top of the Inspector. */
+const inspReg = new Map();
+const pinsOf = (id) => (EP.inspPins || {})[id] || [];
+function togglePin(id, path) { const P = { ...(EP.inspPins || {}) }, L = P[id] || []; P[id] = L.includes(path) ? L.filter((x) => x !== path) : [...L, path]; if (!P[id].length) delete P[id]; setEP('inspPins', P); toast(P[id]?.includes(path) ? 'Pinned to the top' : 'Unpinned'); }
+/** Component presets: a component's settings saved by name, for any object (kept in this editor). */
+const presetStore = () => { try { return JSON.parse(store.get('pocket.editor.presets', '{}')) || {}; } catch { return {}; } };
+function savePreset(b) { const n = prompt('Name this preset', (Behaviors[b.type]?.label || b.type) + ' preset')?.trim(); if (!n) return; const P = presetStore(), { enabled, ...rest } = clone(b); P[b.type] = [...(P[b.type] || []).filter((q) => q.name !== n), { name: n, data: rest }]; store.set('pocket.editor.presets', JSON.stringify(P)); toast(`Saved the preset “${n}”`); }
+/** Copy every component of an object (not where it is or its name) to put on another. */
+let compsClip = null;
+const COMP_KEYS = ['shape', 'text', 'sprite', 'mesh', 'model', 'bar', 'body', 'collider', 'light', 'voxels', 'tiles'];
+function copyAllComps(j) { compsClip = { from: j.name || 'Object', behaviors: clone(j.behaviors || []), ...Object.fromEntries(COMP_KEYS.filter((k) => j[k]).map((k) => [k, clone(j[k])])) }; toast(`Copied ${compsClip.behaviors.length + COMP_KEYS.filter((k) => compsClip[k]).length} components`); }
+function pasteAllComps(j) { if (!compsClip) return; let n = 0; for (const k of COMP_KEYS) if (compsClip[k] && !j[k]) { j[k] = clone(compsClip[k]); n++; } for (const b of compsClip.behaviors) { (j.behaviors ||= []).push(clone(b)); n++; } changed({ structure: true }); pushHistory(); toast(n ? `Pasted ${n} component${n === 1 ? '' : 's'} from ${compsClip.from}` : 'Nothing new to paste'); }
+/** The object as JSON, to read or change by hand (its id and parent stay). */
+function editAsJson(j) {
+  const { id, ...rest } = j, ta = h('textarea', { class: 'json-edit', spellcheck: false, autocapitalize: 'off', style: 'width:100%;min-height:52vh;box-sizing:border-box;font:12.5px/1.45 ui-monospace,Menlo,monospace;padding:10px;border-radius:10px;border:1px solid var(--g0);background:var(--g2,rgba(128,128,128,.08));color:var(--text);resize:vertical;' }, JSON.stringify(rest, null, 2));
+  const err = h('div', { class: 'desc', style: 'color:#ff6b6b;min-height:1.2em' });
+  ta.addEventListener('input', () => { try { JSON.parse(ta.value); err.textContent = ''; } catch (e) { err.textContent = e.message; } });
+  openDialog('Edit as JSON', [h('p', { class: 'desc' }, 'Every setting of this object. Change what you like and Apply; its id stays the same.'), ta, err, h('div', { class: 'btns' },
+    h('button', { class: 'btn primary', onclick: () => { let o; try { o = JSON.parse(ta.value); } catch (e) { err.textContent = e.message; return; } if (!o || typeof o !== 'object' || Array.isArray(o)) { err.textContent = 'It must be one object { … }'; return; } for (const k of Object.keys(j)) if (k !== 'id') delete j[k]; Object.assign(j, o, { id }); closeLayer(); changed({ structure: true }); pushHistory(); renderInspector(); toast('Applied'); } }, icon('check'), 'Apply'),
+    h('button', { class: 'btn', onclick: () => navigator.clipboard?.writeText(ta.value).then(() => toast('Copied'), () => {}) }, icon('copy'), 'Copy'),
+    h('button', { class: 'btn', onclick: closeLayer }, 'Cancel'))]);
+  setTimeout(() => ta.focus(), 100);
+}
 /** Odin-style inspector search: keep only matching fields (and open their components). */
 function applyInspSearch(box) {
   const q = inspQuery.trim().toLowerCase();
@@ -3809,6 +3845,7 @@ function renderInspector() {
   const T = () => ent(selectedId) || {};
   const C = (path, spec) => control(T, path, spec);
   const threeD = is3D() && !j.ui;
+  inspReg.clear();
   const idx = project.entities.indexOf(j);
   let freshSel = false, scrollTo = scroll;
   if (lastInspected !== j.id) { // new selection: keep long component lists tidy
@@ -3830,7 +3867,14 @@ function renderInspector() {
     h('button', { class: 'ib adv-btn' + (showAdvanced ? ' on' : ''), title: 'Show advanced options', 'aria-pressed': String(showAdvanced),
       onclick: () => { showAdvanced = !showAdvanced; store.set('pocket.editor.advanced', showAdvanced ? '1' : '0'); renderInspector(); toast(showAdvanced ? 'Showing advanced options' : 'Advanced options hidden'); } }, icon('gear')),
     h('button', { class: 'ib mod-btn' + (onlyChanged ? ' on' : ''), title: 'Show only settings changed from their defaults', 'aria-pressed': String(onlyChanged),
-      onclick: () => { onlyChanged = !onlyChanged; renderInspector(); toast(onlyChanged ? 'Showing only changed settings' : 'Showing all settings'); } }, icon('edit'))));
+      onclick: () => { onlyChanged = !onlyChanged; renderInspector(); toast(onlyChanged ? 'Showing only changed settings' : 'Showing all settings'); } }, icon('edit')),
+    h('button', { class: 'ib insp-more', title: 'More', 'aria-label': 'More for this object', onclick: (e) => popMenu(e.currentTarget, [
+      { icon: 'text', label: j.note != null ? 'Remove note' : 'Add a note', fn: () => { if (j.note != null) delete j.note; else j.note = ''; changed(); pushHistory(); renderInspector(); if (j.note === '') setTimeout(() => $('#inspector .insp-note textarea')?.focus(), 50); } },
+      { icon: 'copy', label: 'Copy all components', fn: () => copyAllComps(j) },
+      compsClip && { icon: 'paste', label: `Paste components from ${compsClip.from}`, fn: () => pasteAllComps(j) },
+      { icon: 'script', label: 'Edit as JSON…', fn: () => editAsJson(j) },
+      pinsOf(j.id).length && { icon: 'flag', label: 'Unpin all', fn: () => { const P = { ...(EP.inspPins || {}) }; delete P[j.id]; setEP('inspPins', P); renderInspector(); } },
+    ].filter(Boolean)) }, icon('more'))));
   box.append(inspCrumbs(j, idx));
 
   // header: active toggle + name, tag, flags
@@ -3843,6 +3887,8 @@ function renderInspector() {
     showAdvanced && h('div', { class: 'sub' },
       h('label', { title: 'Hidden while playing; Spawner/Shooter make copies' }, h('input', { type: 'checkbox', checked: !!j.template, onchange: (e) => { j.template = e.target.checked; changed({ structure: true }); } }), 'Template'),
       h('label', { title: 'Cannot be picked in the Scene view' }, h('input', { type: 'checkbox', checked: !!j.locked, onchange: (e) => { j.locked = e.target.checked; changed({ structure: true }); } }), 'Locked'))));
+  if (j.note != null) box.append(h('div', { class: 'insp-note' }, h('div', { class: 'insp-note-h' }, icon('text'), 'Note', h('button', { class: 'ib', title: 'Remove note', onclick: () => { delete j.note; changed(); pushHistory(); renderInspector(); } }, icon('close'))),
+    h('textarea', { placeholder: 'Write a note for yourself or your team (what this is for, what to fix)…', rows: 2, value: j.note, oninput: (e) => { j.note = e.target.value; e.target.style.height = 'auto'; e.target.style.height = e.target.scrollHeight + 'px'; changed(); }, onchange: () => pushHistory() })));
   if (j.template) box.append(h('p', { class: 'desc', style: 'padding:0 8px;color:var(--dim);font-size:11.5px' }, 'Template: hidden while playing. Spawner and Shooter components create copies of it by name.'));
   const pfb = prefabBanner(j); if (pfb) box.append(pfb);
   { const g = findDuplicates().find((q) => q.ids.includes(j.id)); if (g) box.append(h('div', { class: 'obox warn dup-banner' }, h('b', {}, g.label), h('div', {}, g.why), h('div', { class: 'btns' },
@@ -4217,6 +4263,9 @@ function renderInspector() {
       { icon: 'copy', label: 'Copy Component', fn: () => { compClipboard = { kind: 'behavior', data: clone(b) }; toast('Component copied'); } },
       compClipboard?.kind === 'behavior' && compClipboard.data.type === b.type && compClipboard.data !== b && { icon: 'paste', label: 'Paste Values', fn: () => { j.behaviors[i] = { ...clone(compClipboard.data), ...(b.enabled === false ? { enabled: false } : {}) }; changed({ structure: true }); pushHistory(); toast('Values pasted'); } },
       { icon: 'text', label: 'Copy as Text', fn: () => navigator.clipboard?.writeText(JSON.stringify(b, null, 1)).then(() => toast('Copied as text'), () => {}) },
+      { icon: 'star', label: 'Save as Preset…', fn: () => { savePreset(b); renderInspector(); } },
+      ...(presetStore()[b.type] || []).slice(-6).map((q) => ({ icon: 'download', label: `Use preset “${q.name}”`, fn: () => { j.behaviors[i] = { ...clone(q.data), type: b.type, ...(b.enabled === false ? { enabled: false } : {}) }; changed({ structure: true }); pushHistory(); toast(`Used “${q.name}”`); } })),
+      (presetStore()[b.type] || []).length && { icon: 'trash', label: 'Delete a preset…', fn: () => { const P = presetStore(), L = P[b.type] || [], n = prompt('Delete which preset? ' + L.map((q) => q.name).join(', '), L[L.length - 1]?.name || '')?.trim(); if (!n) return; P[b.type] = L.filter((q) => q.name !== n); store.set('pocket.editor.presets', JSON.stringify(P)); toast('Preset deleted'); renderInspector(); } },
       { icon: 'trash', label: 'Remove Component', fn: () => { j.behaviors.splice(i, 1); changed({ structure: true }); } },
       i > 0 && { icon: 'upload', label: 'Move Up', fn: () => { j.behaviors.splice(i - 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
       i < j.behaviors.length - 1 && { icon: 'download', label: 'Move Down', fn: () => { j.behaviors.splice(i + 1, 0, j.behaviors.splice(i, 1)[0]); changed({ structure: true }); } },
@@ -4255,6 +4304,8 @@ function renderInspector() {
     const comps = [...box.querySelectorAll(':scope > .comp')], lay = comps.find((c) => ['transform', 'uiel', 'shape', 'text', 'sprite', 'bar'].includes(c.dataset.key));
     if (lay) for (const c of comps) if (/^b\d/.test(c.dataset.key || '') && comps.indexOf(c) > comps.indexOf(lay)) lay.before(c);
   }
+  const pins = pinsOf(j.id).filter((pth) => inspReg.has(pth));
+  if (pins.length) { const card = comp('Pinned', pins.map((pth) => control(T, pth, { ...inspReg.get(pth) })), { icon: 'flag', key: 'pinned', summary: `${pins.length} setting${pins.length === 1 ? '' : 's'}` }); card.classList.add('pinned-card'); (box.querySelector(':scope > .comp-tools') || box.querySelector(':scope > .comp'))?.before(card); }
   if (freshSel && foldAllPref) foldAll(box, true);
   syncFoldBtn(box);
   compJump(box);

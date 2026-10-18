@@ -113,23 +113,29 @@ The selected object's settings, as **components** (cards).
 - **Components:** each card can be folded. Closed cards show a summary ("run speed 240 · jump power 680").
 - **Add Component:** suggestions for this object, recently used, and folders (Physics, Colliders, Controllers, Combat, Survival, Crafting, AI, Logic, UI…). Search covers everything.
 - **Quick add** chips sit next to Add Component.
-- **⋯ on a card:** Copy, **Paste Values** (from another component of the same type), Copy as Text, move up / down, turn off, remove, and **Docs** (opens this component's reference page).
+- **⋯ on a card:** Copy, **Paste Values** (from another component of the same type), Copy as Text, **Save as Preset…** (name this component's settings; then **Use preset “…”** appears on that kind of component on any object, in any project; *Delete a preset…* removes one), move up / down, turn off, remove, and **Docs** (opens this component's reference page).
 - **Collapse all / Expand all** folds every card. The choice is remembered for the next object you select.
 - **One open:** turn it on and opening a card closes the others, so you only ever scroll through one.
 - **Group chips:** a big component (a Feed, a Side Menu…) shows a row of chips for its groups (Look, Behaviour, Colours, More settings…). Tap one to open that group, close the others and jump to it.
-- **Top row:** back to the Hierarchy, **Search settings** (finds a setting in this object's cards), **Advanced** and **Only changed**.
+- **Top row:** back to the Hierarchy, **Search settings** (finds a setting in this object's cards), **Advanced**, **Only changed** and **⋯**:
+  - **Add a note:** a yellow note card under the name, for you or your team (what it's for, what to fix). The Hierarchy shows *📝 Note* on that object. ⋯ › *Remove note* (or ✕ on the card) takes it off.
+  - **Copy all components** / **Paste components from …**: copies every component (not the position or name) and adds them to another object.
+  - **Edit as JSON…:** every setting of the object as text. Change what you like and **Apply** (it shows what's wrong if the text isn't valid); the object keeps its id. **Copy** puts the text on the clipboard.
+  - **Unpin all** (when settings are pinned).
 - **Where it lives:** under the top row, the path to the object (Level › parent › object). Tap a parent to select it, or the level name to go back to nothing selected. On the right, **‹ 2 / 21 ›** steps to the previous or next object in the level.
 - **Jump chips:** with three or more cards (and in Game Settings), a row of chips sits at the top of the Inspector, one per card. It stays there while you scroll and lights up the card you're in. Tap a chip to open that card and jump to it. Once you've scrolled down, an **↑** chip at the start takes you back to the top. A card's header also sticks to the top while you scroll through it.
 - **Remembers where you were:** come back to an object (with ‹ ›, the Hierarchy or the Scene) and its cards are open or closed as you left them, scrolled to the same place.
 - **Several objects ticked** (Hierarchy › Select): the Inspector shows **N objects** and the settings they share: Visible, Locked, Draw order, Rotation and Scale, the Shape's fill, outline, corners and shadow, and the Text's size, colour, alignment, font and weight. A change sets all of them; a field marked *mixed* shows the first one's value. **Move all by…** nudges them together, **Line up…** aligns UI, and the components they all have can be turned off or on together.
 - **Copy one setting:** hold a field's name (or right-click it) for **Copy value**, **Paste value** and **Reset to default**. Copy a colour from one object and paste it onto another.
+- **Pin a setting:** the same menu has **Pin to the top**. Pinned settings sit in a **Pinned** card at the top of that object's Inspector, so the ones you tweak most are always first (kept on this device). *Unpin from the top* removes one.
 - **Nothing selected:** **Find an object…** searches the level by name, tag or component; tap a result to inspect it. Below it are the main objects (the player first).
 
 *Preferences › Compact panels* (on by default) makes Hierarchy rows shorter and Inspector fields smaller, so more fits on a phone screen.
 
 ### Fields
 
-- **Numbers:** type, use − / +, or **drag the label** left and right to scrub the value.
+- **Numbers:** type, use − / +, or **drag the label** left and right to scrub the value. With a keyboard, **↑ / ↓** add or take 1 (Shift: 10, Alt: 0.1).
+- **Sums in number fields:** type `10*3`, `100/4` or `(2+3)*8` and it's worked out when you finish. Start with an operator to change what's there: `+5` adds 5, `*2` doubles it, `/2` halves it; `x` stands for the current value (`x*1.5`); `50%` is 0.5.
 - **Changed from default:** the field gets a blue edge and a **↺** reset button. **✎ Changed only** hides everything else.
 - **Dropdowns** with 2–4 short choices become toggle buttons.
 - **Lists** typed "one per line, A | B | C" (shop items, tabs, camera shots) become tables with a row menu.

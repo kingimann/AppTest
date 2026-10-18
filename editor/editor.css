@@ -465,6 +465,10 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 .ne-row.out { justify-content: flex-end; }
 .ne-row.in .lbl, .ne-row.param .lbl { min-width: 54px; }
 .ne-row.param { padding-left: 12px; padding-right: 10px; }
+/* a long label ("put the result in variable (optional)") never squeezes its field: the field drops to its own line instead */
+.ne-row.param, .ne-row.in { flex-wrap: wrap; row-gap: 4px; padding-top: 3px; padding-bottom: 3px; }
+.ne-row.param .lbl { white-space: normal; }
+.ne-row.param > input:not([type=checkbox]), .ne-row.param > select, .ne-row.param > textarea, .ne-row.in > input:not([type=checkbox]), .ne-row.in > select { min-width: 110px; }
 .ne-row input, .ne-row select { height: 40px; font-size: 15px; padding: 4px 10px; border-radius: 8px; flex: 1; }
 .ne-row select { padding-right: 28px; background-position: calc(100% - 15px) 16px, calc(100% - 10px) 16px; }
 .ne-row input[type=checkbox] { flex: none; height: 26px; }

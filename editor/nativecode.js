@@ -2,7 +2,8 @@
 // web view. Pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and data
 // collections become native code; anything else is left as a placeholder with a TODO. The runtime (state, data,
 // building blocks) is a fixed file (editor/native/…); the pages are generated from the project.
-import { appModel, PALETTES, iconFor } from './appmodel.js';
+import { appModel, PALETTES, iconFor, barIcons } from './appmodel.js';
+import { NAV_ART } from './navart.js';
 import { dartName, FLUTTER_VERSIONS } from './flutter.js';
 
 const semver = (v) => String(v || '1.0').split('.').concat(['0', '0']).slice(0, 3).map((n) => parseInt(n, 10) || 0).join('.');
@@ -122,12 +123,12 @@ ${parts.map((c) => '        ' + c + ',').join('\n')}
 }
 
 const dartBar = (m) => { const b = m.bar; if (!b) return 'const BarStyle()';
-  return `const BarStyle(look: ${ds(b.look)}, brandPages: [${b.brandPages.map(ds).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, actions: [${b.actions.map((a) => `BarAction(${ds(a.icon)}, ${ds(a.does)}${a.badge ? `, badge: ${ds(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ds).join(', ')}]` : ''})`).join(', ')}], bg: ${ds(tok(b.bg, '@bar'))}, text: ${ds(tok(b.text, '@text'))}, icon: ${ds(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
-const dartNav = (m) => (m.nav ? `const NavStyle(style: ${ds(m.nav.style)}, bar: ${ds(tok(m.nav.bar, '@bar'))}, active: ${ds(tok(m.nav.active, '@accent'))}, idle: ${ds(tok(m.nav.idle, '@sub'))})` : 'const NavStyle()');
+  return `const BarStyle(look: ${ds(b.look)}, brandPages: [${b.brandPages.map(ds).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, circles: ${ds(b.circles || 'plain')}, actions: [${b.actions.map((a) => `BarAction(${ds(a.icon)}, ${ds(a.does)}${a.badge ? `, badge: ${ds(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ds).join(', ')}]` : ''})`).join(', ')}], bg: ${ds(tok(b.bg, '@bar'))}, text: ${ds(tok(b.text, '@text'))}, icon: ${ds(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
+const dartNav = (m) => (m.nav ? `const NavStyle(style: ${ds(m.nav.style)}, labels: ${ds(m.nav.labels || 'always')}, margin: ${+m.nav.margin || 0}, on: ${ds(tok(m.nav.on, '#ffffff'))}, bar: ${ds(tok(m.nav.bar, '@bar'))}, active: ${ds(tok(m.nav.active, '@accent'))}, idle: ${ds(tok(m.nav.idle, '@sub'))})` : 'const NavStyle()');
 
 function dartMain(model, N) {
   const pal = (P) => `Palette({${Object.entries(P).map(([k, v]) => `${ds(k)}: Color(${hexArgb(v)})`).join(', ')}})`;
-  const light = { ...PALETTES.light, accent: model.accent }, dark = { ...PALETTES.dark };
+  const light = { ...PALETTES.light, accent: model.accent || PALETTES.light.accent }, dark = { ...PALETTES.dark, accent: model.accent || PALETTES.dark.accent };
   const field = (f) => `Field(${ds(f.key)}, ${ds(f.name)}, ${ds(f.type)}${f.options.length ? `, options: [${f.options.map(ds).join(', ')}]` : ''}${f.def !== '' && f.def != null ? `, def: ${dartValue(f.def)}` : ''})`;
   const row = (r) => `{${Object.entries(r).map(([k, v]) => `${ds(k)}: ${dartValue(v)}`).join(', ')}}`;
   return `// ${model.name}: a native Flutter app, made by Pocket Engine's native export.
@@ -139,6 +140,7 @@ ${model.pages.map((p) => `import 'pages/${snake(N[p.value])}.dart';`).join('\n')
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  artIcons = const {${barIcons(model).filter((n) => NAV_ART[n]).map((n) => `\n    ${ds(n)}: [${NAV_ART[n].map(ds).join(', ')}],`).join('')}${barIcons(model).some((n) => NAV_ART[n]) ? '\n  ' : ''}}; // the App Bar's and Bottom Nav's icons, drawn like the editor's
   app = AppState(
     name: ${ds(model.name)},
     home: ${ds(model.home)},
@@ -146,7 +148,7 @@ Future<void> main() async {
     light: const ${pal(light)},
     dark: const ${pal(dark)},
     vars: {${Object.entries(model.vars).map(([k, v]) => `${ds(k)}: ${dartValue(v)}`).join(', ')}},
-    tabs: const [${model.tabs.map((t) => `\n      NavTab(${ds(t.label)}, Icons.${iconFor(t.icon, 0)}, ${ds(t.page)}${t.badge ? `, badge: ${ds(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n    ' : ''}],
+    tabs: const [${model.tabs.map((t) => `\n      NavTab(${ds(t.label)}, Icons.${iconFor(t.icon, 0)}, ${ds(t.page)}, name: ${ds(t.icon)}${t.badge ? `, badge: ${ds(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n    ' : ''}],
     collections: const [${model.collections.map((c) => `\n      Collection(${ds(c.name)}, [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n    ' : ''}],
     bar: ${dartBar(model)},
     nav: ${dartNav(model)},
@@ -336,7 +338,7 @@ function swiftElement(x, ind) {
 }
 
 const swiftBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
-  return `BarStyle(look: ${ss(b.look)}, brandPages: [${b.brandPages.map(ss).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, actions: [${b.actions.map((a) => `BarAction(icon: ${ss(a.icon)}, does: ${ss(a.does)}${a.badge ? `, badge: ${ss(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ss).join(', ')}]` : ''})`).join(', ')}], bg: ${ss(tok(b.bg, '@bar'))}, text: ${ss(tok(b.text, '@text'))}, icon: ${ss(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
+  return `BarStyle(look: ${ss(b.look)}, brandPages: [${b.brandPages.map(ss).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, circles: ${ss(b.circles || 'plain')}, actions: [${b.actions.map((a) => `BarAction(icon: ${ss(a.icon)}, does: ${ss(a.does)}${a.badge ? `, badge: ${ss(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ss).join(', ')}]` : ''})`).join(', ')}], bg: ${ss(tok(b.bg, '@bar'))}, text: ${ss(tok(b.text, '@text'))}, icon: ${ss(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
 
 function swiftPage(p, cls, model) {
   const fills = p.items.some((x) => x.fill && (x.kind === 'list' || x.kind === 'form'));
@@ -365,7 +367,7 @@ const groups = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) 
 function swiftApp(model, N, appName) {
   const hex = (h) => '0x' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();
   const pal = (P) => `Palette(c: [${Object.entries(P).map(([k, v]) => `${ss(k)}: Color(hex: ${hex(v)})`).join(', ')}])`;
-  const light = { ...PALETTES.light, accent: model.accent }, dark = { ...PALETTES.dark };
+  const light = { ...PALETTES.light, accent: model.accent || PALETTES.light.accent }, dark = { ...PALETTES.dark, accent: model.accent || PALETTES.dark.accent };
   const field = (f) => `Field(key: ${ss(f.key)}, name: ${ss(f.name)}, type: ${ss(f.type)}${f.options.length ? `, options: [${f.options.map(ss).join(', ')}]` : ''}${f.def !== '' && f.def != null ? `, def: ${swiftVal(f.def)}` : ''})`;
   const row = (r) => `[${Object.entries(r).map(([k, v]) => `${ss(k)}: ${swiftVal(v)}`).join(', ') || ':'}]`;
   return `// ${model.name}: a native SwiftUI app, made by Pocket Engine's native export.
@@ -381,12 +383,14 @@ struct ${appName}: App {
         light: ${pal(light)},
         dark: ${pal(dark)},
         vars: [${Object.entries(model.vars).map(([k, v]) => `${ss(k)}: ${swiftVal(v)}`).join(', ') || ':'}],
-        tabs: [${model.tabs.map((t) => `\n            NavTab(label: ${ss(t.label)}, icon: ${ss(iconFor(t.icon, 1))}, page: ${ss(t.page)}${t.badge ? `, badge: ${ss(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}],
+        tabs: [${model.tabs.map((t) => `\n            NavTab(label: ${ss(t.label)}, icon: ${ss(iconFor(t.icon, 1))}, page: ${ss(t.page)}${t.badge ? `, badge: ${ss(t.badge)}` : ''}, name: ${ss(t.icon)}),`).join('')}${model.tabs.length ? '\n        ' : ''}],
         collections: [${model.collections.map((c) => `\n            Collection(name: ${ss(c.name)}, fields: [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}],
         stats: [${model.stats.map((s) => `\n            Stat(variable: ${ss(s.var)}, collection: ${ss(s.collection)}, how: ${ss(s.how)}${s.field && s.field !== 'field' ? `, field: ${ss(s.field)}` : ''}${s.filter ? `, filter: ${ss(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}],
         bar: ${swiftBar(model)},
-        nav: ${model.nav ? `NavStyle(style: ${ss(model.nav.style)}, bar: ${ss(tok(model.nav.bar, '@bar'))}, active: ${ss(tok(model.nav.active, '@accent'))}, idle: ${ss(tok(model.nav.idle, '@sub'))})` : 'NavStyle()'}
+        nav: ${model.nav ? `NavStyle(style: ${ss(model.nav.style)}, bar: ${ss(tok(model.nav.bar, '@bar'))}, active: ${ss(tok(model.nav.active, '@accent'))}, idle: ${ss(tok(model.nav.idle, '@sub'))}, labels: ${ss(model.nav.labels || 'always')}, margin: ${+model.nav.margin || 0}, on: ${ss(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'}
     )
+
+    init() { artIcons = [${barIcons(model).filter((n) => NAV_ART[n]).map((n) => `\n        ${ss(n)}: [${NAV_ART[n].map(ss).join(', ')}],`).join('') || ':'}${barIcons(model).some((n) => NAV_ART[n]) ? '\n    ' : ''}] } // the App Bar's and Bottom Nav's icons, drawn like the editor's
 
     var body: some Scene {
         WindowGroup {

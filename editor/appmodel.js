@@ -96,10 +96,12 @@ export function appModel(game) {
     look: barP.look || 'standard', brandPages: String(barP.brandPages ?? 'home').split(',').map((x) => x.trim()).filter(Boolean),
     align: barP.titleAlign && barP.titleAlign !== 'auto' ? barP.titleAlign : barP.style === 'centered' || (barP.look && !['standard', 'facebook', 'instagram'].includes(barP.look)) ? 'center' : 'left',
     avatar: barP.leftAvatar === 'yes' || ((barP.leftAvatar || 'for the look') === 'for the look' && barP.look === 'x'),
+    circles: barP.iconStyle && barP.iconStyle !== 'for the look' ? barP.iconStyle : barP.look === 'facebook' ? 'circles' : 'plain', // icon buttons: plain, circles or outlined circles
     actions: rows(barP.actions ?? 'bell | notifications | unread\nsearch | search').map(([icon, does = '', badge = '', only = '']) => ({ icon, does, badge, only: only.split(',').map((x) => x.trim()).filter(Boolean) })).slice(0, 5),
-    bg: barP.bg || '@bar', text: barP.text || '@text', icon: barP.iconColor || barP.text || '@text', border: barP.border !== false, size: +barP.titleSize || 19,
+    bg: barP.bg || '#12141f', text: barP.text || '#ffffff', icon: barP.iconColor || barP.text || '#ffffff', border: barP.border !== false, size: +barP.titleSize || 19, // (the App Bar's own default colours)
   } : null;
-  const navs = nav ? { style: navP.style || 'pill', bar: navP.barColor || '@bar', active: navP.activeColor || '@accent', idle: navP.idleColor || '@sub' } : null;
+  const navStyle = navP.style || 'pill', navLabels = navP.labels && navP.labels !== 'auto' ? navP.labels : { minimal: 'never', bubble: 'selected only', 'raised center': 'always', curved: 'selected only', dock: 'never', outline: 'never' }[navStyle] || 'always';
+  const navs = nav ? { style: navStyle, labels: navLabels, margin: +(navP.margin ?? 14), bar: navP.barColor || '#12141f', active: navP.activeColor || '#4fa3ff', idle: navP.idleColor || '#8b90a5', on: navP.onColor || '#ffffff' } : null; // (the Bottom Nav's own defaults)
   const tabs = String(navP.tabs || '').split('\n').map((l) => l.split('|').map((s) => s.trim())).filter((t) => t[0] && t[2] && !/^(msg|button|url):/.test(t[2])).map(([label, icon, page, badge]) => ({ label, icon: icon || 'circle', page, badge: badge || '' }));
 
   const pages = [];
@@ -121,6 +123,10 @@ export function appModel(game) {
     name: c.name, fields: (c.fields || []).map((f) => ({ name: f.name, key: fieldKey(f.name), type: f.type || 'text', options: String(f.options || '').split(',').map((s) => s.trim()).filter(Boolean), def: f.default ?? '' })),
     rows: (c.rows || []).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k === '_at' ? k : fieldKey(k), v]))), // (_at: when it was added; it keeps its name)
   }));
+  // a feed whose collection isn't there shows sample posts in the editor: the native app gets them as its Posts
+  const feedColls = new Set(); const look = (x) => { if (['feed', 'trending', 'composer'].includes(x.kind) && x.collection) feedColls.add(x.collection); (x.children || []).forEach(look); };
+  for (const p of pages) { p.items.forEach(look); if (p.fab) look(p.fab); }
+  for (const name of feedColls) if (!collections.some((c) => fieldKey(c.name) === fieldKey(name))) collections.push({ name, sample: true, fields: POST_FIELDS.map(([n, type]) => ({ name: n, key: fieldKey(n), type, options: [], def: type === 'number' ? 0 : type === 'yes/no' ? false : '' })), rows: samplePosts() });
   const vars = {}; for (const [k, v] of Object.entries(game.vars || {})) if (k !== 'page' && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')) vars[k] = v;
   // controls start with their own value when the project hasn't set the variable (a slider at 80, the 2nd tab picked…)
   const startOf = (x) => { switch (x.kind) {
@@ -133,10 +139,29 @@ export function appModel(game) {
   const walk = (x) => { const v = x.var && startOf(x); if (v !== undefined && !(x.var in vars) && !(x.var in (game.vars || {}))) vars[x.var] = v; (x.children || []).forEach(walk); };
   for (const p of pages) p.items.forEach(walk);
   return {
-    name: game.settings?.appName || game.name || 'My App', accent: game.settings?.appAccent || '#3a7bfd', theme: game.settings?.appTheme || 'follow the phone',
+    name: game.settings?.appName || game.name || 'My App', accent: game.settings?.appAccent || '', theme: themeOf(game),
     appBar: !!bar, bar: bars, nav: navs, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
   };
 }
+
+/** Light or dark, the way the editor decides: the darkMode variable, else the theme picked, else (none picked) the background's brightness. */
+function themeOf(game) {
+  const v = game.vars?.darkMode;
+  if (v !== undefined && v !== '' && v !== null) return [true, 1, '1', 'on', 'yes', 'dark'].includes(v) ? 'dark' : 'light';
+  const bg = String(game.background || ''), t = game.settings?.appTheme;
+  if (!t && /^#[0-9a-f]{3,8}$/i.test(bg)) { let h = bg.slice(1); if (h.length < 6) h = [...h.slice(0, 3)].map((c) => c + c).join(''); const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255); return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.5 ? 'dark' : 'light'; }
+  return t || 'light';
+}
+const POST_FIELDS = [['Author', 'text'], ['Handle', 'text'], ['Text', 'long text'], ['Media', 'text'], ['Color', 'text'], ['Likes', 'number'], ['Liked', 'yes/no'], ['Comments', 'number'], ['Reposts', 'number'], ['Reposted', 'yes/no'], ['Saved', 'yes/no'], ['Verified', 'yes/no'], ['Location', 'text']];
+/** The editor's sample posts (what a feed shows before the app has a Posts collection). */
+const samplePosts = () => { const t = Date.now(); return [
+  { id: 'p1', author: 'Maya Chen', handle: 'maya', text: 'First light over the mountains this morning. Worth the 5am alarm.', media: '🏔️ | 🌄 | 🌲', color: '#4f7cff', likes: 1284, liked: false, comments: 48, reposts: 120, verified: true, location: 'Banff', _at: t - 7 * 60e3 },
+  { id: 'p2', author: 'Leo Park', handle: 'leop', text: 'Shipped the new update! Dark mode, faster sync and a lot fewer bugs. Tell me what you think 👇', media: '', color: '', likes: 312, liked: true, comments: 27, reposts: 41, verified: false, _at: t - 2.5 * 3600e3 },
+  { id: 'p6', author: 'Jon Doe', handle: 'jondoe', text: 'This is the kind of morning I need 🙌', media: '', color: '', likes: 41, liked: false, comments: 3, reposts: 1, verified: false, _at: t - 3 * 60e3 },
+  { id: 'p5', author: 'Ava Brooks', handle: 'avab', text: 'Going live with a sketching session — come say hi!', media: '🎨', color: '#c2185b', likes: 77, liked: false, comments: 9, reposts: 3, verified: false, _at: t - 40 * 60e3 },
+  { id: 'p3', author: 'Sofia Ruiz', handle: 'sofiaruiz', text: 'Homemade pasta night 🍝', media: '🍝', color: '#ff7a45', likes: 958, liked: false, comments: 63, reposts: 12, verified: false, _at: t - 26 * 3600e3 },
+  { id: 'p4', author: 'Pocket News', handle: 'pocketnews', text: 'Scientists spot a new comet that will be visible without a telescope next month.', media: '', color: '', likes: 5420, liked: false, comments: 410, reposts: 1900, verified: true, _at: t - 3 * 86400e3 },
+]; };
 
 /** The app's colour tokens (@bg, @accent…) for light and dark; the accent is the app's own. */
 export const PALETTES = {
@@ -150,8 +175,26 @@ export const ICONS = {
   home: ['home', 'house'], search: ['search', 'magnifyingglass'], explore: ['explore', 'safari'], user: ['person', 'person'], profile: ['person', 'person'], users: ['group', 'person.2'], chat: ['chat_bubble_outline', 'bubble.left'],
   bell: ['notifications_none', 'bell'], heart: ['favorite_border', 'heart'], star: ['star_border', 'star'], settings: ['settings', 'gearshape'], gear: ['settings', 'gearshape'], plus: ['add', 'plus'], add: ['add', 'plus'],
   list: ['list', 'list.bullet'], check: ['check', 'checkmark'], calendar: ['calendar_today', 'calendar'], clock: ['schedule', 'clock'], video: ['play_circle_outline', 'play.rectangle'], play: ['play_arrow', 'play'],
-  shop: ['shopping_bag', 'bag'], cart: ['shopping_cart', 'cart'], trophy: ['emoji_events', 'trophy'], map: ['map', 'map'], camera: ['photo_camera', 'camera'], image: ['image', 'photo'], edit: ['edit', 'pencil'],
+  shop: ['storefront', 'bag'], cart: ['shopping_cart', 'cart'], trophy: ['emoji_events', 'trophy'], map: ['map', 'map'], camera: ['photo_camera', 'camera'], image: ['image', 'photo'], edit: ['edit', 'pencil'],
   trash: ['delete_outline', 'trash'], info: ['info_outline', 'info.circle'], menu: ['menu', 'line.3.horizontal'], bookmark: ['bookmark_border', 'bookmark'], wallet: ['account_balance_wallet', 'creditcard'], money: ['attach_money', 'dollarsign.circle'],
   chart: ['bar_chart', 'chart.bar'], note: ['sticky_note_2', 'note.text'], book: ['menu_book', 'book'], music: ['music_note', 'music.note'], globe: ['public', 'globe'], gamepad: ['sports_esports', 'gamecontroller'], circle: ['circle', 'circle'],
+  // the rest of the editor's icons
+  pause: ['pause', 'pause'], close: ['close', 'xmark'], back: ['arrow_back', 'chevron.left'], next: ['arrow_forward', 'chevron.right'], sound: ['volume_up', 'speaker.wave.2'], lock: ['lock_outline', 'lock'],
+  moon: ['dark_mode', 'moon'], sun: ['light_mode', 'sun.max'], filter: ['filter_list', 'line.3.horizontal.decrease'], sort: ['sort', 'arrow.up.arrow.down'], share: ['ios_share', 'square.and.arrow.up'],
+  mail: ['mail_outline', 'envelope'], phone: ['phone', 'phone'], pin: ['place', 'mappin'], grid: ['grid_view', 'square.grid.2x2'], download: ['download', 'arrow.down.circle'], refresh: ['refresh', 'arrow.clockwise'],
+  more: ['more_horiz', 'ellipsis'], coin: ['monetization_on', 'dollarsign.circle'], gem: ['diamond', 'diamond'], flag: ['flag', 'flag'], gift: ['card_giftcard', 'gift'], tag: ['sell', 'tag'], key: ['key', 'key'],
+  shield: ['shield', 'shield'], bolt: ['bolt', 'bolt'], fire: ['local_fire_department', 'flame'], link: ['link', 'link'], eye: ['visibility', 'eye'], 'eye-off': ['visibility_off', 'eye.slash'], unlock: ['lock_open', 'lock.open'],
+  sliders: ['tune', 'slider.horizontal.3'], cloud: ['cloud_queue', 'cloud'], upload: ['upload', 'arrow.up.circle'], wifi: ['wifi', 'wifi'], battery: ['battery_full', 'battery.100'], compass: ['explore', 'safari'],
+  navigate: ['navigation', 'location.north'], send: ['send', 'paperplane'], attach: ['attach_file', 'paperclip'], mic: ['mic_none', 'mic'], headphones: ['headphones', 'headphones'], dice: ['casino', 'dice'],
+  crown: ['workspace_premium', 'crown'], rocket: ['rocket_launch', 'paperplane'], target: ['gps_fixed', 'scope'], medal: ['military_tech', 'rosette'], 'thumbs-up': ['thumb_up_off_alt', 'hand.thumbsup'],
+  smile: ['sentiment_satisfied', 'face.smiling'], 'user-plus': ['person_add', 'person.badge.plus'], logout: ['logout', 'rectangle.portrait.and.arrow.right'], login: ['login', 'person.crop.circle'], copy: ['content_copy', 'doc.on.doc'],
+  file: ['description', 'doc'], folder: ['folder_open', 'folder'], inbox: ['inbox', 'tray'], card: ['credit_card', 'creditcard'], bag: ['shopping_bag', 'bag'], percent: ['percent', 'percent'], truck: ['local_shipping', 'shippingbox'],
+  undo: ['undo', 'arrow.uturn.backward'], 'zoom-in': ['zoom_in', 'plus.magnifyingglass'], expand: ['open_in_full', 'arrow.up.left.and.arrow.down.right'], minus: ['remove', 'minus'], 'x-circle': ['cancel', 'xmark.circle'],
+  'check-circle': ['check_circle_outline', 'checkmark.circle'], alert: ['warning_amber', 'exclamationmark.triangle'], help: ['help_outline', 'questionmark.circle'], sparkles: ['auto_awesome', 'sparkles'], bulb: ['lightbulb_outline', 'lightbulb'],
+  palette: ['palette', 'paintpalette'], code: ['code', 'chevron.left.forwardslash.chevron.right'], layers: ['layers', 'square.3.layers.3d'], 'skip-next': ['skip_next', 'forward.end'], 'skip-back': ['skip_previous', 'backward.end'],
+  mute: ['volume_off', 'speaker.slash'], repeat: ['repeat', 'repeat'], shuffle: ['shuffle', 'shuffle'], hourglass: ['hourglass_empty', 'hourglass'], podium: ['leaderboard', 'chart.bar'], news: ['newspaper', 'newspaper'],
+  paw: ['pets', 'pawprint'], leaf: ['eco', 'leaf'], drop: ['water_drop', 'drop'], coffee: ['local_cafe', 'cup.and.saucer'], media: ['perm_media', 'photo.on.rectangle'],
 };
+/** The icons the App Bar and Bottom Nav show (they're drawn with the editor's own line icons). */
+export const barIcons = (model) => [...new Set([...model.tabs.map((t) => t.icon), ...(model.bar?.actions || []).flatMap((a) => (a.icon === 'theme' || /dark mode/.test(a.does) ? ['sun', 'moon', a.icon] : [a.icon]))])].filter(Boolean);
 export const iconFor = (name, i) => (ICONS[String(name || '').toLowerCase()] || ICONS.circle)[i];

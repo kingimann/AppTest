@@ -32,8 +32,9 @@ class Stat {
 }
 
 class NavTab {
-  const NavTab(this.label, this.icon, this.page, {this.badge = ''});
-  final String label, page, badge;
+  const NavTab(this.label, this.icon, this.page, {this.badge = '', this.name = ''});
+  /// name: the icon's name in Pocket Engine (drawn with its line icon when artIcons has it; icon otherwise).
+  final String label, page, badge, name;
   final IconData icon;
 }
 
@@ -47,18 +48,86 @@ class BarAction {
 
 /// The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours.
 class BarStyle {
-  const BarStyle({this.look = 'standard', this.brandPages = const ['home'], this.center = false, this.avatar = false, this.actions = const [], this.bg = '@bar', this.text = '@text', this.icon = '@text', this.border = true, this.size = 19});
-  final String look, bg, text, icon;
+  const BarStyle({this.look = 'standard', this.brandPages = const ['home'], this.center = false, this.avatar = false, this.circles = 'plain', this.actions = const [], this.bg = '@bar', this.text = '@text', this.icon = '@text', this.border = true, this.size = 19});
+  /// circles: the buttons sit in a filled circle ("circles"), a ring ("outlined circles") or nothing ("plain").
+  final String look, circles, bg, text, icon;
   final List<String> brandPages;
   final bool center, avatar, border;
   final List<BarAction> actions;
   final double size;
 }
 
-/// The Bottom Nav's style (minimal: icons only) and colours.
+/// The Bottom Nav's style (pill, floating, glass, segmented, dock, minimal…), when names show (always, selected only, never),
+/// the gap around a floating bar, and colours (on: the icon on a solid highlight).
 class NavStyle {
-  const NavStyle({this.style = 'pill', this.bar = '@bar', this.active = '@accent', this.idle = '@sub'});
-  final String style, bar, active, idle;
+  const NavStyle({this.style = 'pill', this.labels = 'always', this.margin = 14, this.bar = '@bar', this.active = '@accent', this.idle = '@sub', this.on = '#ffffff'});
+  final String style, labels, bar, active, idle, on;
+  final double margin;
+  bool get floating => const ['floating', 'glass', 'segmented', 'dock'].contains(style);
+  /// The highlight behind the selected icon: a soft pill, a solid one, or none.
+  bool get pill => const ['pill', 'floating', 'glass', 'bubble', 'classic'].contains(style);
+  bool get solid => const ['segmented', 'chips'].contains(style);
+}
+
+/// The editor's own line icons (64 × 64 SVG path data: [stroked, filled]), for the App Bar and Bottom Nav. Set in main.dart.
+Map<String, List<String>> artIcons = {};
+
+/// SVG path data → a Path (M L H V C S Q A Z, absolute and relative).
+Path svgPath(String d) {
+  final p = Path(), t = RegExp(r'[a-zA-Z]|-?(?:\d+\.?\d*|\.\d+)').allMatches(d).map((m) => m.group(0)!).toList();
+  var i = 0, cmd = '';
+  double x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0; // the pen, where the shape started, the last control point
+  bool letter(String s) => RegExp(r'^[a-zA-Z]$').hasMatch(s);
+  double n() => i < t.length ? double.parse(t[i++]) : 0;
+  while (i < t.length) {
+    if (letter(t[i])) cmd = t[i++];
+    final at = i, rel = cmd == cmd.toLowerCase(), ox = rel ? x : 0.0, oy = rel ? y : 0.0;
+    switch (cmd.toUpperCase()) {
+      case 'M': x = ox + n(); y = oy + n(); p.moveTo(x, y); sx = x; sy = y; cx = x; cy = y; cmd = rel ? 'l' : 'L';
+      case 'L': x = ox + n(); y = oy + n(); p.lineTo(x, y); cx = x; cy = y;
+      case 'H': x = ox + n(); p.lineTo(x, y); cx = x; cy = y;
+      case 'V': y = oy + n(); p.lineTo(x, y); cx = x; cy = y;
+      case 'C': final x1 = ox + n(), y1 = oy + n(), x2 = ox + n(), y2 = oy + n(); x = ox + n(); y = oy + n(); p.cubicTo(x1, y1, x2, y2, x, y); cx = x2; cy = y2;
+      case 'S': final x1 = 2 * x - cx, y1 = 2 * y - cy, x2 = ox + n(), y2 = oy + n(); x = ox + n(); y = oy + n(); p.cubicTo(x1, y1, x2, y2, x, y); cx = x2; cy = y2;
+      case 'Q': final x1 = ox + n(), y1 = oy + n(); x = ox + n(); y = oy + n(); p.quadraticBezierTo(x1, y1, x, y); cx = x1; cy = y1;
+      case 'A':
+        final rx = n(), ry = n(), rot = n(), large = n() != 0, sweep = n() != 0;
+        x = ox + n(); y = oy + n(); p.arcToPoint(Offset(x, y), radius: Radius.elliptical(rx, ry), rotation: rot, largeArc: large, clockwise: sweep); cx = x; cy = y;
+      case 'Z': p.close(); x = sx; y = sy; cx = x; cy = y;
+    }
+    if (i == at && i < t.length && !letter(t[i])) i++; // (a stray number)
+  }
+  return p;
+}
+
+/// One of the editor's line icons, in a colour.
+class ArtIcon extends StatelessWidget {
+  const ArtIcon(this.paths, {super.key, required this.color, this.size = 24});
+  final List<String> paths;
+  final Color color;
+  final double size;
+  @override
+  Widget build(BuildContext context) => SizedBox(width: size, height: size, child: CustomPaint(painter: _ArtPainter(paths, color)));
+}
+
+class _ArtPainter extends CustomPainter {
+  _ArtPainter(this.paths, this.color);
+  final List<String> paths;
+  final Color color;
+  @override
+  void paint(Canvas canvas, Size size) {
+    canvas.scale(size.width / 64, size.height / 64);
+    canvas.drawPath(svgPath(paths[0]), Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 5..strokeCap = StrokeCap.round..strokeJoin = StrokeJoin.round);
+    if (paths.length > 1 && paths[1].isNotEmpty) canvas.drawPath(svgPath(paths[1]), Paint()..color = color);
+  }
+  @override
+  bool shouldRepaint(_ArtPainter o) => o.color != color || o.paths != paths;
+}
+
+/// An App Bar / Bottom Nav icon by its Pocket Engine name: the editor's line icon, or the nearest Material icon.
+Widget barIcon(String name, {required Color color, double size = 24, IconData? fallback}) {
+  final art = artIcons[name];
+  return art != null ? ArtIcon(art, color: color, size: size) : Icon(fallback ?? iconNamed(name), color: color, size: size);
 }
 
 /// Icon names (as in Pocket Engine) → Material icons.
@@ -152,7 +221,7 @@ class AppState extends ChangeNotifier {
   /// Stats are worked out again whenever the data changes.
   /// Stats, {posts_count}-style counts and the social counts ({unread}, {notifications_unread}, {friend_requests}).
   void _work() {
-    final me = show(vars['playerHandle']).isEmpty ? 'me' : show(vars['playerHandle']), mine = {for (final s in stats) s.variable};
+    final me = show(vars['playerHandle']).isEmpty ? (show(vars['playerName']).isEmpty ? 'You' : show(vars['playerName'])).toLowerCase().replaceAll(RegExp(r'\s+'), '') : show(vars['playerHandle']), mine = {for (final s in stats) s.variable};
     for (final c in collections) { vars['${c.name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}_count'] = rows(c.name).length; }
     if (def('Notifications') != null) vars['notifications_unread'] = rows('Notifications').where((r) => show(r['to']) == me && !_on(r['read'])).length;
     if (def('Friends') != null) vars['friend_requests'] = rows('Friends').where((r) => show(r['status']) != 'accepted' && show(r['to']) == me).length;
@@ -349,22 +418,34 @@ class _Tabs extends StatelessWidget {
         body: IndexedStack(index: app.tab, children: [for (final t in app.tabs) pages[t.page]!(context)]),
         bottomNavigationBar: Builder(builder: (context) {
           // the project's Bottom Nav: its style (minimal = icons only, no pill) and colours
-          final p = pal(context), n = app.nav, minimal = n.style == 'minimal', on = p.resolve(n.active) ?? p.accent, off = p.resolve(n.idle) ?? p.sub;
+          final p = pal(context), n = app.nav, minimal = n.style == 'minimal', on = p.resolve(n.active) ?? p.accent, off = p.resolve(n.idle) ?? p.sub, onSolid = p.resolve(n.on) ?? Colors.white;
           Widget icon(NavTab t, bool sel) => Badge(
                 isLabelVisible: t.badge.isNotEmpty && (num.tryParse(AppState.show(app.get(t.badge))) ?? 0) > 0,
                 label: Text(AppState.show(app.get(t.badge))),
-                child: Icon(sel && t.icon == Icons.home_outlined ? Icons.home : t.icon, color: sel ? on : off, size: minimal ? 28 : 24),
+                child: barIcon(t.name, fallback: sel && t.icon == Icons.home_outlined ? Icons.home : t.icon, color: sel ? (n.solid ? onSolid : on) : off, size: minimal ? 28 : 24),
               );
-          return NavigationBarTheme(
+          final bar = NavigationBarTheme(
             data: NavigationBarThemeData(labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: s.contains(WidgetState.selected) ? on : off))),
             child: NavigationBar(
               selectedIndex: app.tab,
               onDestinationSelected: app.pickTab,
-              backgroundColor: p.resolve(n.bar) ?? p.card,
-              indicatorColor: minimal ? Colors.transparent : on.withValues(alpha: 0.18),
-              labelBehavior: minimal ? NavigationDestinationLabelBehavior.alwaysHide : NavigationDestinationLabelBehavior.alwaysShow,
-              height: minimal ? 60 : null,
+              backgroundColor: (p.resolve(n.bar) ?? p.card).withValues(alpha: n.style == 'glass' ? 0.72 : 1),
+              indicatorColor: n.solid ? on : n.pill ? on.withValues(alpha: 0.22) : Colors.transparent,
+              labelBehavior: n.labels == 'never' ? NavigationDestinationLabelBehavior.alwaysHide : n.labels == 'selected only' ? NavigationDestinationLabelBehavior.onlyShowSelected : NavigationDestinationLabelBehavior.alwaysShow,
+              height: n.labels == 'never' ? 60 : n.floating ? 66 : null,
               destinations: [for (final t in app.tabs) NavigationDestination(icon: icon(t, false), selectedIcon: icon(t, true), label: t.label)],
+            ),
+          );
+          if (!n.floating) return bar;
+          // floating styles: a rounded bar inset from the edges, with a shadow
+          return SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(n.margin, 0, n.margin, n.margin < 8 ? 8 : n.margin),
+              child: DecoratedBox(
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(26), boxShadow: const [BoxShadow(color: Color(0x59000000), blurRadius: 22, offset: Offset(0, 6))]),
+                child: ClipRRect(borderRadius: BorderRadius.circular(26), child: MediaQuery.removePadding(context: context, removeBottom: true, child: bar)),
+              ),
             ),
           );
         }),
@@ -413,7 +494,7 @@ class PocketPage extends StatelessWidget {
       iconTheme: IconThemeData(color: ic),
       centerTitle: b.center,
       shape: b.border ? Border(bottom: BorderSide(color: p.line)) : null,
-      leading: back ? null : b.avatar ? Padding(padding: const EdgeInsets.all(10), child: Avatar(meName, me, size: 34)) : null,
+      leading: back ? null : b.avatar ? Padding(padding: const EdgeInsets.all(10), child: Avatar(barName.isEmpty ? '?' : barName, '?', size: 34)) : null,
       automaticallyImplyLeading: back,
       title: Text(brand ? app.name : app.fill(title), style: TextStyle(fontWeight: brand ? FontWeight.w900 : FontWeight.w800, fontSize: brand ? 22 : b.size)),
       actions: [
@@ -421,10 +502,14 @@ class PocketPage extends StatelessWidget {
           if (a.only.isEmpty || a.only.contains(page))
             IconButton(
               tooltip: a.icon,
+              style: b.circles == 'plain' ? null : IconButton.styleFrom(
+                backgroundColor: b.circles == 'circles' ? (dark ? Colors.white.withValues(alpha: 0.1) : Colors.black.withValues(alpha: 0.06)) : null,
+                side: b.circles == 'outlined circles' ? BorderSide(color: ic.withValues(alpha: 0.35), width: 1.4) : null,
+              ),
               icon: Badge(
                 isLabelVisible: a.badge.isNotEmpty && (num.tryParse(AppState.show(app.get(a.badge))) ?? 0) > 0,
                 label: Text(AppState.show(app.get(a.badge))),
-                child: Icon(iconNamed(a.icon == 'theme' ? (dark ? 'sun' : 'moon') : a.icon), color: ic),
+                child: barIcon(a.icon == 'theme' ? (dark ? 'sun' : 'moon') : a.icon, color: ic, size: b.circles == 'plain' ? 24 : 20),
               ),
               onPressed: () {
                 if (a.does.contains('dark mode')) { app.set('darkMode', !dark); }
@@ -1005,8 +1090,11 @@ class TodoBox extends StatelessWidget {
 // They read and change the same data collections as the app (Posts, Messages, Stories, Listings, Profiles…).
 // ---------------------------------------------------------------------------------------------------------------
 
-String get me => AppState.show(app.get('playerHandle')).isEmpty ? 'me' : AppState.show(app.get('playerHandle'));
-String get meName => AppState.show(app.get('playerName')).isEmpty ? 'Me' : AppState.show(app.get('playerName'));
+/// You: {playerName} and {playerHandle}; no name yet → “You”, @you (the same as the editor).
+String get meName => AppState.show(app.get('playerName')).isEmpty ? 'You' : AppState.show(app.get('playerName'));
+/// The name on the App Bar's avatar: “Me” until there is a playerName variable, then the name (blank shows “?”).
+String get barName => app.vars.containsKey('playerName') ? AppState.show(app.get('playerName')) : 'Me';
+String get me => AppState.show(app.get('playerHandle')).isEmpty ? meName.toLowerCase().replaceAll(RegExp(r'\s+'), '') : AppState.show(app.get('playerHandle'));
 String sv(Map<String, Object?> r, String k) => AppState.show(r[k]);
 bool isOn(Object? v) => v == true || v == 1 || v == 'yes' || v == 'true';
 num nv(Object? v) => v is num ? v : num.tryParse('${v ?? ''}') ?? 0;

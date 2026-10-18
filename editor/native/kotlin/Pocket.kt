@@ -82,9 +82,14 @@ typealias Row = Map<String, Any?>
  *  ("dark mode toggle", "page:friends", or a message), a badge variable, and the pages it shows on (empty = all). */
 data class BarAction(val icon: String, val does: String, val badge: String = "", val only: List<String> = emptyList())
 /** The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours. */
-data class BarStyle(val look: String = "standard", val brandPages: List<String> = listOf("home"), val center: Boolean = false, val avatar: Boolean = false, val actions: List<BarAction> = emptyList(), val bg: String = "@bar", val text: String = "@text", val icon: String = "@text", val border: Boolean = true, val size: Int = 19)
-/** The Bottom Nav's style (minimal: icons only) and colours. */
-data class NavStyle(val style: String = "pill", val bar: String = "@bar", val active: String = "@accent", val idle: String = "@sub")
+data class BarStyle(val look: String = "standard", val brandPages: List<String> = listOf("home"), val center: Boolean = false, val avatar: Boolean = false, val circles: String = "plain", val actions: List<BarAction> = emptyList(), val bg: String = "@bar", val text: String = "@text", val icon: String = "@text", val border: Boolean = true, val size: Int = 19)
+/** The Bottom Nav's style (pill, floating, glass, segmented, dock, minimal…), when names show (always, selected only, never),
+ *  the gap around a floating bar, and colours (on: the icon on a solid highlight). */
+data class NavStyle(val style: String = "pill", val bar: String = "@bar", val active: String = "@accent", val idle: String = "@sub", val labels: String = "always", val margin: Int = 14, val on: String = "#ffffff") {
+    val floating get() = style in listOf("floating", "glass", "segmented", "dock")
+    val pill get() = style in listOf("pill", "floating", "glass", "bubble", "classic")
+    val solid get() = style in listOf("segmented", "chips")
+}
 
 /** The app's colours (@tokens) for light or dark. */
 class Palette(val c: Map<String, Color>) {
@@ -192,7 +197,7 @@ class AppState(
     /** Stats are worked out again whenever the data changes. */
     /** Stats, {posts_count}-style counts and the social counts ({unread}, {notifications_unread}, {friend_requests}). */
     private fun work() {
-        val me = show(vars["playerHandle"]).ifEmpty { "me" }
+        val me = show(vars["playerHandle"]).ifEmpty { show(vars["playerName"]).ifEmpty { "You" }.lowercase().replace(Regex("\\s+"), "") }
         for (c in collections) vars[c.name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_") + "_count"] = rows(c.name).size.toDouble()
         if (def("Notifications") != null) vars["notifications_unread"] = rows("Notifications").count { show(it["to"]) == me && !isOn(it["read"]) }.toDouble()
         if (def("Friends") != null) vars["friend_requests"] = rows("Friends").count { show(it["status"]) != "accepted" && show(it["to"]) == me }.toDouble()
@@ -375,20 +380,26 @@ fun PocketApp(pages: Map<String, @Composable () -> Unit>) {
             Scaffold(
                 containerColor = p.bg,
                 bottomBar = {
-                    // the project's Bottom Nav: its style (minimal = icons only, no pill) and colours
+                    // the project's Bottom Nav: its style, when names show, and colours; floating styles sit inset with round ends
                     val n0 = app.nav
-                    val minimal = n0.style == "minimal"
                     val on = p.resolve(n0.active) ?: p.accent
                     val off = p.resolve(n0.idle) ?: p.sub
-                    if (app.tabs.isNotEmpty() && stack.isEmpty()) NavigationBar(containerColor = p.resolve(n0.bar) ?: p.card) {
-                        app.tabs.forEachIndexed { i, t ->
-                            val n = if (t.badge.isEmpty()) 0 else (num(app.get(t.badge)) ?: 0.0).toInt()
-                            NavigationBarItem(
-                                selected = app.tab == i, onClick = { app.go(t.page) },
-                                label = if (minimal) null else ({ Text(t.label) }), alwaysShowLabel = !minimal,
-                                icon = { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(if (minimal) 28.dp else 24.dp)) } },
-                                colors = NavigationBarItemDefaults.colors(selectedIconColor = on, unselectedIconColor = off, selectedTextColor = on, unselectedTextColor = off, indicatorColor = if (minimal) Color.Transparent else on.copy(alpha = 0.18f)),
-                            )
+                    val onSolid = p.resolve(n0.on) ?: Color.White
+                    val shape = RoundedCornerShape(26.dp)
+                    if (app.tabs.isNotEmpty() && stack.isEmpty()) Box(if (n0.floating) Modifier.navigationBarsPadding().padding(start = n0.margin.dp, end = n0.margin.dp, bottom = maxOf(8, n0.margin).dp).shadow(14.dp, shape).clip(shape) else Modifier) {
+                        NavigationBar(containerColor = (p.resolve(n0.bar) ?: p.card).copy(alpha = if (n0.style == "glass") 0.72f else 1f), windowInsets = if (n0.floating) WindowInsets(0) else NavigationBarDefaults.windowInsets) {
+                            app.tabs.forEachIndexed { i, t ->
+                                val n = if (t.badge.isEmpty()) 0 else (num(app.get(t.badge)) ?: 0.0).toInt()
+                                val sel = app.tab == i
+                                val showLabel = n0.labels == "always" || (n0.labels == "selected only" && sel)
+                                NavigationBarItem(
+                                    selected = sel, onClick = { app.go(t.page) },
+                                    label = if (showLabel) ({ Text(t.label) }) else null, alwaysShowLabel = n0.labels == "always",
+                                    icon = { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(if (n0.labels == "never") 28.dp else 24.dp)) } },
+                                    colors = NavigationBarItemDefaults.colors(selectedIconColor = if (n0.solid) onSolid else on, unselectedIconColor = off, selectedTextColor = on, unselectedTextColor = off,
+                                        indicatorColor = if (n0.solid) on else if (n0.pill) on.copy(alpha = 0.22f) else Color.Transparent),
+                                )
+                            }
                         }
                     }
                 },
@@ -431,19 +442,23 @@ fun PocketBar(title: String, page: String) {
     val titleText: @Composable () -> Unit = { Text(if (brand) app.name else app.fill(title), fontWeight = if (brand) FontWeight.Black else FontWeight.ExtraBold, fontSize = (if (brand) 22 else b.size).sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     val nav: @Composable () -> Unit = {
         if (back) IconButton(onClick = { app.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-        else if (b.avatar) Box(Modifier.padding(start = 12.dp)) { Avatar(meName, me, 34) }
+        else if (b.avatar) Box(Modifier.padding(start = 12.dp)) { Avatar(barName.ifEmpty { "?" }, "?", 34) }
     }
     val actions: @Composable RowScope.() -> Unit = {
         for (a in b.actions.reversed()) { // (the first sits at the right edge)
             if (a.only.isNotEmpty() && page !in a.only) continue
             val n = if (a.badge.isEmpty()) 0 else (num(app.get(a.badge)) ?: 0.0).toInt()
-            IconButton(onClick = {
+            IconButton(modifier = when (b.circles) { // the buttons sit in a filled circle, a ring, or nothing
+                "circles" -> Modifier.padding(horizontal = 2.dp).background(if (dark) Color.White.copy(alpha = 0.1f) else Color.Black.copy(alpha = 0.06f), CircleShape)
+                "outlined circles" -> Modifier.padding(horizontal = 2.dp).border(1.4.dp, ic.copy(alpha = 0.35f), CircleShape)
+                else -> Modifier
+            }, onClick = {
                 when {
                     "dark mode" in a.does -> app.set("darkMode", !dark)
                     a.does.startsWith("page:") -> app.go(a.does.removePrefix("page:"))
                     else -> println("TODO: the App Bar button sends \"${a.does}\"")
                 }
-            }) { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(PocketIcons.get(if (a.icon == "theme") (if (dark) "sun" else "moon") else a.icon), contentDescription = a.icon, tint = ic) } }
+            }) { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(PocketIcons.nav(if (a.icon == "theme") (if (dark) "sun" else "moon") else a.icon), contentDescription = a.icon, tint = ic, modifier = Modifier.size(if (b.circles == "plain") 24.dp else 20.dp)) } }
         }
     }
     Column {
@@ -866,8 +881,11 @@ fun TodoBox(name: String, type: String) {
 // They read and change the same data collections as the app (Posts, Messages, Stories, Listings, Profiles…).
 // ---------------------------------------------------------------------------------------------------------------
 
-val me: String get() = show(app.get("playerHandle")).ifEmpty { "me" }
-val meName: String get() = show(app.get("playerName")).ifEmpty { "Me" }
+/** You: {playerName} and {playerHandle}; no name yet → “You”, @you (the same as the editor). */
+val meName: String get() = show(app.get("playerName")).ifEmpty { "You" }
+/** The name on the App Bar's avatar: “Me” until there is a playerName variable, then the name (blank shows “?”). */
+val barName: String get() = if (app.vars.containsKey("playerName")) show(app.get("playerName")) else "Me"
+val me: String get() = show(app.get("playerHandle")).ifEmpty { meName.lowercase().replace(Regex("\\s+"), "") }
 fun Row.s(k: String): String = show(this[k])
 // the engine's avatar colours and initials (Maya Chen → MC)
 private val avatarColors = listOf(0xFFEF5350, 0xFFEC407A, 0xFFAB47BC, 0xFF7E57C2, 0xFF5C6BC0, 0xFF42A5F5, 0xFF26A69A, 0xFF66BB6A, 0xFFFFA726, 0xFF8D6E63)
@@ -915,6 +933,14 @@ object PocketIcons {
     )
     private val alias = mapOf("friends" to "users", "profile" to "user", "explore" to "search", "gear" to "settings", "add" to "plus")
     private val cache = mutableMapOf<String, ImageVector>()
+    /** The editor's own line icons (64 × 64 SVG path data: stroked, then filled), for the App Bar and Bottom Nav. Set by App.kt. */
+    val art = mutableMapOf<String, List<String>>()
+    /** An App Bar / Bottom Nav icon: the editor's line icon when there is one. */
+    fun nav(name: String): ImageVector = art[name]?.let { a -> cache.getOrPut("art:$name") {
+        val v = ImageVector.Builder(name, 24.dp, 24.dp, 64f, 64f).addPath(pathData = addPathNodes(a[0]), fill = null, stroke = SolidColor(Color.Black), strokeLineWidth = 5f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round)
+        if (a.size > 1 && a[1].isNotEmpty()) v.addPath(pathData = addPathNodes(a[1]), fill = SolidColor(Color.Black))
+        v.build()
+    } } ?: get(name)
     /** filled: heart and bookmark when they're on. */
     fun get(name: String, filled: Boolean = false): ImageVector = cache.getOrPut("$name$filled") {
         val d = paths[alias[name] ?: name] ?: paths.getValue("circle")

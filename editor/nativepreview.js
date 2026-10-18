@@ -4,6 +4,7 @@
 // iOS look for SwiftUI. Nothing is compiled here: Download gives the real project.
 import { appModel, PALETTES } from './appmodel.js';
 import { names, labelW } from './nativecode.js';
+import { SPRITE_ART } from '../engine/pocket.js';
 
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
@@ -18,6 +19,7 @@ const h = (tag, attrs = {}, ...kids) => {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c.nodeType ? c : document.createTextNode(c));
   return el;
 };
+const keyOf = (n) => String(n ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'field';
 const show = (v) => (v == null ? '' : typeof v === 'boolean' ? (v ? 'yes' : 'no') : typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100)) : String(v));
 const num = (v) => (typeof v === 'number' ? v : typeof v === 'boolean' ? +v : v == null || v === '' || isNaN(+v) ? null : +v);
 const isOn = (v) => v === true || v === 1 || v === 'yes' || v === 'true';
@@ -29,6 +31,16 @@ const ICON_SVG = {
   bookmark: 'M6 3h12v18l-6-4-6 4z', share: 'M12 3v13M7 8l5-5 5 5M5 14v6h14v-6', more: 'M5 12h.01M12 12h.01M19 12h.01', moon: 'M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z', sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM1 21a8 8 0 0 1 16 0M17 3.5a4 4 0 0 1 0 7.5M23 21a7 7 0 0 0-4-6.3', info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01', back: 'M15 18l-6-6 6-6', check2: 'M5 12l5 5L20 7',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm8-3l2-1-2-4-2 1-2-1V5h-4v2l-2 1-2-1-2 4 2 1v2l-2 1 2 4 2-1 2 1v2h4v-2l2-1 2 1 2-4-2-1z', plus: 'M12 5v14M5 12h14', video: 'M4 6h12v12H4zm12 4l5-3v10l-5-3', list: 'M4 6h16M4 12h16M4 18h16', circle: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z',
+};
+/** The App Bar's and Bottom Nav's icons: the editor's own (its line icons, or a picture / emoji), the way the editor draws them. */
+const UI_FIRST = new Set(['key', 'shield', 'fire', 'drop', 'flag', 'potion', 'sword', 'crown', 'rocket', 'cloud', 'leaf', 'skull']);
+const navIcon = (name) => {
+  const n = String(name || 'circle');
+  if (!/^ui-|^[a-z][a-zA-Z-]+$/.test(n)) return h('span', { class: 'npv-ic npv-emo' }, n);
+  const k = n.startsWith('ui-') || (SPRITE_ART[n] && !UI_FIRST.has(n)) ? n : 'ui-' + n, art = SPRITE_ART[k];
+  if (!art) return svgIcon(n);
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 64 64'); s.setAttribute('class', 'npv-ic art');
+  s.innerHTML = art.replace(/#fff(fff)?\b/gi, 'currentColor'); return s;
 };
 const ICON_ALIAS = { explore: 'search', profile: 'user', friends: 'users', gear: 'settings', add: 'plus', play: 'video', menu: 'list' };
 const svgIcon = (name) => { const d = ICON_SVG[ICON_ALIAS[name] || name] || ICON_SVG.circle; const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'npv-ic'); const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); return s; };
@@ -113,7 +125,7 @@ function makeApp(model) {
   };
   /** Stats, {posts_count}-style counts, and the social counts the engine keeps ({unread}, {notifications_unread}, {friend_requests}). */
   A.work = () => {
-    const me = show(A.vars.playerHandle) || 'me', mine = new Set(model.stats.map((s) => s.var));
+    const me = show(A.vars.playerHandle) || (show(A.vars.playerName) || 'You').toLowerCase().replace(/\s+/g, ''), mine = new Set(model.stats.map((s) => s.var));
     for (const c of model.collections) A.vars[c.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_count'] = A.rows(c.name).length;
     if (A.def('Notifications')) A.vars.notifications_unread = A.rows('Notifications').filter((r) => show(r.to) === me && !isOn(r.read)).length;
     if (A.def('Friends')) A.vars.friend_requests = A.rows('Friends').filter((r) => show(r.status) !== 'accepted' && show(r.to) === me).length;
@@ -155,10 +167,15 @@ function makeApp(model) {
 /** opts: { game, files(kind) → Promise<[{name, data}]>, download(kind), toast(msg) } */
 export function openNativePreview({ game, files, download, toast = () => {}, host = null }) {
   const read = () => (typeof game === 'function' ? game() : game);
-  let model = appModel(read()), N = names(model);
+  /** The model, with the records saved on this device (what the editor's scene shows after you've tried the app). */
+  const build = () => { const g = read(), m = appModel(g);
+    for (const c of m.collections) { const d = (g.collections || []).find((q) => q.name === c.name); if (!d || d.keep === false) continue;
+      try { const v = JSON.parse(localStorage.getItem('pocket.data.' + (g.name || 'game') + '.' + keyOf(c.name)) || 'null'); if (Array.isArray(v)) c.rows = v; } catch { /* nothing saved */ } }
+    return m; };
+  let model = build(), N = names(model);
   let kind = 'flutter', view = 'app', A = makeApp(model), codeFiles = null, codeSel = '', note = '';
-  const dark = () => { const d = A.vars.darkMode; return typeof d === 'boolean' ? d : model.theme === 'dark' ? true : model.theme === 'light' ? false : matchMedia('(prefers-color-scheme: dark)').matches; };
-  const pal = () => (dark() ? { ...PALETTES.dark } : { ...PALETTES.light, accent: model.accent });
+  const dark = () => { const d = A.vars.darkMode; return d !== undefined && d !== '' && d !== null ? [true, 1, '1', 'on', 'yes', 'dark'].includes(d) : model.theme === 'dark' ? true : model.theme === 'light' ? false : matchMedia('(prefers-color-scheme: dark)').matches; };
+  const pal = () => { const P = dark() ? { ...PALETTES.dark } : { ...PALETTES.light }; if (model.accent) P.accent = model.accent; return P; }; // (the app's accent in dark mode too, like the editor)
   const col = (c, P) => { if (!c) return null; const t = /^@(\w+)$/.exec(c); return t ? P[t[1]] || null : /^#[0-9a-f]{6}$/i.test(c) ? c : null; };
 
   const phone = h('div', { class: 'npv-phone' }), codeBox = h('div', { class: 'npv-code' });
@@ -299,7 +316,8 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     ]), h('button', { class: 'npv-pbtn filled', 'data-save': '', onclick: save }, A.fill(x.saveLabel)));
   }
   // ---------- social: the same rules as the native SocialFeed, Chat, Profile… building blocks ----------
-  const me = () => show(A.vars.playerHandle) || 'me', meName = () => show(A.vars.playerName) || 'Me';
+  const meName = () => show(A.vars.playerName) || 'You', me = () => show(A.vars.playerHandle) || meName().toLowerCase().replace(/\s+/g, ''); // (no name yet: “You”, @you, like the editor)
+  const barName = () => ('playerName' in A.vars ? show(A.vars.playerName) : 'Me'); // (the App Bar's avatar: “?” when the name is blank, like the editor)
   // the engine's avatar colours and initials (Maya Chen → MC)
   const AV = ['#ef5350', '#ec407a', '#ab47bc', '#7e57c2', '#5c6bc0', '#42a5f5', '#26a69a', '#66bb6a', '#ffa726', '#8d6e63'];
   const avColor = (s) => { let n = 0; for (const ch of String(s || '?')) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return AV[n % AV.length]; };
@@ -465,18 +483,19 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     const icon = (a) => (a.icon === 'theme' ? (dark() ? 'sun' : 'moon') : a.icon);
     const tap = (a) => { if (/dark mode/.test(a.does)) A.set('darkMode', !dark()); else if (a.does.startsWith('page:')) A.go(a.does.slice(5)); else note = `“${a.does}” is a message: the native code has a TODO there`; drawPhone(); };
     const acts = B.actions.filter((a) => !a.only.length || a.only.includes(page.value)).reverse(); // (the first sits at the right edge)
-    return h('div', { class: 'npv-bar ' + (ios || B.align === 'center' ? 'center' : 'left') + (B.border ? ' line' : ''), style: `background:${col(B.bg, P) || P.card};color:${col(B.text, P) || P.text};--ic:${col(B.icon, P) || P.text}` },
+    return h('div', { class: 'npv-bar ' + (ios || B.align === 'center' ? 'center' : 'left') + (B.border ? ' line' : '') + (B.circles === 'circles' ? ' circ' : B.circles === 'outlined circles' ? ' ocirc' : ''), style: `background:${col(B.bg, P) || P.card};color:${col(B.text, P) || P.text};--ic:${col(B.icon, P) || P.text}` },
       h('div', { class: 'npv-bl' }, stack.length ? h('button', { class: 'npv-back', 'aria-label': 'Back', onclick: () => { A.back(); drawPhone(); } }, svgIcon('back'), ios ? 'Back' : '')
-        : B.avatar ? avatar(meName(), me(), 34) : null),
+        : B.avatar ? avatar(barName() || '?', '', 32) : null),
       h('b', { class: 'npv-btitle' + (brand ? ' brand' : ''), style: `font-size:${B.size}px` }, brand ? model.name : A.fill(page.title)),
       h('div', { class: 'npv-br' }, acts.map((a) => { const n = a.badge ? num(A.vars[a.badge]) || 0 : 0;
-        return h('button', { class: 'npv-bact', 'aria-label': a.icon, 'data-act': a.does, onclick: () => tap(a) }, svgIcon(icon(a)), n > 0 && h('i', {}, n > 99 ? '99+' : n)); })));
+        return h('button', { class: 'npv-bact', 'aria-label': a.icon, 'data-act': a.does, onclick: () => tap(a) }, navIcon(icon(a)), n > 0 && h('i', {}, n > 99 ? '99+' : n)); })));
   }
   function navBar(P) {
-    const N = model.nav || { style: 'pill', bar: '@bar', active: '@accent', idle: '@sub' }, labels = N.style !== 'minimal';
-    return h('div', { class: 'npv-tabs ' + N.style, style: `background:${col(N.bar, P) || P.card};--on:${col(N.active, P) || P.accent};--off:${col(N.idle, P) || P.sub}` }, model.tabs.map((t, i) => {
+    const N = model.nav || { style: 'pill', labels: 'always', margin: 14, bar: '@bar', active: '@accent', idle: '@sub', on: '#ffffff' }, fl = ['floating', 'glass', 'segmented', 'dock'].includes(N.style);
+    const label = (on) => N.labels === 'always' || (N.labels === 'selected only' && on);
+    return h('div', { class: 'npv-tabs ' + N.style + (fl ? ' fl' : ''), style: `background:${col(N.bar, P) || P.card};--on:${col(N.active, P) || P.accent};--off:${col(N.idle, P) || P.sub};--onc:${col(N.on, P) || '#fff'}${fl ? `;margin:0 ${N.margin}px ${Math.max(8, N.margin)}px` : ''}` }, model.tabs.map((t, i) => {
       const n = t.badge ? num(A.vars[t.badge]) || 0 : 0;
-      return h('button', { class: 'npv-tab' + (i === A.tab ? ' on' : ''), 'data-tab': t.page, 'aria-label': t.label, onclick: () => { A.go(t.page); drawPhone(); } }, h('span', { class: 'npv-tabic' }, svgIcon(t.icon), n > 0 && h('i', {}, n > 99 ? '99+' : n)), labels && h('small', {}, t.label));
+      return h('button', { class: 'npv-tab' + (i === A.tab ? ' on' : ''), 'data-tab': t.page, 'aria-label': t.label, onclick: () => { A.go(t.page); drawPhone(); } }, h('span', { class: 'npv-tabic' }, navIcon(t.icon), n > 0 && h('i', {}, n > 99 ? '99+' : n)), label(i === A.tab) && h('small', {}, t.label));
     }));
   }
 
@@ -537,7 +556,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   /** Read the project again (after an edit): keeps the tab you're on; reset also starts the data again. */
   function refresh(reset = false) {
     const tab = A.tab, vars = A.vars, data = A.data, before = Object.fromEntries(model.collections.map((c) => [c.name, JSON.stringify(c.rows)]));
-    model = appModel(read()); N = names(model); A = makeApp(model); codeFiles = null; story = null; listing = null;
+    model = build(); N = names(model); A = makeApp(model); codeFiles = null; story = null; listing = null;
     if (!reset) { A.tab = Math.min(tab, Math.max(0, model.tabs.length - 1)); Object.assign(A.vars, vars); for (const c of model.collections) if (data[c.name] && before[c.name] === JSON.stringify(c.rows)) A.data[c.name] = data[c.name]; A.work(); }
     note = ''; drawAll();
   }

@@ -2604,3 +2604,23 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-pin > .npv-slider { height: 100%; margin: 0; display: block; }
 .npv-you { padding: 4px !important; } .npv-zl.on { color: var(--accent, #4fa3ff); border-color: var(--accent, #4fa3ff); }
 .npv-story { align-self: flex-start; }
+/* the App Bar's and Bottom Nav's own looks (the editor's icons, circles behind the buttons, the nav styles) */
+.npv-emo { display: grid; place-items: center; font-size: 20px; line-height: 1; }
+.npv-bar.circ .npv-bact, .npv-bar.ocirc .npv-bact { width: 40px; height: 40px; margin-left: 6px; }
+.npv-bar.circ .npv-bact { background: rgba(0, 0, 0, 0.06); } .npv-phone.dark .npv-bar.circ .npv-bact { background: rgba(255, 255, 255, 0.1); }
+.npv-bar.ocirc .npv-bact { box-shadow: inset 0 0 0 1.4px color-mix(in srgb, var(--ic) 35%, transparent); }
+.npv-bar.circ .npv-bact .npv-ic, .npv-bar.ocirc .npv-bact .npv-ic { width: 20px; height: 20px; }
+.npv-tabs.fl { border-top: 0; border-radius: 26px; padding: 8px 4px; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35); }
+.npv-tabs.glass { background: color-mix(in srgb, var(--card) 72%, transparent) !important; backdrop-filter: blur(12px); box-shadow: inset 0 0 0 1.2px rgba(255, 255, 255, 0.28), 0 6px 22px rgba(0, 0, 0, 0.3); }
+.npv-tabs.floating .npv-tab.on .npv-tabic, .npv-tabs.glass .npv-tab.on .npv-tabic { background: color-mix(in srgb, var(--on) 22%, transparent); width: 64px; }
+.npv-tabs.segmented .npv-tab { border-radius: 20px; padding: 6px 0; } .npv-tabs.segmented .npv-tab.on { background: var(--on); color: var(--onc); box-shadow: 0 2px 10px color-mix(in srgb, var(--on) 45%, transparent); }
+.npv-tabs.classic .npv-tab { border-radius: 12px; padding: 4px 0; } .npv-tabs.classic .npv-tab.on { background: color-mix(in srgb, var(--on) 12%, transparent); }
+.npv-tabs.underline .npv-tab, .npv-tabs.neon .npv-tab, .npv-tabs.spotlight .npv-tab { position: relative; }
+.npv-tabs.underline .npv-tab.on::before, .npv-tabs.neon .npv-tab.on::before, .npv-tabs.spotlight .npv-tab.on::before { content: ''; position: absolute; top: -6px; left: 25%; right: 25%; height: 3px; border-radius: 2px; background: var(--on); }
+.npv-tabs.neon .npv-tab.on::before { box-shadow: 0 0 12px var(--on); }
+.npv-tabs.dot .npv-tab, .npv-tabs.dock .npv-tab { position: relative; padding-bottom: 6px; }
+.npv-tabs.dot .npv-tab.on::after, .npv-tabs.dock .npv-tab.on::after { content: ''; position: absolute; bottom: -4px; left: calc(50% - 3px); width: 6px; height: 6px; border-radius: 50%; background: var(--on); }
+.npv-tabs.outline .npv-tab.on .npv-tabic { width: 44px; height: 44px; border-radius: 50%; box-shadow: inset 0 0 0 2px var(--on); background: color-mix(in srgb, var(--on) 14%, transparent); }
+.npv-tabs.bubble .npv-tab.on, .npv-tabs.chips .npv-tab.on { flex-direction: row; justify-content: center; gap: 6px; background: color-mix(in srgb, var(--on) 20%, transparent); border-radius: 22px; padding: 4px 8px; }
+.npv-tabs.bubble .npv-tab.on .npv-tabic, .npv-tabs.chips .npv-tab.on .npv-tabic { width: auto; }
+.npv-tabs.chips .npv-tab.on { background: var(--on); color: var(--onc); }

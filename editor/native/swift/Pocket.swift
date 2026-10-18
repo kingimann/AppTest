@@ -54,6 +54,8 @@ struct Stat {
 struct NavTab {
     let label: String, icon: String, page: String
     var badge: String = ""
+    /// The icon's name in Pocket Engine (drawn with its line icon when artIcons has it; icon is the SF Symbol otherwise).
+    var name: String = ""
 }
 
 /// A button on the right of the App Bar: icon (a name, or theme for the dark mode moon / sun), what it does
@@ -67,12 +69,98 @@ struct BarAction {
 /// The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours.
 struct BarStyle {
     var look = "standard", brandPages = ["home"], center = false, avatar = false
+    /// The buttons sit in a filled circle ("circles"), a ring ("outlined circles") or nothing ("plain").
+    var circles = "plain"
     var actions: [BarAction] = []
     var bg = "@bar", text = "@text", icon = "@text", border = true, size: CGFloat = 19
 }
 
-/// The Bottom Nav's style (minimal: icons only) and colours.
-struct NavStyle { var style = "pill", bar = "@bar", active = "@accent", idle = "@sub" }
+/// The Bottom Nav's style (pill, floating, glass, segmented, dock, minimal…), its colours, when names show (always, selected only,
+/// never), the gap around a floating bar, and the icon colour on a solid highlight.
+struct NavStyle {
+    var style = "pill", bar = "@bar", active = "@accent", idle = "@sub", labels = "always"
+    var margin: CGFloat = 14
+    var on = "#ffffff"
+    var floating: Bool { ["floating", "glass", "segmented", "dock"].contains(style) }
+    var pill: Bool { ["pill", "floating", "glass", "bubble", "classic"].contains(style) }
+    var solid: Bool { ["segmented", "chips"].contains(style) }
+}
+
+/// The editor's own line icons (64 × 64 SVG path data: [stroked, filled]), for the App Bar and Bottom Nav. Set by the app.
+var artIcons: [String: [String]] = [:]
+
+/// SVG path data → a Path (M L H V C S Q A Z, absolute and relative; arcs are circles, as in the editor's icons).
+func svgPath(_ d: String) -> Path {
+    var p = Path(), t: [String] = [], cur = ""
+    for ch in d {
+        if ch.isLetter { if !cur.isEmpty { t.append(cur); cur = "" }; t.append(String(ch)) }
+        else if ch == " " || ch == "," { if !cur.isEmpty { t.append(cur); cur = "" } }
+        else if ch == "-" || (ch == "." && cur.contains(".")) { if !cur.isEmpty { t.append(cur) }; cur = String(ch) }
+        else { cur.append(ch) }
+    }
+    if !cur.isEmpty { t.append(cur) }
+    var i = 0, cmd: Character = "M"
+    var x: CGFloat = 0, y: CGFloat = 0, sx: CGFloat = 0, sy: CGFloat = 0, cx: CGFloat = 0, cy: CGFloat = 0 // the pen, where the shape started, the last control point
+    func n() -> CGFloat { defer { i += 1 }; return i < t.count ? CGFloat(Double(t[i]) ?? 0) : 0 }
+    while i < t.count {
+        if let c = t[i].first, c.isLetter { cmd = c; i += 1 }
+        let at = i, rel = cmd.isLowercase, ox: CGFloat = rel ? x : 0, oy: CGFloat = rel ? y : 0
+        switch cmd.uppercased() {
+        case "M": x = ox + n(); y = oy + n(); p.move(to: CGPoint(x: x, y: y)); sx = x; sy = y; cx = x; cy = y; cmd = rel ? "l" : "L"
+        case "L": x = ox + n(); y = oy + n(); p.addLine(to: CGPoint(x: x, y: y)); cx = x; cy = y
+        case "H": x = ox + n(); p.addLine(to: CGPoint(x: x, y: y)); cx = x; cy = y
+        case "V": y = oy + n(); p.addLine(to: CGPoint(x: x, y: y)); cx = x; cy = y
+        case "C":
+            let x1 = ox + n(), y1 = oy + n(), x2 = ox + n(), y2 = oy + n(); x = ox + n(); y = oy + n()
+            p.addCurve(to: CGPoint(x: x, y: y), control1: CGPoint(x: x1, y: y1), control2: CGPoint(x: x2, y: y2)); cx = x2; cy = y2
+        case "S":
+            let x1 = 2 * x - cx, y1 = 2 * y - cy, x2 = ox + n(), y2 = oy + n(); x = ox + n(); y = oy + n()
+            p.addCurve(to: CGPoint(x: x, y: y), control1: CGPoint(x: x1, y: y1), control2: CGPoint(x: x2, y: y2)); cx = x2; cy = y2
+        case "Q":
+            let x1 = ox + n(), y1 = oy + n(); x = ox + n(); y = oy + n()
+            p.addQuadCurve(to: CGPoint(x: x, y: y), control: CGPoint(x: x1, y: y1)); cx = x1; cy = y1
+        case "A":
+            let r = n(); _ = n(); _ = n(); let large = n() != 0, sweep = n() != 0, x0 = x, y0 = y
+            x = ox + n(); y = oy + n(); svgArc(&p, x0, y0, x, y, r, large, sweep); cx = x; cy = y
+        case "Z": p.closeSubpath(); x = sx; y = sy; cx = x; cy = y
+        default: break
+        }
+        if i == at && i < t.count && !(t[i].first?.isLetter ?? false) { i += 1 } // (a stray number)
+    }
+    return p
+}
+
+/// An SVG arc (a circle's) from one point to another, by its centre.
+func svgArc(_ p: inout Path, _ x1: CGFloat, _ y1: CGFloat, _ x2: CGFloat, _ y2: CGFloat, _ r0: CGFloat, _ large: Bool, _ sweep: Bool) {
+    let dx = (x1 - x2) / 2, dy = (y1 - y2) / 2, d2 = dx * dx + dy * dy
+    if d2 == 0 { return }
+    let r = max(abs(r0), d2.squareRoot()), k = max(0, (r * r - d2) / d2).squareRoot() * (large == sweep ? -1 : 1)
+    let ox = k * dy, oy = -k * dx // the centre, from the middle of the chord
+    p.addArc(center: CGPoint(x: ox + (x1 + x2) / 2, y: oy + (y1 + y2) / 2), radius: r, startAngle: .radians(Double(atan2(dy - oy, dx - ox))), endAngle: .radians(Double(atan2(-dy - oy, -dx - ox))), clockwise: !sweep) // (SwiftUI's clockwise is the other way round on screen)
+}
+
+/// One of the editor's line icons as a shape (64 × 64, scaled to fit).
+struct ArtShape: Shape {
+    let d: String
+    func path(in rect: CGRect) -> Path { svgPath(d).applying(CGAffineTransform(scaleX: rect.width / 64, y: rect.height / 64)) }
+}
+
+/// An App Bar / Bottom Nav icon by its Pocket Engine name: the editor's line icon, or an SF Symbol.
+struct BarIcon: View {
+    let name: String
+    var sf = ""
+    var size: CGFloat = 24
+    var body: some View {
+        if let a = artIcons[name] {
+            ZStack {
+                ArtShape(d: a[0]).stroke(style: StrokeStyle(lineWidth: 5 * size / 64, lineCap: .round, lineJoin: .round))
+                if a.count > 1 && !a[1].isEmpty { ArtShape(d: a[1]).fill() }
+            }.frame(width: size, height: size)
+        } else {
+            Image(systemName: sf.isEmpty ? symbol(name) : sf).font(.system(size: size * 0.8))
+        }
+    }
+}
 
 /// Icon names (as in Pocket Engine) → SF Symbols.
 func symbol(_ name: String, on: Bool = false) -> String {
@@ -172,7 +260,7 @@ final class AppState: ObservableObject {
     /// Stats are worked out again whenever the data changes.
     /// Stats, {posts_count}-style counts and the social counts ({unread}, {notifications_unread}, {friend_requests}).
     private func work() {
-        let me = (vars["playerHandle"]?.text).flatMap { $0.isEmpty ? nil : $0 } ?? "me"
+        let me = (vars["playerHandle"]?.text).flatMap { $0.isEmpty ? nil : $0 } ?? ((vars["playerName"]?.text).flatMap { $0.isEmpty ? nil : $0 } ?? "You").lowercased().replacingOccurrences(of: " ", with: "")
         for c in collections {
             let key = c.name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: "_")
             vars[key + "_count"] = .n(Double(rows(c.name).count))
@@ -366,6 +454,18 @@ struct PocketRoot: View {
                 NavigationStack(path: $app.paths[0]) {
                     page(app.home).navigationDestination(for: String.self) { page($0) }
                 }
+            } else if app.nav.floating {
+                // floating styles: the pages, with a rounded bar inset from the edges over them
+                ZStack(alignment: .bottom) {
+                    ForEach(app.tabs.indices, id: \.self) { i in
+                        NavigationStack(path: $app.paths[i]) {
+                            page(app.tabs[i].page).navigationDestination(for: String.self) { page($0) }
+                                .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 76) }
+                        }
+                        .opacity(app.tab == i ? 1 : 0).allowsHitTesting(app.tab == i)
+                    }
+                    if app.paths[min(app.tab, app.paths.count - 1)].isEmpty { FloatingTabBar() }
+                }
             } else {
                 TabView(selection: $app.tab) {
                     ForEach(app.tabs.indices, id: \.self) { i in
@@ -373,7 +473,7 @@ struct PocketRoot: View {
                         NavigationStack(path: $app.paths[i]) {
                             page(t.page).navigationDestination(for: String.self) { page($0) }
                         }
-                        .tabItem { if app.nav.style == "minimal" { Image(systemName: t.icon) } else { Label(t.label, systemImage: t.icon) } } // (minimal: icons only)
+                        .tabItem { if app.nav.labels == "never" { Image(systemName: t.icon) } else { Label(t.label, systemImage: t.icon) } } // (minimal: icons only)
                         .badge(t.badge.isEmpty ? 0 : Int(app.get(t.badge)?.number ?? 0))
                         .tag(i)
                     }
@@ -382,6 +482,37 @@ struct PocketRoot: View {
         }
         .tint(app.light.resolve(app.nav.active) ?? app.light.accent)
         .preferredColorScheme(app.colorScheme)
+    }
+}
+
+/// The Bottom Nav's floating styles: a rounded bar inset from the edges, the editor's icons, a highlight on the open tab.
+struct FloatingTabBar: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var body: some View {
+        let p = app.palette(scheme), n = app.nav, on = p.resolve(n.active) ?? p.accent, off = p.resolve(n.idle) ?? p.sub, onSolid = p.resolve(n.on) ?? Color.white
+        HStack(spacing: 0) {
+            ForEach(app.tabs.indices, id: \.self) { i in
+                let t = app.tabs[i], sel = app.tab == i, badge = t.badge.isEmpty ? 0 : Int(app.get(t.badge)?.number ?? 0), tint = sel ? (n.solid ? onSolid : on) : off
+                Button { app.tab = i } label: {
+                    VStack(spacing: 3) {
+                        BarIcon(name: t.name, sf: t.icon, size: 24).foregroundColor(tint)
+                            .frame(width: 62, height: 30)
+                            .background(Capsule().fill(sel && n.pill ? on.opacity(0.22) : Color.clear))
+                            .overlay(alignment: .topTrailing) {
+                                if badge > 0 { Text(badge > 99 ? "99+" : String(badge)).font(.system(size: 10, weight: .heavy)).foregroundColor(.white).padding(.horizontal, 4).background(Capsule().fill(p.danger)).offset(x: -6, y: -2) }
+                            }
+                        if n.labels == "always" || (n.labels == "selected only" && sel) { Text(t.label).font(.system(size: 11, weight: .semibold)).foregroundColor(tint).lineLimit(1) }
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 20).fill(sel && n.solid ? on : Color.clear))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 4).padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 26).fill((p.resolve(n.bar) ?? p.card).opacity(n.style == "glass" ? 0.72 : 1)).shadow(color: .black.opacity(0.35), radius: 11, y: 6))
+        .padding(.horizontal, n.margin).padding(.bottom, max(0, n.margin - 8)) // (above the home bar)
     }
 }
 
@@ -437,7 +568,7 @@ struct PocketBar: ViewModifier {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 if brand { ToolbarItem(placement: .principal) { Text(app.name).font(.system(size: 22, weight: .black)).foregroundColor(p.resolve(b.text) ?? p.text) } }
-                if b.avatar && !back { ToolbarItem(placement: .navigationBarLeading) { Avatar(name: app.meName, seed: app.me, size: 32) } }
+                if b.avatar && !back { ToolbarItem(placement: .navigationBarLeading) { Avatar(name: app.barName.isEmpty ? "?" : app.barName, seed: "?", size: 32) } }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     ForEach(Array(acts.enumerated()), id: \.offset) { _, a in
                         let n = a.badge.isEmpty ? 0 : Int(app.get(a.badge)?.number ?? 0)
@@ -446,7 +577,10 @@ struct PocketBar: ViewModifier {
                             else if a.does.hasPrefix("page:") { app.go(String(a.does.dropFirst(5))) }
                             else { print("TODO: the App Bar button sends \"\(a.does)\"") }
                         } label: {
-                            Image(systemName: symbol(a.icon == "theme" ? (scheme == .dark ? "sun" : "moon") : a.icon)).foregroundColor(ic)
+                            BarIcon(name: a.icon == "theme" ? (scheme == .dark ? "sun" : "moon") : a.icon, size: b.circles == "plain" ? 22 : 18).foregroundColor(ic)
+                                .frame(width: 34, height: 34)
+                                .background(Circle().fill(b.circles == "circles" ? (scheme == .dark ? Color.white.opacity(0.1) : Color.black.opacity(0.06)) : Color.clear)) // circles behind the buttons, or rings
+                                .overlay(Circle().stroke(b.circles == "outlined circles" ? ic.opacity(0.35) : Color.clear, lineWidth: 1.4))
                                 .overlay(alignment: .topTrailing) {
                                     if n > 0 { Text(n > 99 ? "99+" : String(n)).font(.system(size: 10, weight: .heavy)).foregroundColor(.white).padding(.horizontal, 4).background(Capsule().fill(p.danger)).offset(x: 8, y: -6) }
                                 }
@@ -1018,8 +1152,11 @@ extension Dictionary where Key == String, Value == Val {
 }
 
 extension AppState {
-    var me: String { let h = get("playerHandle")?.text ?? ""; return h.isEmpty ? "me" : h }
-    var meName: String { let n = get("playerName")?.text ?? ""; return n.isEmpty ? "Me" : n }
+    /// You: {playerName} and {playerHandle}; no name yet → “You”, @you (the same as the editor).
+    var meName: String { let n = get("playerName")?.text ?? ""; return n.isEmpty ? "You" : n }
+    /// The name on the App Bar's avatar: “Me” until there is a playerName variable, then the name (blank shows “?”).
+    var barName: String { vars["playerName"] == nil ? "Me" : (get("playerName")?.text ?? "") }
+    var me: String { let h = get("playerHandle")?.text ?? ""; return h.isEmpty ? meName.lowercased().replacingOccurrences(of: " ", with: "") : h }
     /// Opens a person's profile page (it shows {profile} and {profile_name}).
     func openProfile(_ page: String, _ handle: String, _ name: String) {
         guard !page.isEmpty else { return }

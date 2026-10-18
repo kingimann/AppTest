@@ -2,7 +2,8 @@
 // codebase (the UI too) runs on Android and iOS. Same model as the Flutter / SwiftUI exports (appmodel.js): pages, the
 // App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and data become Compose code over a fixed
 // runtime (editor/native/kotlin/Pocket.kt); anything else is a TODO placeholder.
-import { appModel, PALETTES } from './appmodel.js';
+import { appModel, PALETTES, barIcons } from './appmodel.js';
+import { NAV_ART } from './navart.js';
 import { nativeReadme, names, listExtras, pinArgs, placeOf, btnExtras } from './nativecode.js';
 import { pbxproj, plist } from './native.js';
 
@@ -92,12 +93,12 @@ ${parts.map((c) => '        ' + c).join('\n')}
 
 const tok = (c, fb) => tokenColor(c) || fb;
 const kBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
-  return `BarStyle(look = ${ks(b.look)}, brandPages = listOf(${b.brandPages.map(ks).join(', ')}), center = ${b.align === 'center'}, avatar = ${b.avatar}, actions = listOf(${b.actions.map((a) => `BarAction(${ks(a.icon)}, ${ks(a.does)}${a.badge ? `, badge = ${ks(a.badge)}` : ''}${a.only.length ? `, only = listOf(${a.only.map(ks).join(', ')})` : ''})`).join(', ')}), bg = ${ks(tok(b.bg, '@bar'))}, text = ${ks(tok(b.text, '@text'))}, icon = ${ks(tok(b.icon, '@text'))}, border = ${b.border}, size = ${Math.round(b.size)})`; };
+  return `BarStyle(look = ${ks(b.look)}, brandPages = listOf(${b.brandPages.map(ks).join(', ')}), center = ${b.align === 'center'}, avatar = ${b.avatar}, circles = ${ks(b.circles || 'plain')}, actions = listOf(${b.actions.map((a) => `BarAction(${ks(a.icon)}, ${ks(a.does)}${a.badge ? `, badge = ${ks(a.badge)}` : ''}${a.only.length ? `, only = listOf(${a.only.map(ks).join(', ')})` : ''})`).join(', ')}), bg = ${ks(tok(b.bg, '@bar'))}, text = ${ks(tok(b.text, '@text'))}, icon = ${ks(tok(b.icon, '@text'))}, border = ${b.border}, size = ${Math.round(b.size)})`; };
 
 function kApp(model, N, pkg) {
   const argb = (h) => '0xFF' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();
   const pal = (P) => `Palette(mapOf(${Object.entries(P).map(([k, v]) => `${ks(k)} to Color(${argb(v)})`).join(', ')}))`;
-  const light = { ...PALETTES.light, accent: model.accent }, dark = { ...PALETTES.dark };
+  const light = { ...PALETTES.light, accent: model.accent || PALETTES.light.accent }, dark = { ...PALETTES.dark, accent: model.accent || PALETTES.dark.accent };
   const field = (f) => `Field(${ks(f.key)}, ${ks(f.name)}, ${ks(f.type)}${f.options.length ? `, options = listOf(${f.options.map(ks).join(', ')})` : ''}${f.def !== '' && f.def != null ? `, def = ${kv(f.def)}` : ''})`;
   const row = (r) => `mapOf(${Object.entries(r).map(([k, v]) => `${ks(k)} to ${kv(v)}`).join(', ')})`;
   return `// ${model.name}: a native Kotlin Multiplatform app (Compose for Android and iOS), made by Pocket Engine's native export.
@@ -113,6 +114,7 @@ import ${pkg}.pages.*
 
 fun setupApp() {
     if (appReady()) return
+    PocketIcons.art.putAll(mapOf(${barIcons(model).filter((n) => NAV_ART[n]).map((n) => `\n        ${ks(n)} to listOf(${NAV_ART[n].map(ks).join(', ')}),`).join('')}${barIcons(model).some((n) => NAV_ART[n]) ? '\n    ' : ''})) // the App Bar's and Bottom Nav's icons, drawn like the editor's
     app = AppState(
         name = ${ks(model.name)},
         home = ${ks(model.home)},
@@ -120,10 +122,10 @@ fun setupApp() {
         light = ${pal(light)},
         dark = ${pal(dark)},
         vars = mapOf(${Object.entries(model.vars).map(([k, v]) => `${ks(k)} to ${kv(v)}`).join(', ')}),
-        tabs = listOf(${model.tabs.map((t) => `\n            NavTab(${ks(t.label)}, ${iconK(t.icon)}, ${ks(t.page)}${t.badge ? `, badge = ${ks(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}),
+        tabs = listOf(${model.tabs.map((t) => `\n            NavTab(${ks(t.label)}, ${NAV_ART[t.icon] ? `PocketIcons.nav(${ks(t.icon)})` : iconK(t.icon)}, ${ks(t.page)}${t.badge ? `, badge = ${ks(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}),
         collections = listOf(${model.collections.map((c) => `\n            Collection(${ks(c.name)}, listOf(${c.fields.map(field).join(', ')})${c.rows.length ? `, sample = listOf(${c.rows.map(row).join(', ')})` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}),
         bar = ${kBar(model)},
-        nav = ${model.nav ? `NavStyle(${ks(model.nav.style)}, ${ks(tok(model.nav.bar, '@bar'))}, ${ks(tok(model.nav.active, '@accent'))}, ${ks(tok(model.nav.idle, '@sub'))})` : 'NavStyle()'},
+        nav = ${model.nav ? `NavStyle(${ks(model.nav.style)}, ${ks(tok(model.nav.bar, '@bar'))}, ${ks(tok(model.nav.active, '@accent'))}, ${ks(tok(model.nav.idle, '@sub'))}, labels = ${ks(model.nav.labels || 'always')}, margin = ${Math.round(+model.nav.margin || 0)}, on = ${ks(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'},
         stats = listOf(${model.stats.map((s) => `\n            Stat(${ks(s.var)}, ${ks(s.collection)}, ${ks(s.how)}${s.field && s.field !== 'field' ? `, field = ${ks(s.field)}` : ''}${s.filter ? `, filter = ${ks(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}),
     )
 }

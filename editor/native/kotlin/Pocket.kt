@@ -26,14 +26,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.addPathNodes
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.serialization.json.*
@@ -63,6 +74,14 @@ data class Stat(val variable: String, val collection: String, val how: String, v
 data class NavTab(val label: String, val icon: ImageVector, val page: String, val badge: String = "")
 
 typealias Row = Map<String, Any?>
+
+/** A button on the right of the App Bar: icon (a name, or theme for the dark mode moon / sun), what it does
+ *  ("dark mode toggle", "page:friends", or a message), a badge variable, and the pages it shows on (empty = all). */
+data class BarAction(val icon: String, val does: String, val badge: String = "", val only: List<String> = emptyList())
+/** The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours. */
+data class BarStyle(val look: String = "standard", val brandPages: List<String> = listOf("home"), val center: Boolean = false, val avatar: Boolean = false, val actions: List<BarAction> = emptyList(), val bg: String = "@bar", val text: String = "@text", val icon: String = "@text", val border: Boolean = true, val size: Int = 19)
+/** The Bottom Nav's style (minimal: icons only) and colours. */
+data class NavStyle(val style: String = "pill", val bar: String = "@bar", val active: String = "@accent", val idle: String = "@sub")
 
 /** The app's colours (@tokens) for light or dark. */
 class Palette(val c: Map<String, Color>) {
@@ -135,6 +154,7 @@ fun appReady(): Boolean = ::app.isInitialized
 class AppState(
     val name: String, val home: String, val light: Palette, val dark: Palette, vars: Map<String, Any?>,
     val tabs: List<NavTab>, val collections: List<Collection>, val stats: List<Stat>, val themeSetting: String = "follow the phone",
+    val bar: BarStyle = BarStyle(), val nav: NavStyle = NavStyle(),
 ) {
     val vars = mutableStateMapOf<String, Any?>()
     val data = mutableStateMapOf<String, List<Row>>()
@@ -151,11 +171,10 @@ class AppState(
     /** Load what was saved on the phone (or the sample records the first time). */
     private fun load() {
         val saved = Store.get("pocket.data")?.let { runCatching { fromJson(Json.parseToJsonElement(it)) as? Map<*, *> }.getOrNull() }
-        val now = nowMs()
         for (c in collections) {
             @Suppress("UNCHECKED_CAST")
             val rows = (saved?.get(c.name) as? List<*>)?.mapNotNull { it as? Map<String, Any?> }
-            data[c.name] = rows ?: c.sample.mapIndexed { i, r -> r + mapOf("_id" to "s$i", "_at" to now - i * 1000) }
+            data[c.name] = rows ?: c.sample.mapIndexed { i, r -> blank(c.name) + r + mapOf("_id" to "s$i", "_at" to (r["_at"] ?: i.toDouble())) } // (later rows count as newer)
         }
         Store.get("pocket.vars")?.let { s -> runCatching { (fromJson(Json.parseToJsonElement(s)) as? Map<*, *>)?.forEach { (k, v) -> vars[k.toString()] = v } } }
         work()
@@ -168,7 +187,57 @@ class AppState(
     }
 
     /** Stats are worked out again whenever the data changes. */
-    private fun work() { for (s in stats) vars[s.variable] = stat(s.collection, s.how, s.field, s.filter) }
+    /** Stats, {posts_count}-style counts and the social counts ({unread}, {notifications_unread}, {friend_requests}). */
+    private fun work() {
+        val me = show(vars["playerHandle"]).ifEmpty { "me" }
+        for (c in collections) vars[c.name.trim().lowercase().replace(Regex("[^a-z0-9]+"), "_") + "_count"] = rows(c.name).size.toDouble()
+        if (def("Notifications") != null) vars["notifications_unread"] = rows("Notifications").count { show(it["to"]) == me && !isOn(it["read"]) }.toDouble()
+        if (def("Friends") != null) vars["friend_requests"] = rows("Friends").count { show(it["status"]) != "accepted" && show(it["to"]) == me }.toDouble()
+        if (def("Messages") != null && stats.none { it.variable == "unread" }) {
+            val read = rows("Reads").filter { show(it["handle"]) == me }.associate { show(it["chat"]) to (num(it["at"]) ?: 0.0) }
+            vars["unread"] = rows("Messages").count { show(it["handle"]) != me && (num(it["_at"]) ?: 0.0) > (read[show(it["chat"])] ?: 0.0) }.toDouble()
+        }
+        for (s in stats) vars[s.variable] = stat(s.collection, s.how, s.field, s.filter)
+    }
+
+    /** A new record's values: each field's default (dates: today). */
+    fun blank(name: String): Row = (def(name)?.fields ?: emptyList()).associate { f ->
+        val d = f.def
+        f.key to (if (d != null && d != "") when {
+            f.type == "yes/no" -> isOn(d)
+            f.type in listOf("number", "money", "rating") -> num(d) ?: 0.0
+            d == "today" && f.type == "date" -> dayOf(nowMs().toLong())
+            else -> d
+        } else when (f.type) {
+            "yes/no" -> false
+            "date" -> dayOf(nowMs().toLong())
+            "choice" -> f.options.firstOrNull() ?: ""
+            "number", "money", "rating" -> 0.0
+            else -> ""
+        })
+    }
+
+    /** How a value reads: dates as Today / Tomorrow / 3 Mar, money with $, yes/no as ✓. */
+    fun text(collection: String?, key: String, v: Any?): String {
+        if (v == null || v == "") return ""
+        val f = def(collection ?: "")?.fields?.firstOrNull { it.key == key }
+        return when (f?.type) {
+            "money" -> { val n = num(v) ?: 0.0; (if (n < 0) "−" else "") + "$" + (kotlin.math.round(kotlin.math.abs(n) * 100) / 100).let { if (it == kotlin.math.floor(it)) it.toLong().toString() else it.toString() } }
+            "yes/no" -> if (isOn(v)) "✓" else ""
+            "date" -> {
+                val k = show(v).take(10)
+                val today = nowMs().toLong()
+                val months = listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+                when (k) {
+                    dayOf(today) -> "Today"
+                    dayOf(today - 86_400_000L) -> "Yesterday"
+                    dayOf(today + 86_400_000L) -> "Tomorrow"
+                    else -> { val p = k.split("-"); if (p.size == 3) "${p[2].toIntOrNull() ?: p[2]} ${months.getOrElse((p[1].toIntOrNull() ?: 1) - 1) { "" }}" + if (p[0] != dayOf(today).take(4)) " ${p[0]}" else "" else show(v) }
+                }
+            }
+            else -> show(v)
+        }
+    }
 
     // ---- variables and text ----
     fun get(k: String): Any? = vars[k]
@@ -176,11 +245,11 @@ class AppState(
     fun add(k: String, by: Double) = set(k, (num(vars[k]) ?: 0.0) + by)
 
     /** "{score} points" → "12 points"; {record_title} is the opened record's title; with a row, {title} is the row's. */
-    fun fill(t: String, row: Row? = null): String = Regex("\\{(\\w+)\\}").replace(t) { m ->
+    fun fill(t: String, row: Row? = null, collection: String? = null): String = Regex("\\{(\\w+)\\}").replace(t) { m ->
         val k = m.groupValues[1]
         when {
-            row != null && row.containsKey(k) -> show(row[k])
-            k.startsWith("record_") -> show(opened?.get(k.removePrefix("record_")))
+            row != null && row.containsKey(k) -> if (collection == null) show(row[k]) else text(collection, k, row[k])
+            k.startsWith("record_") -> text(openCollection, k.removePrefix("record_"), opened?.get(k.removePrefix("record_")))
             else -> show(vars[k])
         }
     }
@@ -248,7 +317,7 @@ class AppState(
 
     fun addRecord(name: String, values: Row): String {
         val id = "r${nowMs().toLong()}${(0..999).random()}"
-        data[name] = rows(name) + (values + mapOf("_id" to id, "_at" to nowMs()))
+        data[name] = rows(name) + (blank(name) + values + mapOf("_id" to id, "_at" to nowMs()))
         changed()
         return id
     }
@@ -303,12 +372,19 @@ fun PocketApp(pages: Map<String, @Composable () -> Unit>) {
             Scaffold(
                 containerColor = p.bg,
                 bottomBar = {
-                    if (app.tabs.isNotEmpty() && stack.isEmpty()) NavigationBar(containerColor = p.card) {
+                    // the project's Bottom Nav: its style (minimal = icons only, no pill) and colours
+                    val n0 = app.nav
+                    val minimal = n0.style == "minimal"
+                    val on = p.resolve(n0.active) ?: p.accent
+                    val off = p.resolve(n0.idle) ?: p.sub
+                    if (app.tabs.isNotEmpty() && stack.isEmpty()) NavigationBar(containerColor = p.resolve(n0.bar) ?: p.card) {
                         app.tabs.forEachIndexed { i, t ->
                             val n = if (t.badge.isEmpty()) 0 else (num(app.get(t.badge)) ?: 0.0).toInt()
                             NavigationBarItem(
-                                selected = app.tab == i, onClick = { app.go(t.page) }, label = { Text(t.label) },
-                                icon = { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(t.icon, contentDescription = t.label) } },
+                                selected = app.tab == i, onClick = { app.go(t.page) },
+                                label = if (minimal) null else ({ Text(t.label) }), alwaysShowLabel = !minimal,
+                                icon = { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(t.icon, contentDescription = t.label, modifier = Modifier.size(if (minimal) 28.dp else 24.dp)) } },
+                                colors = NavigationBarItemDefaults.colors(selectedIconColor = on, unselectedIconColor = off, selectedTextColor = on, unselectedTextColor = off, indicatorColor = if (minimal) Color.Transparent else on.copy(alpha = 0.18f)),
                             )
                         }
                     }
@@ -324,17 +400,11 @@ fun PocketApp(pages: Map<String, @Composable () -> Unit>) {
 
 /** A page: its title (with a back arrow on pages opened on top), then what's on it (a list or form fills the rest). */
 @Composable
-fun PocketPage(title: String, scroll: Boolean = true, appBar: Boolean = true, fab: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
+fun PocketPage(title: String, page: String = "", scroll: Boolean = true, appBar: Boolean = true, fab: (() -> Unit)? = null, content: @Composable ColumnScope.() -> Unit) {
     val p = LocalPalette.current
     Scaffold(
         containerColor = p.bg,
-        topBar = {
-            if (appBar) TopAppBar(
-                title = { Text(app.fill(title), fontWeight = FontWeight.ExtraBold) },
-                navigationIcon = { if (app.stack.isNotEmpty()) IconButton(onClick = { app.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") } },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = p.card, titleContentColor = p.text, navigationIconContentColor = p.text),
-            )
-        },
+        topBar = { if (appBar) PocketBar(title, page) },
         floatingActionButton = { if (fab != null) FloatingActionButton(onClick = fab, containerColor = p.accent, contentColor = p.onAccent, shape = CircleShape) { Icon(Icons.Filled.Add, contentDescription = "Add") } },
     ) { pad ->
         Column(
@@ -343,6 +413,48 @@ fun PocketPage(title: String, scroll: Boolean = true, appBar: Boolean = true, fa
             content = content,
         )
     }
+}
+
+/** The project's App Bar: its look (x: your avatar on the left and the app's name on the home page), title position, buttons with badges, colours. */
+@Composable
+fun PocketBar(title: String, page: String) {
+    val p = LocalPalette.current
+    val b = app.bar
+    val back = app.stack.isNotEmpty()
+    val brand = b.look != "standard" && !back && (b.brandPages.isEmpty() || page in b.brandPages)
+    val ic = p.resolve(b.icon) ?: p.text
+    val dark = p === app.dark
+    val colors = TopAppBarDefaults.topAppBarColors(containerColor = p.resolve(b.bg) ?: p.card, titleContentColor = p.resolve(b.text) ?: p.text, navigationIconContentColor = ic, actionIconContentColor = ic)
+    val titleText: @Composable () -> Unit = { Text(if (brand) app.name else app.fill(title), fontWeight = if (brand) FontWeight.Black else FontWeight.ExtraBold, fontSize = (if (brand) 22 else b.size).sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+    val nav: @Composable () -> Unit = {
+        if (back) IconButton(onClick = { app.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
+        else if (b.avatar) Box(Modifier.padding(start = 12.dp)) { Avatar(meName, me, 34) }
+    }
+    val actions: @Composable RowScope.() -> Unit = {
+        for (a in b.actions.reversed()) { // (the first sits at the right edge)
+            if (a.only.isNotEmpty() && page !in a.only) continue
+            val n = if (a.badge.isEmpty()) 0 else (num(app.get(a.badge)) ?: 0.0).toInt()
+            IconButton(onClick = {
+                when {
+                    "dark mode" in a.does -> app.set("darkMode", !dark)
+                    a.does.startsWith("page:") -> app.go(a.does.removePrefix("page:"))
+                    else -> println("TODO: the App Bar button sends \"${a.does}\"")
+                }
+            }) { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(PocketIcons.get(if (a.icon == "theme") (if (dark) "sun" else "moon") else a.icon), contentDescription = a.icon, tint = ic) } }
+        }
+    }
+    Column {
+        if (b.center) CenterAlignedTopAppBar(title = titleText, navigationIcon = nav, actions = actions, colors = colors)
+        else TopAppBar(title = titleText, navigationIcon = nav, actions = actions, colors = colors)
+        if (b.border) HorizontalDivider(color = p.line)
+    }
+}
+
+/** Runs edge to edge on a page (a feed), out of the page's side margins. */
+fun Modifier.bleed(by: Dp = 16.dp) = layout { m, c ->
+    val px = by.roundToPx()
+    val pl = m.measure(c.copy(minWidth = (c.minWidth + 2 * px).coerceAtLeast(0), maxWidth = if (c.hasBoundedWidth) c.maxWidth + 2 * px else c.maxWidth))
+    layout(if (c.hasBoundedWidth) c.maxWidth else pl.width, pl.height) { pl.place(-px, 0) }
 }
 
 /** Text with {variables} filled in. */
@@ -377,7 +489,21 @@ fun PCard(content: @Composable RowScope.() -> Unit) {
 
 /** A text box that edits a variable (search boxes too). */
 @Composable
-fun VarField(variable: String, placeholder: String = "", keyboard: String = "text") {
+fun VarField(variable: String, placeholder: String = "", keyboard: String = "text", outlined: Boolean = false) {
+    val p = LocalPalette.current
+    if (outlined) { // a white box with a thin line (the project's input has a stroke)
+        OutlinedTextField(
+            value = show(app.get(variable)),
+            onValueChange = { app.set(variable, if (keyboard == "number") it.toDoubleOrNull() ?: 0.0 else it) },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(placeholder) },
+            singleLine = true,
+            leadingIcon = if (keyboard == "search") ({ Icon(Icons.Filled.Search, contentDescription = null, tint = p.sub) }) else null,
+            shape = RoundedCornerShape(12.dp),
+            colors = OutlinedTextFieldDefaults.colors(unfocusedContainerColor = p.card, focusedContainerColor = p.card, unfocusedBorderColor = p.line, focusedBorderColor = p.accent),
+        )
+        return
+    }
     TextField(
         value = show(app.get(variable)),
         onValueChange = { app.set(variable, if (keyboard == "number") it.toDoubleOrNull() ?: 0.0 else it) },
@@ -402,31 +528,43 @@ fun VarSwitch(variable: String, label: String = "") {
     }
 }
 
-/** The records of a collection: tap one to open it, tick its checkbox, delete it. */
+/** The records of a collection, the way the app draws them: a round tick, the title (struck through when done), the line under it; tap to open, swipe left to delete. */
 @Composable
-fun RecordList(collection: String, modifier: Modifier = Modifier, title: String = "{title}", subtitle: String = "", icon: String = "", check: String = "", search: String = "", filter: String = "", sort: String = "newest first", openPage: String = "", empty: String = "Nothing here yet") {
+fun RecordList(collection: String, modifier: Modifier = Modifier, title: String = "{title}", subtitle: String = "", right: String = "", icon: String = "", check: String = "", search: String = "", filter: String = "", sort: String = "newest first", openPage: String = "", empty: String = "Nothing here yet", swipeDelete: Boolean = true, rowH: Int = 64, gap: Int = 8, radius: Int = 14, doneLook: Boolean = true) {
     val p = LocalPalette.current
     val rows = app.query(collection, filter, if (search.isEmpty()) "" else show(app.get(search)), sort)
     if (rows.isEmpty()) {
         Box(modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text(empty, color = p.sub, textAlign = TextAlign.Center) }
         return
     }
-    LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(bottom = 96.dp)) {
+    val shape = RoundedCornerShape(radius.dp)
+    LazyColumn(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(gap.dp), contentPadding = PaddingValues(bottom = 96.dp)) {
         items(rows, key = { show(it["_id"]) }) { r ->
             val id = show(r["_id"])
             val done = check.isNotEmpty() && isOn(r[check])
-            Row(
-                Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).clickable(enabled = openPage.isNotEmpty()) { app.open(collection, id); app.go(openPage) }.padding(horizontal = 12.dp, vertical = 10.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (check.isNotEmpty()) Checkbox(checked = done, onCheckedChange = { app.updateRecord(collection, id, mapOf(check to it)) })
-                else if (icon.isNotEmpty()) Text(app.fill(icon, r), fontSize = 26.sp, modifier = Modifier.padding(end = 12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(app.fill(title, r), fontWeight = FontWeight.Bold, color = if (done) p.sub else p.text, textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (subtitle.isNotEmpty()) Text(app.fill(subtitle, r), color = p.sub, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
+            val row: @Composable () -> Unit = {
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = rowH.dp).background(p.card, shape).clip(shape).clickable(enabled = openPage.isNotEmpty()) { app.open(collection, id); app.go(openPage) }.padding(horizontal = 14.dp, vertical = 10.dp).alpha(if (done && doneLook) 0.55f else 1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (check.isNotEmpty()) Box(
+                        Modifier.padding(end = 14.dp).size(28.dp).clip(CircleShape).background(if (done) p.accent else Color.Transparent).border(2.dp, if (done) p.accent else p.sub, CircleShape).clickable { app.updateRecord(collection, id, mapOf(check to !done)) },
+                        contentAlignment = Alignment.Center,
+                    ) { if (done) Icon(Icons.Filled.Check, contentDescription = "Done", tint = Color.White, modifier = Modifier.size(18.dp)) }
+                    else if (icon.isNotEmpty()) Text(app.fill(icon, r, collection), fontSize = 26.sp, modifier = Modifier.padding(end = 14.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(app.fill(title, r, collection), fontSize = 16.sp, fontWeight = FontWeight.Bold, color = p.text, textDecoration = if (done) TextDecoration.LineThrough else null, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (subtitle.isNotEmpty()) Text(app.fill(subtitle, r, collection), color = p.sub, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, fontSize = 14.sp)
+                    }
+                    if (right.isNotEmpty()) Text(app.fill(right, r, collection), color = p.sub, fontWeight = FontWeight.Bold)
                 }
-                IconButton(onClick = { app.deleteRecord(collection, id) }) { Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = p.sub) }
-                if (openPage.isNotEmpty()) Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = p.sub)
+            }
+            if (!swipeDelete) row()
+            else {
+                val state = rememberSwipeToDismissBoxState(confirmValueChange = { if (it == SwipeToDismissBoxValue.EndToStart) { app.deleteRecord(collection, id); true } else false })
+                SwipeToDismissBox(state, enableDismissFromStartToEnd = false, backgroundContent = {
+                    Box(Modifier.fillMaxSize().background(p.danger, shape).padding(end = 24.dp), contentAlignment = Alignment.CenterEnd) { Text("Delete", color = Color.White, fontWeight = FontWeight.ExtraBold) }
+                }) { row() }
             }
         }
     }
@@ -517,11 +655,61 @@ fun TodoBox(name: String, type: String) {
 val me: String get() = show(app.get("playerHandle")).ifEmpty { "me" }
 val meName: String get() = show(app.get("playerName")).ifEmpty { "Me" }
 fun Row.s(k: String): String = show(this[k])
-private val avatarColors = listOf(0xFFEF4444, 0xFFF59E0B, 0xFF10B981, 0xFF3B82F6, 0xFF8B5CF6, 0xFFEC4899, 0xFF14B8A6, 0xFFF97316)
-fun avatarColor(s: String): Color = Color(avatarColors[s.sumOf { it.code } % avatarColors.size])
-fun firstMedia(m: Any?): String = show(m).split("|").first().trim()
+// the engine's avatar colours and initials (Maya Chen → MC)
+private val avatarColors = listOf(0xFFEF5350, 0xFFEC407A, 0xFFAB47BC, 0xFF7E57C2, 0xFF5C6BC0, 0xFF42A5F5, 0xFF26A69A, 0xFF66BB6A, 0xFFFFA726, 0xFF8D6E63)
+fun avatarColor(s: String): Color {
+    var n = 0L
+    for (c in s.ifEmpty { "?" }) n = (n * 31 + c.code) and 0xFFFFFFFFL
+    return Color(avatarColors[(n % avatarColors.size).toInt()])
+}
+fun initials(s: String): String = s.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }.take(2).joinToString("") { it.take(1).uppercase() }.ifEmpty { "?" }
+fun mediaList(m: Any?): List<String> = show(m).split("|").map { it.trim() }.filter { it.isNotEmpty() }
+fun firstMedia(m: Any?): String = mediaList(m).firstOrNull() ?: ""
 fun isUrl(s: String): Boolean = s.startsWith("http:") || s.startsWith("https:")
-fun colorOf(r: Row, seed: String): Color = app.light.resolve(r.s("color").takeIf { it.startsWith("#") }) ?: avatarColor(seed)
+fun hexColor(v: String): Color? = if (Regex("^#[0-9a-fA-F]{6}$").matches(v)) Color(0xFF000000 or v.drop(1).toLong(16)) else null
+fun colorOf(r: Row, seed: String): Color = hexColor(r.s("color")) ?: avatarColor(seed)
+/** 1284 → 1.3K, 48200 → 48K. */
+fun compactNum(v: Any?): String {
+    val n = num(v) ?: 0.0
+    fun one(x: Double) = (kotlin.math.round(x * 10) / 10).let { if (it == kotlin.math.floor(it)) it.toLong().toString() else it.toString() }
+    return when { n < 1000 -> kotlin.math.round(n).toLong().toString(); n < 10_000 -> one(n / 1000) + "K"; n < 1e6 -> kotlin.math.round(n / 1000).toLong().toString() + "K"; else -> one(n / 1e6) + "M" }
+}
+/** 9m, 2h, 3d, then the date. */
+fun ago(at: Any?): String {
+    val t = num(at) ?: 0.0
+    if (t < 1e11) return ""
+    val s = (nowMs() - t) / 1000
+    return when {
+        s < 60 -> "now"; s < 3600 -> "${(s / 60).toInt()}m"; s < 86400 -> "${(s / 3600).toInt()}h"; s < 604800 -> "${(s / 86400).toInt()}d"
+        else -> dayOf(t.toLong()).split("-").let { p -> listOf("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec").getOrElse((p[1].toIntOrNull() ?: 1) - 1) { "" } + " " + (p[2].toIntOrNull() ?: 1) }
+    }
+}
+/** The colours of a CSS gradient ("linear-gradient(135deg,#f58529,#dd2a7b)"). */
+fun gradientColors(bg: Any?): List<Color> = Regex("#[0-9a-fA-F]{6}").findAll(show(bg)).mapNotNull { hexColor(it.value) }.toList()
+
+/** Line icons drawn from SVG paths (the same shapes as the editor's preview), so no icon library is needed. */
+object PocketIcons {
+    private val paths = mapOf(
+        "comment" to "M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z", "repost" to "M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4",
+        "heart" to "M12 20s-8-5-8-11a4 4 0 0 1 8-1 4 4 0 0 1 8 1c0 6-8 11-8 11z", "views" to "M5 20V10M10 20V4M15 20v-7M20 20v-4", "bookmark" to "M6 3h12v18l-6-4-6 4z",
+        "share" to "M12 3v13M7 8l5-5 5 5M5 14v6h14v-6", "more" to "M5 12h.01M12 12h.01M19 12h.01", "moon" to "M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z",
+        "sun" to "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
+        "users" to "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM1 21a8 8 0 0 1 16 0M17 3.5a4 4 0 0 1 0 7.5M23 21a7 7 0 0 0-4-6.3", "bell" to "M6 16V11a6 6 0 0 1 12 0v5l2 2H4zm4 4h4",
+        "info" to "M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01", "search" to "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm10 17l-5-5", "settings" to "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+        "user" to "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0", "chat" to "M4 5h16v11H8l-4 4z", "home" to "M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z",
+        "plus" to "M12 5v14M5 12h14", "circle" to "M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z",
+    )
+    private val alias = mapOf("friends" to "users", "profile" to "user", "explore" to "search", "gear" to "settings", "add" to "plus")
+    private val cache = mutableMapOf<String, ImageVector>()
+    /** filled: heart and bookmark when they're on. */
+    fun get(name: String, filled: Boolean = false): ImageVector = cache.getOrPut("$name$filled") {
+        val d = paths[alias[name] ?: name] ?: paths.getValue("circle")
+        ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).addPath(
+            pathData = addPathNodes(d), fill = if (filled) SolidColor(Color.Black) else null, stroke = SolidColor(Color.Black),
+            strokeLineWidth = 2f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round,
+        ).build()
+    }
+}
 
 /** Opens a person's profile page (it shows {profile} and {profile_name}). */
 fun openProfile(page: String, handle: String, name: String) {
@@ -533,18 +721,49 @@ fun openProfile(page: String, handle: String, name: String) {
 
 @Composable
 fun Avatar(name: String, seed: String, size: Int = 40, label: String? = null) {
-    Box(Modifier.size(size.dp).background(avatarColor(seed.ifEmpty { name }), CircleShape), contentAlignment = Alignment.Center) {
-        Text(label ?: name.trim().take(1).uppercase().ifEmpty { "?" }, color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = (size * 0.42).sp)
+    Box(Modifier.size(size.dp).background(avatarColor(name.ifEmpty { seed }), CircleShape), contentAlignment = Alignment.Center) {
+        Text(label ?: initials(name.ifEmpty { seed }), color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = (size * (if (label == null) 0.38 else 0.5)).sp)
     }
 }
 
-/** A post's picture: an emoji on the post's colour (a photo link shows 🖼️: add an image library such as Coil to load it). */
+/** A picture: an emoji on a colour (a photo link shows 🖼️: add an image library such as Coil to load it). */
+@Composable
+fun Tile(media: String, color: Color, height: Dp, modifier: Modifier = Modifier) {
+    Box(modifier.fillMaxWidth().height(height).background(color), contentAlignment = Alignment.Center) {
+        Text(if (isUrl(media)) "🖼️" else media, fontSize = (minOf(height.value, 150f) * 0.42f).sp)
+    }
+}
+
+/** A post's first picture (rounded). */
 @Composable
 fun Media(r: Row, height: Int = 200, radius: Int = 12) {
     val m = firstMedia(r["media"])
     if (m.isEmpty()) return
-    Box(Modifier.fillMaxWidth().height(height.dp).background(colorOf(r, r.s("handle") + m), RoundedCornerShape(radius.dp)), contentAlignment = Alignment.Center) {
-        Text(if (isUrl(m)) "🖼️" else m, fontSize = (height * 0.4).sp)
+    Tile(m, colorOf(r, r.s("handle") + m), height.dp, Modifier.clip(RoundedCornerShape(radius.dp)))
+}
+
+/** 1 to 4 pictures, laid out like the app's feed: one big, two side by side, one big and two stacked, two by two. */
+@Composable
+fun MediaGrid(r: Row, height: Int = 220) {
+    val p = LocalPalette.current
+    val l = mediaList(r["media"]).take(4)
+    if (l.isEmpty()) return
+    val bg = colorOf(r, r.s("handle") + l[0])
+    val h = height.dp
+    val half = (height / 2 - 1).dp
+    val shape = RoundedCornerShape(16.dp)
+    Box(Modifier.fillMaxWidth().clip(shape).border(1.dp, p.line, shape)) {
+        when (l.size) {
+            1 -> Tile(l[0], bg, h)
+            else -> Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                @Composable fun RowScope.col(a: String, b: String) = Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) { Tile(a, bg, half); Tile(b, bg, half) }
+                when (l.size) {
+                    2 -> { Tile(l[0], bg, h, Modifier.weight(1f)); Tile(l[1], bg, h, Modifier.weight(1f)) }
+                    3 -> { Tile(l[0], bg, h, Modifier.weight(1f)); col(l[1], l[2]) }
+                    else -> { col(l[0], l[2]); col(l[1], l[3]) }
+                }
+            }
+        }
     }
 }
 
@@ -553,84 +772,171 @@ private fun Empty(text: String) {
     Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) { Text(text, color = LocalPalette.current.sub, textAlign = TextAlign.Center) }
 }
 
-/** Posts, newest first: like, repost, save; tap the author for their profile. look: timeline, reels or grid. */
+/** A tab on top of a feed: its name and which posts it shows (following, saved, media, replies, posts, likes, or a filter). */
+data class FeedTab(val label: String, val only: String = "", val look: String = "")
+
+/** Posts, newest first, the way the app draws them (X style): avatar, name ✓ @handle · 9m, text with #tags, pictures, and
+ *  comment / repost / like / views / save / share. Tap the author for their profile. look: timeline, reels or grid. */
 @Composable
-fun SocialFeed(collection: String = "Posts", look: String = "timeline", filter: String = "", search: String = "", columns: Int = 3, profilePage: String = "", empty: String = "No posts yet") {
+fun SocialFeed(collection: String = "Posts", look: String = "timeline", filter: String = "", search: String = "", columns: Int = 3, profilePage: String = "", empty: String = "No posts yet", tabs: List<FeedTab> = emptyList(), actions: List<String> = listOf("comment", "repost", "like", "share")) {
     val p = LocalPalette.current
-    val rows = app.query(collection, filter, if (search.isEmpty()) "" else show(app.get(search)))
-    if (rows.isEmpty()) { Empty(empty); return }
+    var tab by remember { mutableStateOf(0) }
+    val t = tabs.getOrNull(tab.coerceIn(0, maxOf(0, tabs.size - 1)))
+    val test: ((Row) -> Boolean)? = when (t?.only?.trim()?.lowercase() ?: "") {
+        "" -> { _ -> true }
+        "following" -> { val f = app.rows("Follows").filter { it.s("follower") == me }.map { it.s("followee") }.toSet(); { r -> r.s("handle") in f || isOn(r["following"]) } }
+        "saved" -> { r -> isOn(r["saved"]) }
+        "media" -> { r -> firstMedia(r["media"]).isNotEmpty() }
+        "replies" -> { r -> r.s("reply_to").isNotEmpty() }
+        "posts" -> { r -> r.s("reply_to").isEmpty() }
+        "likes" -> { r -> isOn(r["liked"]) }
+        else -> null // a filter: for the query
+    }
+    val rows = app.query(collection, listOf(filter, if (t != null && test == null) t.only else "").filter { it.isNotEmpty() }.joinToString(" and "), if (search.isEmpty()) "" else show(app.get(search))).filter(test ?: { true })
+    val shown = t?.look?.ifEmpty { null } ?: look
     fun toggle(r: Row, flag: String, count: String? = null) {
         val now = !isOn(r[flag])
         val change = mutableMapOf<String, Any?>(flag to now)
         if (count != null) change[count] = maxOf(0.0, (num(r[count]) ?: 0.0) + if (now) 1.0 else -1.0)
         app.updateRecord(collection, r.s("_id"), change)
     }
-    if (look == "grid") {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            for (line in rows.chunked(columns)) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                for (r in line) Box(Modifier.weight(1f).clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }) {
-                    if (firstMedia(r["media"]).isEmpty()) Text(r.s("text"), maxLines = 4, fontSize = 11.sp, color = p.text, modifier = Modifier.fillMaxWidth().height(120.dp).background(p.field).padding(6.dp)) else Media(r, 120, 6)
-                }
-                repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
-            }
-        }
-        return
-    }
-    @Composable
-    fun RowScope.action(label: String, lit: Boolean, color: Color, onClick: () -> Unit) =
-        TextButton(onClick, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 4.dp)) { Text(label, color = if (lit) color else p.sub, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        for (r in rows) Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }, verticalAlignment = Alignment.CenterVertically) {
-                Avatar(r.s("author"), r.s("handle"))
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(r.s("author") + if (isOn(r["verified"])) " ✓" else "", fontWeight = FontWeight.ExtraBold, color = p.text)
-                    Text("@${r.s("handle")}" + if (r.s("location").isEmpty()) "" else " · ${r.s("location")}", color = p.sub, fontSize = 14.sp)
-                }
-            }
-            if (r.s("text").isNotEmpty()) Text(r.s("text"), color = p.text, fontSize = 16.sp)
-            Media(r, if (look == "reels") 380 else 200)
+    Column(Modifier.bleed()) {
+        if (tabs.size > 1) {
             Row(Modifier.fillMaxWidth()) {
-                action("💬 ${show(num(r["comments"]) ?: 0.0)}", false, p.accent) {}
-                action("🔁 ${show(num(r["reposts"]) ?: 0.0)}", isOn(r["reposted"]), Color(0xFF10B981)) { toggle(r, "reposted", "reposts") }
-                action("${if (isOn(r["liked"])) "❤️" else "🤍"} ${show(num(r["likes"]) ?: 0.0)}", isOn(r["liked"]), p.danger) { toggle(r, "liked", "likes") }
-                action(if (isOn(r["saved"])) "🔖 Saved" else "🔖", isOn(r["saved"]), p.accent) { toggle(r, "saved") }
+                tabs.forEachIndexed { i, tb ->
+                    Column(Modifier.weight(1f).clickable { tab = i }.padding(top = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(tb.label, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (i == tab) p.text else p.sub)
+                        Spacer(Modifier.height(10.dp))
+                        Box(Modifier.width(48.dp).height(4.dp).background(if (i == tab) p.accent else Color.Transparent, RoundedCornerShape(2.dp)))
+                    }
+                }
+            }
+            HorizontalDivider(color = p.line)
+        }
+        if (rows.isEmpty()) { Empty(empty); return@Column }
+        when (shown) {
+            "grid" -> Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                for (line in rows.chunked(columns)) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (r in line) Box(Modifier.weight(1f).clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }) {
+                        if (firstMedia(r["media"]).isEmpty()) Text(r.s("text"), maxLines = 4, fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.fillMaxWidth().height(120.dp).background(avatarColor(r.s("author"))).padding(6.dp)) else Media(r, 120, 6)
+                    }
+                    repeat(columns - line.size) { Spacer(Modifier.weight(1f)) }
+                }
+            }
+            else -> for (r in rows) {
+                @Composable
+                fun RowScope.action(name: String, count: String, lit: Boolean, color: Color, grow: Boolean = true, onClick: (() -> Unit)?) {
+                    Row(Modifier.then(if (grow) Modifier.weight(1f) else Modifier).clickable(enabled = onClick != null) { onClick?.invoke() }.padding(vertical = 8.dp, horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(PocketIcons.get(name, filled = lit && name in listOf("heart", "bookmark")), contentDescription = name, tint = if (lit) color else p.sub, modifier = Modifier.size(19.dp))
+                        if (count.isNotEmpty()) Text(count, fontSize = 13.5.sp, color = if (lit) color else p.sub, maxLines = 1, modifier = Modifier.padding(start = 4.dp))
+                    }
+                }
+                val acts: @Composable () -> Unit = {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        for (a in actions) when (a) {
+                            "comment" -> action("comment", compactNum(r["comments"]), false, p.accent, onClick = null)
+                            "repost" -> action("repost", compactNum(r["reposts"]), isOn(r["reposted"]), Color(0xFF00BA7C)) { toggle(r, "reposted", "reposts") }
+                            "like" -> action("heart", compactNum(r["likes"]), isOn(r["liked"]), Color(0xFFF91880)) { toggle(r, "liked", "likes") }
+                            "views" -> action("views", compactNum(r["views"]), false, p.accent, onClick = null)
+                            "save" -> action("bookmark", "", isOn(r["saved"]), p.accent, grow = false) { toggle(r, "saved") }
+                            "share" -> action("share", "", false, p.accent, grow = false, onClick = null)
+                        }
+                    }
+                }
+                if (shown == "reels") {
+                    Column(Modifier.padding(horizontal = 16.dp, vertical = 5.dp).fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(Modifier.clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }, verticalAlignment = Alignment.CenterVertically) {
+                            Avatar(r.s("author"), r.s("handle")); Spacer(Modifier.width(10.dp))
+                            Column { Text(r.s("author"), fontWeight = FontWeight.ExtraBold, color = p.text); Text("@${r.s("handle")}", color = p.sub) }
+                        }
+                        if (firstMedia(r["media"]).isNotEmpty()) Media(r, 380) else Text(r.s("text"), color = p.text, fontSize = 16.sp)
+                        acts()
+                    }
+                    continue
+                }
+                val grad = if (firstMedia(r["media"]).isEmpty()) gradientColors(r["background"]) else emptyList()
+                val sub = listOf("@${r.s("handle")}", ago(r["_at"]), if (r.s("location").isEmpty()) "" else "📍 ${r.s("location")}").filter { it.isNotEmpty() }.joinToString(" · ")
+                Column(Modifier.fillMaxWidth()) {
+                    Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 2.dp)) {
+                        Box(Modifier.clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }) { Avatar(r.s("author"), r.s("handle"), 46) }
+                        Spacer(Modifier.width(10.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(Modifier.clickable { openProfile(profilePage, r.s("handle"), r.s("author")) }, verticalAlignment = Alignment.CenterVertically) {
+                                Text(r.s("author"), fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = p.text, maxLines = 1)
+                                if (isOn(r["verified"])) Box(Modifier.padding(start = 3.dp).size(17.dp).background(p.accent, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.Check, contentDescription = "Verified", tint = Color.White, modifier = Modifier.size(12.dp)) }
+                                Text(" $sub", color = p.sub, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                                Icon(PocketIcons.get("more"), contentDescription = "More", tint = p.sub, modifier = Modifier.size(20.dp))
+                            }
+                            if (grad.isNotEmpty()) Box(Modifier.fillMaxWidth().height(150.dp).clip(RoundedCornerShape(16.dp)).background(androidx.compose.ui.graphics.Brush.linearGradient(if (grad.size > 1) grad else listOf(grad[0], grad[0]))).padding(18.dp), contentAlignment = Alignment.Center) {
+                                Text(r.s("text"), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+                            }
+                            else if (r.s("text").isNotEmpty()) Text(buildAnnotatedString {
+                                var at = 0
+                                for (m in Regex("[#@]\\w+").findAll(r.s("text"))) {
+                                    append(r.s("text").substring(at, m.range.first))
+                                    withStyle(SpanStyle(color = p.accent)) { append(m.value) }
+                                    at = m.range.last + 1
+                                }
+                                append(r.s("text").substring(at))
+                            }, color = p.text, fontSize = 16.sp)
+                            if (r.s("poll").isNotEmpty()) for (o in r.s("poll").split("|")) Box(Modifier.fillMaxWidth().border(1.dp, p.accent, RoundedCornerShape(999.dp)).padding(vertical = 7.dp), contentAlignment = Alignment.Center) { Text(o.trim(), color = p.accent, fontWeight = FontWeight.Bold) }
+                            if (r.s("link").isNotEmpty()) Column(Modifier.fillMaxWidth().border(1.dp, p.line, RoundedCornerShape(14.dp)).padding(10.dp)) {
+                                Text(r.s("link_title").ifEmpty { r.s("link") }, fontWeight = FontWeight.Bold, color = p.text)
+                                Text(r.s("link").removePrefix("https://").removePrefix("http://").substringBefore("/"), color = p.sub)
+                            }
+                            if (firstMedia(r["media"]).isNotEmpty()) Box(Modifier.padding(top = 4.dp)) { MediaGrid(r) }
+                            acts()
+                        }
+                    }
+                    HorizontalDivider(color = p.line)
+                }
             }
         }
     }
 }
 
 @Composable
-private fun SendBox(placeholder: String, button: String, onSend: (String) -> Unit) {
+private fun SendBox(placeholder: String, button: String, card: Boolean = true, avatar: Boolean = false, onSend: (String) -> Unit) {
     val p = LocalPalette.current
     var text by remember { mutableStateOf("") }
-    Row(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text(placeholder) }, singleLine = true, shape = RoundedCornerShape(12.dp), colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
-        Button({ if (text.isNotBlank()) { onSend(text.trim()); text = "" } }, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent)) { Text(button) }
+    Row(Modifier.fillMaxWidth().then(if (card) Modifier.background(p.card, RoundedCornerShape(16.dp)).padding(8.dp) else Modifier), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (avatar) Avatar(meName, me)
+        TextField(text, { text = it }, Modifier.weight(1f), placeholder = { Text(placeholder) }, singleLine = true, shape = RoundedCornerShape(if (card) 12.dp else 999.dp), colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent))
+        Button({ if (text.isNotBlank()) { onSend(text.trim()); text = "" } }, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent)) { Text(button, fontWeight = FontWeight.ExtraBold) }
     }
 }
 
 /** A box to write a post: Post adds it to the top of the feed. */
 @Composable
 fun Composer(collection: String = "Posts", placeholder: String = "What’s happening?") =
-    SendBox(placeholder, "Post") { app.addRecord(collection, mapOf("author" to meName, "handle" to me, "text" to it, "likes" to 0.0, "comments" to 0.0, "reposts" to 0.0, "liked" to false, "reposted" to false, "saved" to false)) }
+    SendBox(placeholder, "Post", card = false, avatar = true) { app.addRecord(collection, mapOf("author" to meName, "handle" to me, "text" to it)) }
 
-/** Story circles; tap one to see it. */
+/** Story circles, one per person (newest first), "Your story" first; tap one to see it. */
 @Composable
-fun Stories(collection: String = "Stories") {
+fun Stories(collection: String = "Stories", yours: Boolean = true) {
     val p = LocalPalette.current
     var open by remember { mutableStateOf<Row?>(null) }
-    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        for (r in app.query(collection)) Column(Modifier.clickable { open = r }, horizontalAlignment = Alignment.CenterHorizontally) {
+    val rows = app.query(collection).filter { it.s("handle") != me }.distinctBy { it.s("handle").ifEmpty { it.s("author") } }
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+        if (yours) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(Modifier.padding(3.dp)) {
+                Avatar(meName, me, 62)
+                Box(Modifier.align(Alignment.BottomEnd).size(22.dp).background(p.bg, CircleShape).padding(2.dp).background(p.accent, CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Filled.Add, contentDescription = "Add a story", tint = Color.White, modifier = Modifier.size(14.dp)) }
+            }
+            Text("Your story", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = p.text, modifier = Modifier.padding(top = 4.dp))
+        }
+        for (r in rows) Column(Modifier.clickable { open = r }, horizontalAlignment = Alignment.CenterHorizontally) {
             val m = firstMedia(r["media"])
-            Box(Modifier.size(62.dp).border(3.dp, p.accent, CircleShape).padding(5.dp)) { Avatar(r.s("author"), r.s("handle"), 52, if (m.isEmpty() || isUrl(m)) null else m) }
-            Text(r.s("author").substringBefore(" "), fontSize = 11.sp, color = p.text)
+            Box(Modifier.size(68.dp).background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFF8B5CF6))), CircleShape).padding(3.dp).background(p.bg, CircleShape).padding(2.dp), contentAlignment = Alignment.Center) {
+                if (m.isEmpty() || isUrl(m)) Avatar(r.s("author"), r.s("handle"), 58)
+                else Box(Modifier.size(58.dp).background(colorOf(r, r.s("author")), CircleShape), contentAlignment = Alignment.Center) { Text(m, fontSize = 27.sp) }
+            }
+            Text(r.s("author").substringBefore(" "), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = p.text, modifier = Modifier.padding(top = 4.dp))
         }
     }
     open?.let { r ->
         AlertDialog(
-            onDismissRequest = { open = null }, containerColor = colorOf(r, r.s("handle")),
+            onDismissRequest = { open = null }, containerColor = colorOf(r, r.s("author")),
             confirmButton = { TextButton({ open = null }) { Text("Close", color = Color.White) } },
             title = { Text(r.s("author"), color = Color.White, fontWeight = FontWeight.ExtraBold) },
             text = { Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) { Text(firstMedia(r["media"]), fontSize = 96.sp); Text(r.s("text"), color = Color.White, textAlign = TextAlign.Center) } },
@@ -689,7 +995,7 @@ fun ProfileHeader(name: String = "{playerName}", handle: String = "{playerHandle
     val p = LocalPalette.current
     val n = app.fill(name)
     val h = app.fill(handle)
-    val own = mapOf("posts_count" to app.rows("Posts").count { it.s("handle") == h }.toDouble(), "points" to (num(app.get("points")) ?: 0.0))
+    val own = mapOf("points" to (num(app.get("points")) ?: 0.0))
     Column(Modifier.fillMaxWidth().background(p.card, RoundedCornerShape(16.dp)).padding(bottom = 14.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(Modifier.fillMaxWidth().height(80.dp).background(p.resolve(cover) ?: p.accent, RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)))
         Box(Modifier.offset(y = (-38).dp).border(3.dp, p.card, CircleShape)) { Avatar(n, h, 76) }

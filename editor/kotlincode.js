@@ -3,7 +3,7 @@
 // App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and data become Compose code over a fixed
 // runtime (editor/native/kotlin/Pocket.kt); anything else is a TODO placeholder.
 import { appModel, PALETTES } from './appmodel.js';
-import { nativeReadme, names } from './nativecode.js';
+import { nativeReadme, names, listExtras } from './nativecode.js';
 import { pbxproj, plist } from './native.js';
 
 /** Versions that go together (built and checked with these). */
@@ -27,16 +27,16 @@ function kElement(x, ind, fill) {
   switch (x.kind) {
     case 'text': return `PText(${ks(x.value)}${x.size !== 16 ? `, size = ${Math.round(x.size)}` : ''}${x.weight !== '600' ? `, weight = ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color = ${ks(tokenColor(x.color))}` : ''})`;
     case 'button': return `PButton(${ks(x.label)}${x.outlined ? `, look = ${/danger/.test(x.color) ? 'Look.Danger' : 'Look.Outlined'}` : ''}) { app.run(${ks(x.action)}, ${kv(x.value)}${x.amount !== 1 && x.amount != null ? `, ${kv(+x.amount || 0)}` : ''}) }`;
-    case 'list': return `RecordList(${ks(x.collection)}${mod}, title = ${ks(x.title)}${x.subtitle ? `, subtitle = ${ks(x.subtitle)}` : ''}${x.icon ? `, icon = ${ks(x.icon)}` : ''}${x.check ? `, check = ${ks(x.check)}` : ''}${x.search ? `, search = ${ks(x.search)}` : ''}${x.filter ? `, filter = ${ks(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort = ${ks(x.sort)}` : ''}${x.openPage ? `, openPage = ${ks(x.openPage)}` : ''}, empty = ${ks(x.empty)})`;
+    case 'list': return `RecordList(${ks(x.collection)}${mod}, title = ${ks(x.title)}${x.subtitle ? `, subtitle = ${ks(x.subtitle)}` : ''}${x.icon ? `, icon = ${ks(x.icon)}` : ''}${x.check ? `, check = ${ks(x.check)}` : ''}${x.search ? `, search = ${ks(x.search)}` : ''}${x.filter ? `, filter = ${ks(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort = ${ks(x.sort)}` : ''}${x.openPage ? `, openPage = ${ks(x.openPage)}` : ''}, empty = ${ks(x.empty)}${listExtras(x, ' = ', ks)})`;
     case 'form': return `RecordForm(${ks(x.collection)}${mod}${x.fields.length ? `, fields = listOf(${x.fields.map(ks).join(', ')})` : ''}, mode = FormMode.${{ new: 'NewRecord', edit: 'EditOpened', auto: 'Auto' }[x.mode]}, saveLabel = ${ks(x.saveLabel)}${x.after !== 'go back' ? `, after = ${ks(x.after)}` : ''}${x.page ? `, page = ${ks(x.page)}` : ''})`;
-    case 'input': return `VarField(${ks(x.var)}${x.placeholder ? `, placeholder = ${ks(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard = ${ks(x.keyboard)}` : ''})`;
+    case 'input': return `VarField(${ks(x.var)}${x.placeholder ? `, placeholder = ${ks(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard = ${ks(x.keyboard)}` : ''}${x.outlined ? ', outlined = true' : ''})`;
     case 'toggle': return `VarSwitch(${ks(x.var)}${x.label ? `, label = ${ks(x.label)}` : ''})`;
     case 'items': return `StaticList(listOf(${x.items.map(ks).join(', ')}))`;
     case 'image': return `TodoBox("Picture", "image") // TODO: show ${x.src.slice(0, 60)} (add an image library such as Coil 3)`;
     case 'row': return `PCard {\n${x.children.map((c) => pad + '    ' + kElement(c, ind + 4, false)).join('\n')}\n${pad}}`;
-    case 'feed': return `SocialFeed(${ks(x.collection)}${x.look !== 'timeline' ? `, look = ${ks(x.look)}` : ''}${x.filter ? `, filter = ${ks(x.filter)}` : ''}${x.search ? `, search = ${ks(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns = ${x.columns}` : ''}${x.profilePage ? `, profilePage = ${ks(x.profilePage)}` : ''}, empty = ${ks(x.empty)})`;
+    case 'feed': return `SocialFeed(${ks(x.collection)}${x.look !== 'timeline' ? `, look = ${ks(x.look)}` : ''}${x.filter ? `, filter = ${ks(x.filter)}` : ''}${x.search ? `, search = ${ks(x.search)}` : ''}${x.look === 'grid' && x.columns !== 3 ? `, columns = ${x.columns}` : ''}${x.profilePage ? `, profilePage = ${ks(x.profilePage)}` : ''}, empty = ${ks(x.empty)}${x.tabs?.length ? `, tabs = listOf(${x.tabs.map((t) => `FeedTab(${ks(t.label)}${t.only || t.look ? `, ${ks(t.only)}` : ''}${t.look ? `, ${ks(t.look)}` : ''})`).join(', ')})` : ''}${x.actions ? `, actions = listOf(${x.actions.map(ks).join(', ')})` : ''})`;
     case 'composer': return `Composer(${ks(x.collection)}, placeholder = ${ks(x.placeholder)})`;
-    case 'stories': return `Stories(${ks(x.collection)})`;
+    case 'stories': return `Stories(${ks(x.collection)}${x.yours === false ? ', yours = false' : ''})`;
     case 'inbox': return `Inbox(${ks(x.collection)}, openPage = ${ks(x.openPage)})`;
     case 'chat': return `Chat(${ks(x.collection)})`;
     case 'profile': return `ProfileHeader(name = ${ks(x.name)}, handle = ${ks(x.handle)}${x.bio ? `, bio = ${ks(x.bio)}` : ''}${x.stats.length ? `, stats = listOf(${x.stats.map((s) => `${ks(s.label)} to ${ks(s.value)}`).join(', ')})` : ''}, cover = ${ks(tokenColor(x.cover) || '@accent')})`;
@@ -66,12 +66,16 @@ import ${pkg}.*
 
 @Composable
 fun ${fn}() {
-    PocketPage(${ks(p.title)}${scroll ? '' : ', scroll = false'}${fab}) {
+    PocketPage(${ks(p.title)}, page = ${ks(p.value)}${scroll ? '' : ', scroll = false'}${fab}) {
 ${parts.map((c) => '        ' + c).join('\n')}
     }
 }
 `;
 }
+
+const tok = (c, fb) => tokenColor(c) || fb;
+const kBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
+  return `BarStyle(look = ${ks(b.look)}, brandPages = listOf(${b.brandPages.map(ks).join(', ')}), center = ${b.align === 'center'}, avatar = ${b.avatar}, actions = listOf(${b.actions.map((a) => `BarAction(${ks(a.icon)}, ${ks(a.does)}${a.badge ? `, badge = ${ks(a.badge)}` : ''}${a.only.length ? `, only = listOf(${a.only.map(ks).join(', ')})` : ''})`).join(', ')}), bg = ${ks(tok(b.bg, '@bar'))}, text = ${ks(tok(b.text, '@text'))}, icon = ${ks(tok(b.icon, '@text'))}, border = ${b.border}, size = ${Math.round(b.size)})`; };
 
 function kApp(model, N, pkg) {
   const argb = (h) => '0xFF' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();
@@ -101,6 +105,8 @@ fun setupApp() {
         vars = mapOf(${Object.entries(model.vars).map(([k, v]) => `${ks(k)} to ${kv(v)}`).join(', ')}),
         tabs = listOf(${model.tabs.map((t) => `\n            NavTab(${ks(t.label)}, ${iconK(t.icon)}, ${ks(t.page)}${t.badge ? `, badge = ${ks(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}),
         collections = listOf(${model.collections.map((c) => `\n            Collection(${ks(c.name)}, listOf(${c.fields.map(field).join(', ')})${c.rows.length ? `, sample = listOf(${c.rows.map(row).join(', ')})` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}),
+        bar = ${kBar(model)},
+        nav = ${model.nav ? `NavStyle(${ks(model.nav.style)}, ${ks(tok(model.nav.bar, '@bar'))}, ${ks(tok(model.nav.active, '@accent'))}, ${ks(tok(model.nav.idle, '@sub'))})` : 'NavStyle()'},
         stats = listOf(${model.stats.map((s) => `\n            Stat(${ks(s.var)}, ${ks(s.collection)}, ${ks(s.how)}${s.field && s.field !== 'field' ? `, field = ${ks(s.field)}` : ''}${s.filter ? `, filter = ${ks(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}),
     )
 }

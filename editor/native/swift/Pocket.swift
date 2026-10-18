@@ -56,6 +56,50 @@ struct NavTab {
     var badge: String = ""
 }
 
+/// A button on the right of the App Bar: icon (a name, or theme for the dark mode moon / sun), what it does
+/// ("dark mode toggle", "page:friends", or a message), a badge variable, and the pages it shows on (empty = all).
+struct BarAction {
+    let icon: String, does: String
+    var badge: String = ""
+    var only: [String] = []
+}
+
+/// The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours.
+struct BarStyle {
+    var look = "standard", brandPages = ["home"], center = false, avatar = false
+    var actions: [BarAction] = []
+    var bg = "@bar", text = "@text", icon = "@text", border = true, size: CGFloat = 19
+}
+
+/// The Bottom Nav's style (minimal: icons only) and colours.
+struct NavStyle { var style = "pill", bar = "@bar", active = "@accent", idle = "@sub" }
+
+/// Icon names (as in Pocket Engine) → SF Symbols.
+func symbol(_ name: String, on: Bool = false) -> String {
+    switch name {
+    case "home": return on ? "house.fill" : "house"
+    case "search", "explore": return "magnifyingglass"
+    case "user", "profile": return on ? "person.fill" : "person"
+    case "users", "friends": return "person.2"
+    case "chat": return on ? "bubble.left.fill" : "bubble.left"
+    case "bell": return "bell"
+    case "heart": return on ? "heart.fill" : "heart"
+    case "video": return on ? "play.rectangle.fill" : "play.rectangle"
+    case "info": return "info.circle"
+    case "settings", "gear": return "gearshape"
+    case "plus", "add": return "plus"
+    case "shop": return "bag"
+    case "bookmark": return on ? "bookmark.fill" : "bookmark"
+    case "trophy": return "trophy"
+    case "edit": return "pencil"
+    case "moon": return "moon"
+    case "sun": return "sun.max"
+    case "menu", "list": return "line.3.horizontal"
+    case "star": return "star"
+    default: return "circle"
+    }
+}
+
 // MARK: - Colours (the app's @tokens) for light and dark
 
 struct Palette {
@@ -89,6 +133,7 @@ final class AppState: ObservableObject {
     let name: String, home: String, themeSetting: String
     let collections: [Collection], stats: [Stat], tabs: [NavTab]
     let light: Palette, dark: Palette
+    let bar: BarStyle, nav: NavStyle
     @Published var vars: [String: Val] = [:]
     @Published var data: [String: [Row]] = [:]
     @Published var tab = 0
@@ -96,8 +141,8 @@ final class AppState: ObservableObject {
     @Published var openCollection: String? = nil
     @Published var openId: String? = nil
 
-    init(name: String, home: String, themeSetting: String = "follow the phone", light: Palette, dark: Palette, vars: [String: Val], tabs: [NavTab], collections: [Collection], stats: [Stat]) {
-        self.name = name; self.home = home; self.themeSetting = themeSetting; self.light = light; self.dark = dark
+    init(name: String, home: String, themeSetting: String = "follow the phone", light: Palette, dark: Palette, vars: [String: Val], tabs: [NavTab], collections: [Collection], stats: [Stat], bar: BarStyle = BarStyle(), nav: NavStyle = NavStyle()) {
+        self.name = name; self.home = home; self.themeSetting = themeSetting; self.light = light; self.dark = dark; self.bar = bar; self.nav = nav
         self.tabs = tabs; self.collections = collections; self.stats = stats; self.vars = vars
         paths = Array(repeating: [], count: max(1, tabs.count))
         load()
@@ -111,10 +156,10 @@ final class AppState: ObservableObject {
 
     // MARK: saving on the phone
     private func load() {
-        let d = UserDefaults.standard, now = Date().timeIntervalSince1970 * 1000
+        let d = UserDefaults.standard
         if let raw = d.data(forKey: "pocket.data"), let saved = try? JSONDecoder().decode([String: [Row]].self, from: raw) { data = saved }
         for c in collections where data[c.name] == nil {
-            data[c.name] = c.sample.enumerated().map { i, r in r.merging(["_id": .s("s\(i)"), "_at": .n(now - Double(i) * 1000)]) { a, _ in a } }
+            data[c.name] = c.sample.enumerated().map { i, r in blank(c.name).merging(r) { _, b in b }.merging(["_id": .s("s\(i)"), "_at": r["_at"] ?? .n(Double(i))]) { _, b in b } } // (later rows count as newer)
         }
         if let raw = d.data(forKey: "pocket.vars"), let saved = try? JSONDecoder().decode([String: Val].self, from: raw) { vars.merge(saved) { _, b in b } }
         work()
@@ -125,21 +170,73 @@ final class AppState: ObservableObject {
         if let raw = try? JSONEncoder().encode(vars) { UserDefaults.standard.set(raw, forKey: "pocket.vars") }
     }
     /// Stats are worked out again whenever the data changes.
-    private func work() { for s in stats { vars[s.variable] = .n(stat(s.collection, s.how, field: s.field, filter: s.filter)) } }
+    /// Stats, {posts_count}-style counts and the social counts ({unread}, {notifications_unread}, {friend_requests}).
+    private func work() {
+        let me = (vars["playerHandle"]?.text).flatMap { $0.isEmpty ? nil : $0 } ?? "me"
+        for c in collections {
+            let key = c.name.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }.joined(separator: "_")
+            vars[key + "_count"] = .n(Double(rows(c.name).count))
+        }
+        if def("Notifications") != nil { vars["notifications_unread"] = .n(Double(rows("Notifications").filter { $0["to"]?.text == me && !($0["read"]?.isOn ?? false) }.count)) }
+        if def("Friends") != nil { vars["friend_requests"] = .n(Double(rows("Friends").filter { $0["status"]?.text != "accepted" && $0["to"]?.text == me }.count)) }
+        if def("Messages") != nil && !stats.contains(where: { $0.variable == "unread" }) {
+            var read: [String: Double] = [:]
+            for r in rows("Reads") where r["handle"]?.text == me { read[r["chat"]?.text ?? ""] = r["at"]?.number ?? 0 }
+            vars["unread"] = .n(Double(rows("Messages").filter { $0["handle"]?.text != me && ($0["_at"]?.number ?? 0) > (read[$0["chat"]?.text ?? ""] ?? 0) }.count))
+        }
+        for s in stats { vars[s.variable] = .n(stat(s.collection, s.how, field: s.field, filter: s.filter)) }
+    }
+
+    static func day(_ offset: Int = 0) -> String { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; return f.string(from: Date().addingTimeInterval(Double(offset) * 86_400)) }
+
+    /// A new record's values: each field's default (dates: today).
+    func blank(_ name: String) -> Row {
+        var out: Row = [:]
+        for f in def(name)?.fields ?? [] {
+            if let d = f.def, d.text != "" {
+                out[f.key] = f.type == "yes/no" ? .b(d.isOn) : ["number", "money", "rating"].contains(f.type) ? .n(d.number ?? 0) : d.text == "today" && f.type == "date" ? .s(AppState.day()) : d
+            } else {
+                out[f.key] = f.type == "yes/no" ? .b(false) : f.type == "date" ? .s(AppState.day()) : f.type == "choice" ? .s(f.options.first ?? "") : ["number", "money", "rating"].contains(f.type) ? .n(0) : .s("")
+            }
+        }
+        return out
+    }
+
+    /// How a value reads: dates as Today / Tomorrow / 3 Mar, money with $, yes/no as ✓.
+    func text(_ collection: String?, _ key: String, _ v: Val?) -> String {
+        guard let v, v.text != "" else { return "" }
+        let f = def(collection ?? "")?.fields.first { $0.key == key }
+        switch f?.type {
+        case "money":
+            let n = v.number ?? 0, a = (abs(n) * 100).rounded() / 100
+            return (n < 0 ? "−" : "") + "$" + (a == a.rounded() ? String(Int(a)) : String(format: "%.2f", a))
+        case "yes/no": return v.isOn ? "✓" : ""
+        case "date":
+            let k = String(v.text.prefix(10))
+            if k == AppState.day() { return "Today" }
+            if k == AppState.day(-1) { return "Yesterday" }
+            if k == AppState.day(1) { return "Tomorrow" }
+            let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"
+            guard let d = f.date(from: k) else { return v.text }
+            let o = DateFormatter(); o.dateFormat = Calendar.current.component(.year, from: d) == Calendar.current.component(.year, from: Date()) ? "d MMM" : "d MMM yyyy"
+            return o.string(from: d)
+        default: return v.text
+        }
+    }
 
     // MARK: variables and text
     func get(_ k: String) -> Val? { vars[k] }
     func set(_ k: String, _ v: Val) { vars[k] = v; changed() }
     func add(_ k: String, _ by: Double) { set(k, .n((vars[k]?.number ?? 0) + by)) }
     /// "{score} points" → "12 points"; {record_title} is the opened record's title; with a row, {title} is the row's.
-    func fill(_ t: String, _ row: Row? = nil) -> String {
+    func fill(_ t: String, _ row: Row? = nil, _ collection: String? = nil) -> String {
         var out = "", key = "", inside = false
         for ch in t {
             if ch == "{" { if inside { out += "{" + key }; inside = true; key = ""; continue }
             if ch == "}" && inside {
                 inside = false
-                if let row, let v = row[key] { out += v.text }
-                else if key.hasPrefix("record_") { out += opened?[String(key.dropFirst(7))]?.text ?? "" }
+                if let row, let v = row[key] { out += collection == nil ? v.text : text(collection, key, v) }
+                else if key.hasPrefix("record_") { out += text(openCollection, String(key.dropFirst(7)), opened?[String(key.dropFirst(7))]) }
                 else if key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) { out += vars[key]?.text ?? "" }
                 else { out += "{" + key + "}" }
                 continue
@@ -215,7 +312,7 @@ final class AppState: ObservableObject {
 
     @discardableResult func addRecord(_ name: String, _ values: Row) -> String {
         let id = "r\(Int(Date().timeIntervalSince1970 * 1_000_000))"
-        data[name, default: []].append(values.merging(["_id": .s(id), "_at": .n(Date().timeIntervalSince1970 * 1000)]) { _, b in b })
+        data[name, default: []].append(blank(name).merging(values) { _, b in b }.merging(["_id": .s(id), "_at": .n(Date().timeIntervalSince1970 * 1000)]) { _, b in b })
         changed()
         return id
     }
@@ -276,14 +373,14 @@ struct PocketRoot: View {
                         NavigationStack(path: $app.paths[i]) {
                             page(t.page).navigationDestination(for: String.self) { page($0) }
                         }
-                        .tabItem { Label(t.label, systemImage: t.icon) }
+                        .tabItem { if app.nav.style == "minimal" { Image(systemName: t.icon) } else { Label(t.label, systemImage: t.icon) } } // (minimal: icons only)
                         .badge(t.badge.isEmpty ? 0 : Int(app.get(t.badge)?.number ?? 0))
                         .tag(i)
                     }
                 }
             }
         }
-        .tint(app.light.accent)
+        .tint(app.light.resolve(app.nav.active) ?? app.light.accent)
         .preferredColorScheme(app.colorScheme)
     }
 }
@@ -295,6 +392,7 @@ struct PocketPage<Content: View>: View {
     @EnvironmentObject var app: AppState
     @Environment(\.colorScheme) var scheme
     let title: String
+    var page = ""
     var scroll = true
     var fab: (action: String, value: Val)? = nil
     @ViewBuilder var content: () -> Content
@@ -312,6 +410,7 @@ struct PocketPage<Content: View>: View {
         .background(p.bg.ignoresSafeArea())
         .navigationTitle(app.fill(title))
         .navigationBarTitleDisplayMode(.inline)
+        .modifier(PocketBar(title: title, page: page))
         .overlay(alignment: .bottomTrailing) {
             if let fab {
                 Button { app.run(fab.action, fab.value) } label: {
@@ -320,6 +419,41 @@ struct PocketPage<Content: View>: View {
                 .padding(20)
             }
         }
+    }
+}
+
+/// The project's App Bar: its look (x: your avatar on the left and the app's name on the home page), buttons with badges, colours.
+struct PocketBar: ViewModifier {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let title: String, page: String
+    func body(content: Content) -> some View {
+        let p = app.palette(scheme), b = app.bar, back = !(app.paths[min(app.tab, app.paths.count - 1)].isEmpty)
+        let brand = b.look != "standard" && !back && (b.brandPages.isEmpty || b.brandPages.contains(page))
+        let ic = p.resolve(b.icon) ?? p.text
+        let acts = b.actions.reversed().filter { $0.only.isEmpty || $0.only.contains(page) } // (the first sits at the right edge)
+        return content
+            .toolbarBackground(p.resolve(b.bg) ?? p.card, for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                if brand { ToolbarItem(placement: .principal) { Text(app.name).font(.system(size: 22, weight: .black)).foregroundColor(p.resolve(b.text) ?? p.text) } }
+                if b.avatar && !back { ToolbarItem(placement: .navigationBarLeading) { Avatar(name: app.meName, seed: app.me, size: 32) } }
+                ToolbarItemGroup(placement: .navigationBarTrailing) {
+                    ForEach(Array(acts.enumerated()), id: \.offset) { _, a in
+                        let n = a.badge.isEmpty ? 0 : Int(app.get(a.badge)?.number ?? 0)
+                        Button {
+                            if a.does.contains("dark mode") { app.set("darkMode", .b(scheme != .dark)) }
+                            else if a.does.hasPrefix("page:") { app.go(String(a.does.dropFirst(5))) }
+                            else { print("TODO: the App Bar button sends \"\(a.does)\"") }
+                        } label: {
+                            Image(systemName: symbol(a.icon == "theme" ? (scheme == .dark ? "sun" : "moon") : a.icon)).foregroundColor(ic)
+                                .overlay(alignment: .topTrailing) {
+                                    if n > 0 { Text(n > 99 ? "99+" : String(n)).font(.system(size: 10, weight: .heavy)).foregroundColor(.white).padding(.horizontal, 4).background(Capsule().fill(p.danger)).offset(x: 8, y: -6) }
+                                }
+                        }
+                    }
+                }
+            }
     }
 }
 
@@ -373,17 +507,21 @@ struct PCard<Content: View>: View {
 /// A text box that edits a variable (search boxes too).
 struct VarField: View {
     @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
     let variable: String
     var placeholder = ""
     var keyboard = "text"
-    init(_ variable: String, placeholder: String = "", keyboard: String = "text") { self.variable = variable; self.placeholder = placeholder; self.keyboard = keyboard }
+    var outlined = false
+    init(_ variable: String, placeholder: String = "", keyboard: String = "text", outlined: Bool = false) { self.variable = variable; self.placeholder = placeholder; self.keyboard = keyboard; self.outlined = outlined }
     var body: some View {
         let text = Binding<String>(get: { app.get(variable)?.text ?? "" }, set: { app.set(variable, keyboard == "number" ? .n(Double($0) ?? 0) : .s($0)) })
         HStack {
             if keyboard == "search" { Image(systemName: "magnifyingglass").foregroundColor(.secondary) }
             if keyboard == "password" { SecureField(placeholder, text: text) } else { TextField(placeholder, text: text).keyboardType(keyboard == "number" ? .decimalPad : keyboard == "email" ? .emailAddress : .default) }
         }
-        .padding(12).background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground)))
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(outlined ? app.palette(scheme).card : Color(.secondarySystemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(outlined ? app.palette(scheme).line : .clear, lineWidth: 1)) // outlined: a white box with a thin line
     }
 }
 
@@ -400,12 +538,44 @@ struct VarSwitch: View {
     }
 }
 
-/// The records of a collection: tap one to open it, tick its checkbox, swipe to delete.
+/// The records of a collection, the way the app draws them: a round tick, the title (struck through when done), the line under it; tap to open, swipe left to delete.
 struct RecordList: View {
     @EnvironmentObject var app: AppState
     @Environment(\.colorScheme) var scheme
     let collection: String
-    var title = "{title}", subtitle = "", icon = "", check = "", search = "", filter = "", sort = "newest first", openPage = "", empty = "Nothing here yet"
+    var title = "{title}", subtitle = "", right = "", icon = "", check = "", search = "", filter = "", sort = "newest first", openPage = "", empty = "Nothing here yet"
+    var swipeDelete = true
+    var rowH: CGFloat = 64, gap: CGFloat = 8, radius: CGFloat = 14
+    var doneLook = true
+
+    func row(_ r: Row, _ p: Palette) -> some View {
+        let id = r["_id"]?.text ?? "", done = !check.isEmpty && (r[check]?.isOn ?? false)
+        return HStack(spacing: 14) {
+            if !check.isEmpty {
+                Button { app.updateRecord(collection, id, [check: .b(!done)]) } label: {
+                    ZStack {
+                        Circle().fill(done ? p.accent : Color.clear)
+                        Circle().stroke(done ? p.accent : p.sub, lineWidth: 2)
+                        if done { Image(systemName: "checkmark").font(.system(size: 13, weight: .heavy)).foregroundColor(.white) }
+                    }.frame(width: 28, height: 28)
+                }.buttonStyle(.plain)
+            } else if !icon.isEmpty { Text(app.fill(icon, r, collection)).font(.title) }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(app.fill(title, r, collection)).font(.system(size: 16, weight: .bold)).foregroundColor(p.text).strikethrough(done).lineLimit(1)
+                if !subtitle.isEmpty { Text(app.fill(subtitle, r, collection)).font(.subheadline.weight(.semibold)).foregroundColor(p.sub).lineLimit(2) }
+            }
+            Spacer()
+            if !right.isEmpty { Text(app.fill(right, r, collection)).bold().foregroundColor(p.sub) }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 10)
+        .frame(minHeight: rowH)
+        .opacity(done && doneLook ? 0.55 : 1)
+        .background(RoundedRectangle(cornerRadius: radius).fill(p.card))
+        .contentShape(Rectangle())
+        .onTapGesture { if !openPage.isEmpty { app.open(collection, id); app.go(openPage) } }
+    }
+
+    func delete(_ rows: [Row]) -> (IndexSet) -> Void { { idx in for i in idx { app.deleteRecord(collection, rows[i]["_id"]?.text ?? "") } } }
 
     var body: some View {
         let p = app.palette(scheme)
@@ -415,27 +585,14 @@ struct RecordList: View {
         } else {
             List {
                 ForEach(rows, id: \.self) { r in
-                    let id = r["_id"]?.text ?? "", done = !check.isEmpty && (r[check]?.isOn ?? false)
-                    HStack(spacing: 12) {
-                        if !check.isEmpty {
-                            Button { app.updateRecord(collection, id, [check: .b(!done)]) } label: {
-                                Image(systemName: done ? "checkmark.circle.fill" : "circle").font(.title2).foregroundColor(done ? p.accent : p.sub)
-                            }.buttonStyle(.plain)
-                        } else if !icon.isEmpty { Text(app.fill(icon, r)).font(.title) }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(app.fill(title, r)).font(.body.bold()).foregroundColor(done ? p.sub : p.text).strikethrough(done).lineLimit(1)
-                            if !subtitle.isEmpty { Text(app.fill(subtitle, r)).font(.subheadline).foregroundColor(p.sub).lineLimit(2) }
-                        }
-                        Spacer()
-                        if !openPage.isEmpty { Image(systemName: "chevron.right").foregroundColor(p.sub) }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { if !openPage.isEmpty { app.open(collection, id); app.go(openPage) } }
-                    .listRowBackground(p.card)
+                    row(r, p)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: gap / 2, leading: 0, bottom: gap / 2, trailing: 0))
                 }
-                .onDelete { idx in for i in idx { app.deleteRecord(collection, rows[i]["_id"]?.text ?? "") } }
+                .onDelete(perform: swipeDelete ? delete(rows) : nil)
             }
-            .listStyle(.insetGrouped)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
     }
@@ -585,25 +742,86 @@ extension AppState {
     }
 }
 
-private let avatarColors: [UInt32] = [0xEF4444, 0xF59E0B, 0x10B981, 0x3B82F6, 0x8B5CF6, 0xEC4899, 0x14B8A6, 0xF97316]
-func avatarColor(_ s: String) -> Color { Color(hex: avatarColors[s.utf16.reduce(0) { $0 + Int($1) } % avatarColors.count]) }
-func firstMedia(_ m: String) -> String { (m.components(separatedBy: "|").first ?? "").trimmingCharacters(in: .whitespaces) }
+// the engine's avatar colours and initials (Maya Chen → MC)
+private let avatarColors: [UInt32] = [0xEF5350, 0xEC407A, 0xAB47BC, 0x7E57C2, 0x5C6BC0, 0x42A5F5, 0x26A69A, 0x66BB6A, 0xFFA726, 0x8D6E63]
+func avatarColor(_ s: String) -> Color {
+    var n: UInt32 = 0
+    for c in (s.isEmpty ? "?" : s).utf16 { n = n &* 31 &+ UInt32(c) }
+    return Color(hex: avatarColors[Int(n % UInt32(avatarColors.count))])
+}
+func initials(_ s: String) -> String {
+    let w = s.split(whereSeparator: { $0 == " " || $0 == "\n" }).prefix(2).compactMap { $0.first.map { String($0).uppercased() } }.joined()
+    return w.isEmpty ? "?" : w
+}
+func mediaList(_ m: String) -> [String] { m.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } }
+func firstMedia(_ m: String) -> String { mediaList(m).first ?? "" }
 func isUrl(_ s: String) -> Bool { s.hasPrefix("http:") || s.hasPrefix("https:") }
-func colorOf(_ r: Row, _ seed: String, _ p: Palette) -> Color { r.s("color").hasPrefix("#") ? (p.resolve(r.s("color")) ?? avatarColor(seed)) : avatarColor(seed) }
+func hexColor(_ v: String) -> Color? { v.count == 7 && v.hasPrefix("#") ? UInt32(v.dropFirst(), radix: 16).map { Color(hex: $0) } : nil }
+func colorOf(_ r: Row, _ seed: String, _ p: Palette) -> Color { hexColor(r.s("color")) ?? avatarColor(seed) }
+/// 1284 → 1.3K, 48200 → 48K.
+func compactNum(_ n: Double) -> String {
+    func one(_ x: Double) -> String { let r = (x * 10).rounded() / 10; return r == r.rounded() ? String(Int(r)) : String(r) }
+    return n < 1000 ? String(Int(n.rounded())) : n < 10_000 ? one(n / 1000) + "K" : n < 1e6 ? String(Int((n / 1000).rounded())) + "K" : one(n / 1e6) + "M"
+}
+/// 9m, 2h, 3d, then the date.
+func ago(_ at: Double) -> String {
+    guard at > 1e11 else { return "" }
+    let s = Date().timeIntervalSince1970 - at / 1000
+    if s < 60 { return "now" }
+    if s < 3600 { return "\(Int(s / 60))m" }
+    if s < 86400 { return "\(Int(s / 3600))h" }
+    if s < 604_800 { return "\(Int(s / 86400))d" }
+    let f = DateFormatter(); f.dateFormat = "MMM d"; return f.string(from: Date(timeIntervalSince1970: at / 1000))
+}
+/// The colours of a CSS gradient ("linear-gradient(135deg,#f58529,#dd2a7b)").
+func gradientColors(_ bg: String) -> [Color] {
+    var out: [Color] = [], rest = Substring(bg)
+    while let i = rest.firstIndex(of: "#") {
+        let hex = String(rest[i...].prefix(7))
+        if let c = hexColor(hex) { out.append(c) }
+        rest = rest[rest.index(after: i)...]
+    }
+    return out
+}
+/// Text with #hashtags and @mentions in the accent colour.
+func richText(_ s: String, _ accent: Color, _ ink: Color) -> Text {
+    var out = Text(""), word = "", tag = false
+    func flush() { if !word.isEmpty { out = out + Text(word).foregroundColor(tag ? accent : ink); word = "" } }
+    for ch in s {
+        if ch == "#" || ch == "@" { flush(); tag = true }
+        else if tag && !(ch.isLetter || ch.isNumber || ch == "_") { flush(); tag = false }
+        word.append(ch)
+    }
+    flush()
+    return out
+}
 
 struct Avatar: View {
     let name: String, seed: String
     var size: CGFloat = 40
     var label: String? = nil
     var body: some View {
-        let first = name.trimmingCharacters(in: .whitespaces).prefix(1).uppercased()
-        Text(label ?? (first.isEmpty ? "?" : first))
-            .font(.system(size: size * 0.42, weight: .heavy)).foregroundColor(.white)
-            .frame(width: size, height: size).background(Circle().fill(avatarColor(seed.isEmpty ? name : seed)))
+        Text(label ?? initials(name.isEmpty ? seed : name))
+            .font(.system(size: size * (label == nil ? 0.38 : 0.5), weight: .heavy)).foregroundColor(.white)
+            .frame(width: size, height: size).background(Circle().fill(avatarColor(name.isEmpty ? seed : name)))
     }
 }
 
-/// A post's picture: a photo from the web, or an emoji on the post's colour.
+/// A picture: a photo from the web, or an emoji on a colour.
+struct Tile: View {
+    let media: String, color: Color
+    var height: CGFloat = 200
+    var body: some View {
+        if isUrl(media) {
+            AsyncImage(url: URL(string: media)) { $0.resizable().scaledToFill() } placeholder: { Color.gray.opacity(0.2) }
+                .frame(maxWidth: .infinity).frame(height: height).clipped()
+        } else {
+            Text(media).font(.system(size: min(height, 150) * 0.42)).frame(maxWidth: .infinity).frame(height: height).background(color)
+        }
+    }
+}
+
+/// A post's first picture (rounded).
 struct Media: View {
     @EnvironmentObject var app: AppState
     @Environment(\.colorScheme) var scheme
@@ -612,12 +830,28 @@ struct Media: View {
     var radius: CGFloat = 12
     var body: some View {
         let m = firstMedia(row.s("media"))
-        if isUrl(m) {
-            AsyncImage(url: URL(string: m)) { $0.resizable().scaledToFill() } placeholder: { Color.gray.opacity(0.2) }
-                .frame(maxWidth: .infinity).frame(height: height).clipShape(RoundedRectangle(cornerRadius: radius))
-        } else if !m.isEmpty {
-            Text(m).font(.system(size: height * 0.4)).frame(maxWidth: .infinity).frame(height: height)
-                .background(RoundedRectangle(cornerRadius: radius).fill(colorOf(row, row.s("handle") + m, app.palette(scheme))))
+        if !m.isEmpty { Tile(media: m, color: colorOf(row, row.s("handle") + m, app.palette(scheme)), height: height).clipShape(RoundedRectangle(cornerRadius: radius)) }
+    }
+}
+
+/// 1 to 4 pictures, laid out like the app's feed: one big, two side by side, one big and two stacked, two by two.
+struct MediaGrid: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let row: Row
+    var height: CGFloat = 220
+    var body: some View {
+        let p = app.palette(scheme), l = Array(mediaList(row.s("media")).prefix(4))
+        if !l.isEmpty {
+            let bg = colorOf(row, row.s("handle") + l[0], p), half = height / 2 - 1
+            Group {
+                if l.count == 1 { Tile(media: l[0], color: bg, height: height) }
+                else if l.count == 2 { HStack(spacing: 2) { Tile(media: l[0], color: bg, height: height); Tile(media: l[1], color: bg, height: height) } }
+                else if l.count == 3 { HStack(spacing: 2) { Tile(media: l[0], color: bg, height: height); VStack(spacing: 2) { Tile(media: l[1], color: bg, height: half); Tile(media: l[2], color: bg, height: half) } } }
+                else { HStack(spacing: 2) { VStack(spacing: 2) { Tile(media: l[0], color: bg, height: half); Tile(media: l[2], color: bg, height: half) }; VStack(spacing: 2) { Tile(media: l[1], color: bg, height: half); Tile(media: l[3], color: bg, height: half) } } }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(p.line, lineWidth: 1))
         }
     }
 }
@@ -627,13 +861,24 @@ struct EmptyNote: View {
     var body: some View { Text(text).foregroundColor(.secondary).multilineTextAlignment(.center).frame(maxWidth: .infinity).padding(32) }
 }
 
-/// Posts, newest first: like, repost, save; tap the author for their profile. look: timeline, reels or grid.
+/// A tab on top of a feed: its name and which posts it shows (following, saved, media, replies, posts, likes, or a filter).
+struct FeedTab {
+    let label: String
+    var only = "", look = ""
+    init(_ label: String, _ only: String = "", _ look: String = "") { self.label = label; self.only = only; self.look = look }
+}
+
+/// Posts, newest first, the way the app draws them (X style): avatar, name ✓ @handle · 9m, text with #tags, pictures, and
+/// comment / repost / like / views / save / share. Tap the author for their profile. look: timeline, reels or grid.
 struct SocialFeed: View {
     @EnvironmentObject var app: AppState
     @Environment(\.colorScheme) var scheme
     var collection = "Posts", look = "timeline", filter = "", search = ""
     var columns = 3
     var profilePage = "", empty = "No posts yet"
+    var tabs: [FeedTab] = []
+    var actions = ["comment", "repost", "like", "share"]
+    @State var tab = 0
 
     func toggle(_ r: Row, _ flag: String, _ count: String? = nil) {
         let now = !r.on(flag)
@@ -642,51 +887,156 @@ struct SocialFeed: View {
         app.updateRecord(collection, r.s("_id"), change)
     }
 
-    func action(_ label: String, _ lit: Bool, _ color: Color, _ tap: @escaping () -> Void) -> some View {
-        Button(action: tap) { Text(label).font(.subheadline.bold()).lineLimit(1).foregroundColor(lit ? color : app.palette(scheme).sub).frame(maxWidth: .infinity) }.buttonStyle(.plain)
+    /// A tab's test, or nil when "only" is a filter for the query.
+    func test(_ only: String) -> ((Row) -> Bool)? {
+        let me = app.me
+        switch only.trimmingCharacters(in: .whitespaces).lowercased() {
+        case "": return { _ in true }
+        case "following":
+            let f = Set(app.rows("Follows").filter { $0.s("follower") == me }.map { $0.s("followee") })
+            return { f.contains($0.s("handle")) || $0.on("following") }
+        case "saved": return { $0.on("saved") }
+        case "media": return { !firstMedia($0.s("media")).isEmpty }
+        case "replies": return { !$0.s("reply_to").isEmpty }
+        case "posts": return { $0.s("reply_to").isEmpty }
+        case "likes": return { $0.on("liked") }
+        default: return nil
+        }
+    }
+
+    func action(_ icon: String, _ count: String, _ lit: Bool, _ color: Color, grow: Bool = true, _ tap: (() -> Void)? = nil) -> some View {
+        let p = app.palette(scheme)
+        return Button { tap?() } label: {
+            HStack(spacing: 4) {
+                Image(systemName: icon).font(.system(size: 16))
+                if !count.isEmpty { Text(count).font(.system(size: 13.5)).lineLimit(1) }
+            }
+            .foregroundColor(lit ? color : p.sub)
+            .padding(.vertical, 8)
+            .frame(maxWidth: grow ? CGFloat.infinity : nil, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    func buttons(_ r: Row) -> some View {
+        let p = app.palette(scheme)
+        return HStack(spacing: 10) {
+            ForEach(actions, id: \.self) { a in
+                switch a {
+                case "comment": action("bubble.left", compactNum(r.n("comments")), false, p.accent)
+                case "repost": action("arrow.2.squarepath", compactNum(r.n("reposts")), r.on("reposted"), Color(hex: 0x00BA7C)) { toggle(r, "reposted", "reposts") }
+                case "like": action(r.on("liked") ? "heart.fill" : "heart", compactNum(r.n("likes")), r.on("liked"), Color(hex: 0xF91880)) { toggle(r, "liked", "likes") }
+                case "views": action("chart.bar", compactNum(r.n("views")), false, p.accent)
+                case "save": action(r.on("saved") ? "bookmark.fill" : "bookmark", "", r.on("saved"), p.accent, grow: false) { toggle(r, "saved") }
+                case "share": action("square.and.arrow.up", "", false, p.accent, grow: false)
+                default: EmptyView()
+                }
+            }
+        }
     }
 
     func post(_ r: Row) -> some View {
+        let p = app.palette(scheme)
+        let grad = firstMedia(r.s("media")).isEmpty ? gradientColors(r.s("background")) : []
+        let sub = ["@" + r.s("handle"), ago(r.n("_at")), r.s("location").isEmpty ? "" : "📍 " + r.s("location")].filter { !$0.isEmpty }.joined(separator: " · ")
+        return VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 10) {
+                Button { app.openProfile(profilePage, r.s("handle"), r.s("author")) } label: { Avatar(name: r.s("author"), seed: r.s("handle"), size: 46) }.buttonStyle(.plain)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 4) {
+                        Text(r.s("author")).font(.system(size: 16, weight: .heavy)).foregroundColor(p.text).lineLimit(1).layoutPriority(1)
+                        if r.on("verified") { Image(systemName: "checkmark.seal.fill").font(.system(size: 15)).foregroundColor(p.accent) }
+                        Text(sub).foregroundColor(p.sub).lineLimit(1)
+                        Spacer(minLength: 0)
+                        Image(systemName: "ellipsis").foregroundColor(p.sub)
+                    }
+                    .onTapGesture { app.openProfile(profilePage, r.s("handle"), r.s("author")) }
+                    if !grad.isEmpty {
+                        Text(r.s("text")).font(.system(size: 22, weight: .heavy)).foregroundColor(.white).multilineTextAlignment(.center).padding(18)
+                            .frame(maxWidth: .infinity, minHeight: 150)
+                            .background(LinearGradient(colors: grad.count > 1 ? grad : [grad[0], grad[0]], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                    } else if !r.s("text").isEmpty {
+                        richText(r.s("text"), p.accent, p.text).font(.system(size: 16))
+                    }
+                    if !r.s("poll").isEmpty {
+                        ForEach(r.s("poll").components(separatedBy: "|"), id: \.self) { o in
+                            Text(o.trimmingCharacters(in: .whitespaces)).bold().foregroundColor(p.accent).frame(maxWidth: .infinity).padding(.vertical, 7).overlay(Capsule().stroke(p.accent, lineWidth: 1))
+                        }
+                    }
+                    if !r.s("link").isEmpty {
+                        VStack(alignment: .leading) {
+                            Text(r.s("link_title").isEmpty ? r.s("link") : r.s("link_title")).bold().foregroundColor(p.text)
+                            Text(URL(string: r.s("link"))?.host ?? "").foregroundColor(p.sub)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(10).overlay(RoundedRectangle(cornerRadius: 14).stroke(p.line, lineWidth: 1))
+                    }
+                    if !firstMedia(r.s("media")).isEmpty { MediaGrid(row: r) }
+                    buttons(r)
+                }
+            }
+            .padding(.horizontal, 14).padding(.top, 12)
+            Divider().overlay(p.line)
+        }
+    }
+
+    func reel(_ r: Row) -> some View {
         let p = app.palette(scheme)
         return VStack(alignment: .leading, spacing: 8) {
             Button { app.openProfile(profilePage, r.s("handle"), r.s("author")) } label: {
                 HStack(spacing: 10) {
                     Avatar(name: r.s("author"), seed: r.s("handle"))
-                    VStack(alignment: .leading) {
-                        Text(r.s("author") + (r.on("verified") ? " ✓" : "")).bold().foregroundColor(p.text)
-                        Text("@" + r.s("handle") + (r.s("location").isEmpty ? "" : " · " + r.s("location"))).font(.subheadline).foregroundColor(p.sub)
-                    }
+                    VStack(alignment: .leading) { Text(r.s("author")).bold().foregroundColor(p.text); Text("@" + r.s("handle")).foregroundColor(p.sub) }
                     Spacer()
                 }
             }.buttonStyle(.plain)
-            if !r.s("text").isEmpty { Text(r.s("text")).foregroundColor(p.text) }
-            Media(row: r, height: look == "reels" ? 380 : 200)
-            HStack {
-                action("💬 " + Val.n(r.n("comments")).text, false, p.accent) {}
-                action("🔁 " + Val.n(r.n("reposts")).text, r.on("reposted"), .green) { toggle(r, "reposted", "reposts") }
-                action((r.on("liked") ? "❤️ " : "🤍 ") + Val.n(r.n("likes")).text, r.on("liked"), p.danger) { toggle(r, "liked", "likes") }
-                action(r.on("saved") ? "🔖 Saved" : "🔖", r.on("saved"), p.accent) { toggle(r, "saved") }
-            }
+            if firstMedia(r.s("media")).isEmpty { Text(r.s("text")).foregroundColor(p.text) } else { Media(row: r, height: 380) }
+            buttons(r)
         }
-        .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+        .padding(12).background(RoundedRectangle(cornerRadius: 16).fill(p.card)).padding(.horizontal, 16)
     }
 
     var body: some View {
-        let rows = app.query(collection, filter: filter, search: search.isEmpty ? "" : (app.get(search)?.text ?? ""))
-        if rows.isEmpty {
-            EmptyNote(text: empty)
-        } else if look == "grid" {
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, columns)), spacing: 4) {
-                ForEach(rows, id: \.self) { r in
-                    Button { app.openProfile(profilePage, r.s("handle"), r.s("author")) } label: {
-                        if firstMedia(r.s("media")).isEmpty { Text(r.s("text")).font(.caption).lineLimit(4).frame(maxWidth: .infinity, minHeight: 120).background(Color.gray.opacity(0.15)) }
-                        else { Media(row: r, height: 120, radius: 6) }
-                    }.buttonStyle(.plain)
+        let p = app.palette(scheme)
+        let t: FeedTab? = tabs.isEmpty ? nil : tabs[min(max(tab, 0), tabs.count - 1)]
+        let pass = t.flatMap { test($0.only) }
+        let filters = [filter, t != nil && pass == nil ? t!.only : ""].filter { !$0.isEmpty }.joined(separator: " and ")
+        let rows = app.query(collection, filter: filters, search: search.isEmpty ? "" : (app.get(search)?.text ?? "")).filter { pass?($0) ?? true }
+        let shown = (t?.look.isEmpty ?? true) ? look : t!.look
+        VStack(spacing: 0) {
+            if tabs.count > 1 {
+                HStack(spacing: 0) {
+                    ForEach(tabs.indices, id: \.self) { i in
+                        Button { tab = i } label: {
+                            VStack(spacing: 10) {
+                                Text(tabs[i].label).font(.system(size: 15, weight: .bold)).foregroundColor(i == tab ? p.text : p.sub)
+                                Capsule().fill(i == tab ? p.accent : Color.clear).frame(width: 48, height: 4)
+                            }
+                            .padding(.top, 14).frame(maxWidth: .infinity)
+                        }.buttonStyle(.plain)
+                    }
                 }
+                Divider().overlay(p.line)
             }
-        } else {
-            VStack(spacing: 10) { ForEach(rows, id: \.self) { post($0) } }
+            if rows.isEmpty {
+                EmptyNote(text: empty)
+            } else if shown == "grid" {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: max(1, columns)), spacing: 4) {
+                    ForEach(rows, id: \.self) { r in
+                        Button { app.openProfile(profilePage, r.s("handle"), r.s("author")) } label: {
+                            if firstMedia(r.s("media")).isEmpty { Text(r.s("text")).font(.caption.bold()).foregroundColor(.white).lineLimit(4).padding(6).frame(maxWidth: .infinity, minHeight: 120).background(avatarColor(r.s("author"))) }
+                            else { Media(row: r, height: 120, radius: 6) }
+                        }.buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 16)
+            } else if shown == "reels" {
+                VStack(spacing: 10) { ForEach(rows, id: \.self) { reel($0) } }
+            } else {
+                VStack(spacing: 0) { ForEach(rows, id: \.self) { post($0) } }
+            }
         }
+        .padding(.horizontal, -16) // edge to edge, out of the page's side margins
     }
 }
 
@@ -695,15 +1045,17 @@ struct SendBox: View {
     @Environment(\.colorScheme) var scheme
     @EnvironmentObject var app: AppState
     let placeholder: String, button: String
+    var card = true, avatar = false
     let send: (String) -> Void
     @State var text = ""
     var body: some View {
         let p = app.palette(scheme)
-        HStack(spacing: 8) {
-            TextField(placeholder, text: $text).padding(10).background(RoundedRectangle(cornerRadius: 12).fill(Color(.secondarySystemBackground))).onSubmit(go)
-            Button(button, action: go).bold().padding(.horizontal, 14).padding(.vertical, 10).foregroundColor(p.onAccent).background(RoundedRectangle(cornerRadius: 12).fill(p.accent))
+        HStack(spacing: 10) {
+            if avatar { Avatar(name: app.meName, seed: app.me) }
+            TextField(placeholder, text: $text).padding(10).background(RoundedRectangle(cornerRadius: card ? 12 : 22).fill(Color(.secondarySystemBackground))).onSubmit(go)
+            Button(button, action: go).font(.body.weight(.heavy)).padding(.horizontal, 16).padding(.vertical, 10).foregroundColor(p.onAccent).background(Capsule().fill(p.accent))
         }
-        .padding(8).background(RoundedRectangle(cornerRadius: 16).fill(p.card))
+        .padding(card ? 8 : 0).background(RoundedRectangle(cornerRadius: 16).fill(card ? p.card : Color.clear))
     }
     func go() {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -718,29 +1070,50 @@ struct Composer: View {
     @EnvironmentObject var app: AppState
     var collection = "Posts", placeholder = "What’s happening?"
     var body: some View {
-        SendBox(placeholder: placeholder, button: "Post") { t in
-            app.addRecord(collection, ["author": .s(app.meName), "handle": .s(app.me), "text": .s(t), "likes": .n(0), "comments": .n(0), "reposts": .n(0), "liked": .b(false), "reposted": .b(false), "saved": .b(false)])
+        SendBox(placeholder: placeholder, button: "Post", card: false, avatar: true) { t in
+            app.addRecord(collection, ["author": .s(app.meName), "handle": .s(app.me), "text": .s(t)])
         }
     }
 }
 
-/// Story circles; tap one to see it.
+/// Story circles, one per person (newest first), "Your story" first; tap one to see it.
 struct Stories: View {
     @EnvironmentObject var app: AppState
     @Environment(\.colorScheme) var scheme
     var collection = "Stories"
+    var yours = true
     @State var open: Row? = nil
+    /// One story per person (their newest), not mine.
+    func people() -> [Row] {
+        var seen = Set<String>(), out: [Row] = []
+        for r in app.query(collection) where r.s("handle") != app.me {
+            let k = r.s("handle").isEmpty ? r.s("author") : r.s("handle")
+            if !seen.contains(k) { seen.insert(k); out.append(r) }
+        }
+        return out
+    }
     var body: some View {
-        let p = app.palette(scheme)
+        let p = app.palette(scheme), me = app.me, rows = people()
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
-                ForEach(app.query(collection), id: \.self) { r in
+            HStack(spacing: 14) {
+                if yours {
+                    VStack(spacing: 4) {
+                        Avatar(name: app.meName, seed: me, size: 62).padding(3)
+                            .overlay(alignment: .bottomTrailing) { Image(systemName: "plus").font(.system(size: 11, weight: .heavy)).foregroundColor(.white).frame(width: 22, height: 22).background(Circle().fill(p.accent)).overlay(Circle().stroke(p.bg, lineWidth: 2)) }
+                        Text("Your story").font(.system(size: 12, weight: .bold)).foregroundColor(p.text)
+                    }
+                }
+                ForEach(rows, id: \.self) { r in
                     let m = firstMedia(r.s("media"))
                     Button { open = r } label: {
                         VStack(spacing: 4) {
-                            Avatar(name: r.s("author"), seed: r.s("handle"), size: 56, label: m.isEmpty || isUrl(m) ? nil : m)
-                                .padding(3).overlay(Circle().stroke(LinearGradient(colors: [.orange, .pink, .purple], startPoint: .bottomLeading, endPoint: .topTrailing), lineWidth: 3))
-                            Text(r.s("author").components(separatedBy: " ").first ?? "").font(.caption2).foregroundColor(p.text)
+                            Group {
+                                if m.isEmpty || isUrl(m) { Avatar(name: r.s("author"), seed: r.s("handle"), size: 58) }
+                                else { Text(m).font(.system(size: 27)).frame(width: 58, height: 58).background(Circle().fill(colorOf(r, r.s("author"), p))) }
+                            }
+                            .padding(2).background(Circle().fill(p.bg)).padding(3)
+                            .background(Circle().fill(LinearGradient(colors: [.orange, .pink, .purple], startPoint: .bottomLeading, endPoint: .topTrailing)))
+                            Text(r.s("author").components(separatedBy: " ").first ?? "").font(.system(size: 12, weight: .bold)).foregroundColor(p.text)
                         }
                     }.buttonStyle(.plain)
                 }
@@ -756,7 +1129,7 @@ struct Stories: View {
                     Text(r.s("text")).multilineTextAlignment(.center)
                 }
                 .foregroundColor(.white).padding(24).frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(colorOf(r, r.s("handle"), p).ignoresSafeArea())
+                .background(colorOf(r, r.s("author"), p).ignoresSafeArea())
                 .onTapGesture { open = nil }
             }
         }
@@ -830,7 +1203,7 @@ struct ProfileHeader: View {
     var cover = "@accent"
     var body: some View {
         let p = app.palette(scheme), n = app.fill(name), h = app.fill(handle)
-        let own: Row = ["posts_count": .n(Double(app.rows("Posts").filter { $0.s("handle") == h }.count)), "points": .n(app.get("points")?.number ?? 0)]
+        let own: Row = ["points": .n(app.get("points")?.number ?? 0)]
         VStack(spacing: 4) {
             Rectangle().fill(p.resolve(cover) ?? p.accent).frame(height: 80)
             Avatar(name: n, seed: h, size: 76).overlay(Circle().stroke(p.card, lineWidth: 3)).padding(.top, -38)

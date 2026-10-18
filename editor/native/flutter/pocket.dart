@@ -37,6 +37,40 @@ class NavTab {
   final IconData icon;
 }
 
+/// A button on the right of the App Bar: icon (a name, or theme for the dark mode moon / sun), what it does
+/// ("dark mode toggle", "page:friends", or a message), a badge variable, and the pages it shows on (blank = all).
+class BarAction {
+  const BarAction(this.icon, this.does, {this.badge = '', this.only = const []});
+  final String icon, does, badge;
+  final List<String> only;
+}
+
+/// The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours.
+class BarStyle {
+  const BarStyle({this.look = 'standard', this.brandPages = const ['home'], this.center = false, this.avatar = false, this.actions = const [], this.bg = '@bar', this.text = '@text', this.icon = '@text', this.border = true, this.size = 19});
+  final String look, bg, text, icon;
+  final List<String> brandPages;
+  final bool center, avatar, border;
+  final List<BarAction> actions;
+  final double size;
+}
+
+/// The Bottom Nav's style (minimal: icons only) and colours.
+class NavStyle {
+  const NavStyle({this.style = 'pill', this.bar = '@bar', this.active = '@accent', this.idle = '@sub'});
+  final String style, bar, active, idle;
+}
+
+/// Icon names (as in Pocket Engine) → Material icons.
+IconData iconNamed(String name, {bool on = false}) => switch (name) {
+      'home' => on ? Icons.home : Icons.home_outlined, 'search' || 'explore' => Icons.search, 'user' || 'profile' => on ? Icons.person : Icons.person_outline,
+      'users' || 'friends' => Icons.people_outline, 'chat' => on ? Icons.chat_bubble : Icons.chat_bubble_outline, 'bell' => Icons.notifications_none, 'heart' => Icons.favorite_border,
+      'video' => on ? Icons.smart_display : Icons.smart_display_outlined, 'info' => Icons.info_outline, 'settings' || 'gear' => Icons.settings_outlined, 'plus' || 'add' => Icons.add,
+      'shop' => Icons.storefront_outlined, 'bookmark' => Icons.bookmark_border, 'trophy' => Icons.emoji_events_outlined, 'edit' => Icons.edit_outlined, 'moon' => Icons.dark_mode_outlined,
+      'sun' => Icons.light_mode_outlined, 'menu' || 'list' => Icons.menu, 'star' => Icons.star_border, 'camera' => Icons.photo_camera_outlined,
+      _ => Icons.circle_outlined,
+    };
+
 // ---------------------------------------------------------------------------------------------------------------
 // Colours (the app's @tokens) for light and dark
 // ---------------------------------------------------------------------------------------------------------------
@@ -73,7 +107,7 @@ Palette pal(BuildContext context) => Theme.of(context).brightness == Brightness.
 late AppState app;
 
 class AppState extends ChangeNotifier {
-  AppState({required this.name, required this.collections, required this.stats, required Map<String, Object?> vars, required this.tabs, required this.home, required this.light, required this.dark, this.themeSetting = 'follow the phone'}) {
+  AppState({required this.name, required this.collections, required this.stats, required Map<String, Object?> vars, required this.tabs, required this.home, required this.light, required this.dark, this.themeSetting = 'follow the phone', this.bar = const BarStyle(), this.nav = const NavStyle()}) {
     this.vars.addAll(vars);
   }
 
@@ -82,6 +116,8 @@ class AppState extends ChangeNotifier {
   final List<Stat> stats;
   final List<NavTab> tabs;
   final Palette light, dark;
+  final BarStyle bar;
+  final NavStyle nav;
   final Map<String, Object?> vars = {};
   final Map<String, List<Map<String, Object?>>> data = {};
   final navigator = GlobalKey<NavigatorState>();
@@ -100,12 +136,11 @@ class AppState extends ChangeNotifier {
     try { _prefs = await SharedPreferences.getInstance(); } catch (_) {}
     final saved = _prefs?.getString('pocket.data');
     final Map<String, dynamic> s = saved != null ? jsonDecode(saved) as Map<String, dynamic> : {};
-    final now = DateTime.now().millisecondsSinceEpoch;
     for (final c in collections) {
       final rows = s[c.name] as List?;
       data[c.name] = rows != null
           ? rows.map((r) => Map<String, Object?>.from(r as Map)).toList()
-          : [for (var i = 0; i < c.sample.length; i++) {'_id': 's$i', '_at': now - i * 1000, ...c.sample[i]}];
+          : [for (var i = 0; i < c.sample.length; i++) {...blank(c.name), ...c.sample[i], '_id': 's$i', '_at': c.sample[i]['_at'] ?? i}]; // (later rows count as newer)
     }
     final v = _prefs?.getString('pocket.vars');
     if (v != null) vars.addAll(Map<String, Object?>.from(jsonDecode(v) as Map));
@@ -115,7 +150,48 @@ class AppState extends ChangeNotifier {
   void _changed() { _work(); _prefs?.setString('pocket.data', jsonEncode(data)); _prefs?.setString('pocket.vars', jsonEncode(vars)); notifyListeners(); }
 
   /// Stats are worked out again whenever the data changes.
-  void _work() { for (final s in stats) { vars[s.variable] = stat(s.collection, s.how, field: s.field, filter: s.filter); } }
+  /// Stats, {posts_count}-style counts and the social counts ({unread}, {notifications_unread}, {friend_requests}).
+  void _work() {
+    final me = show(vars['playerHandle']).isEmpty ? 'me' : show(vars['playerHandle']), mine = {for (final s in stats) s.variable};
+    for (final c in collections) { vars['${c.name.trim().toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), '_')}_count'] = rows(c.name).length; }
+    if (def('Notifications') != null) vars['notifications_unread'] = rows('Notifications').where((r) => show(r['to']) == me && !_on(r['read'])).length;
+    if (def('Friends') != null) vars['friend_requests'] = rows('Friends').where((r) => show(r['status']) != 'accepted' && show(r['to']) == me).length;
+    if (def('Messages') != null && !mine.contains('unread')) {
+      final read = <String, num>{for (final r in rows('Reads')) if (show(r['handle']) == me) show(r['chat']): (r['at'] as num?) ?? 0};
+      vars['unread'] = rows('Messages').where((r) => show(r['handle']) != me && ((r['_at'] as num?) ?? 0) > (read[show(r['chat'])] ?? 0)).length;
+    }
+    for (final s in stats) { vars[s.variable] = stat(s.collection, s.how, field: s.field, filter: s.filter); }
+  }
+  static bool _on(Object? v) => v == true || v == 1 || v == 'yes' || v == 'true';
+  static String today([int days = 0]) { final d = DateTime.now().add(Duration(days: days)); return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}'; }
+
+  /// A new record's values: each field's default (dates: today).
+  Map<String, Object?> blank(String name) => {
+        for (final f in def(name)?.fields ?? const <Field>[])
+          f.key: f.def != null && f.def != ''
+              ? (f.type == 'yes/no' ? _on(f.def) : ['number', 'money', 'rating'].contains(f.type) ? num.tryParse('${f.def}') ?? 0 : f.def == 'today' && f.type == 'date' ? today() : f.def)
+              : f.type == 'yes/no' ? false : f.type == 'date' ? today() : f.type == 'choice' ? (f.options.isEmpty ? '' : f.options.first) : ['number', 'money', 'rating'].contains(f.type) ? 0 : '',
+      };
+
+  /// How a value reads: dates as Today / Tomorrow / 3 Mar, money with \$, yes/no as ✓.
+  String text(String? collection, String key, Object? v) {
+    if (v == null || v == '') return '';
+    Field? f;
+    for (final x in def(collection ?? '')?.fields ?? const <Field>[]) { if (x.key == key) f = x; }
+    switch (f?.type) {
+      case 'money': final n = v is num ? v : num.tryParse('$v') ?? 0; return '${n < 0 ? '−' : ''}\$${n.abs().toStringAsFixed(2).replaceAll(RegExp(r'\.00$'), '')}';
+      case 'yes/no': return _on(v) ? '✓' : '';
+      case 'date':
+        final k = '$v'.length >= 10 ? '$v'.substring(0, 10) : '$v', d = DateTime.tryParse(k);
+        if (d == null) return show(v);
+        if (k == today()) return 'Today';
+        if (k == today(-1)) return 'Yesterday';
+        if (k == today(1)) return 'Tomorrow';
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return '${d.day} ${months[d.month - 1]}${d.year != DateTime.now().year ? ' ${d.year}' : ''}';
+      default: return show(v);
+    }
+  }
 
   // ---- variables and text ----
   Object? get(String k) => vars[k];
@@ -128,10 +204,10 @@ class AppState extends ChangeNotifier {
     return '$v';
   }
   /// '{score} points' → '12 points'; {record_title} is the opened record's title; with a row, {title} is the row's.
-  String fill(String t, [Map<String, Object?>? row]) => t.replaceAllMapped(RegExp(r'\{(\w+)\}'), (m) {
+  String fill(String t, [Map<String, Object?>? row, String? collection]) => t.replaceAllMapped(RegExp(r'\{(\w+)\}'), (m) {
         final k = m[1]!;
-        if (row != null && row.containsKey(k)) return show(row[k]);
-        if (k.startsWith('record_')) return show(opened?[k.substring(7)]);
+        if (row != null && row.containsKey(k)) return collection == null ? show(row[k]) : text(collection, k, row[k]);
+        if (k.startsWith('record_')) return text(openCollection, k.substring(7), opened?[k.substring(7)]);
         return show(vars[k]);
       });
 
@@ -194,7 +270,7 @@ class AppState extends ChangeNotifier {
 
   String addRecord(String name, Map<String, Object?> values) {
     final id = 'r${DateTime.now().microsecondsSinceEpoch}';
-    (data[name] ??= []).add({'_id': id, '_at': DateTime.now().millisecondsSinceEpoch, ...values});
+    (data[name] ??= []).add({...blank(name), ...values, '_id': id, '_at': DateTime.now().millisecondsSinceEpoch});
     _changed();
     return id;
   }
@@ -271,17 +347,27 @@ class _Tabs extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
         body: IndexedStack(index: app.tab, children: [for (final t in app.tabs) pages[t.page]!(context)]),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: app.tab,
-          onDestinationSelected: app.pickTab,
-          destinations: [
-            for (final t in app.tabs)
-              NavigationDestination(
-                icon: Badge(isLabelVisible: t.badge.isNotEmpty && (num.tryParse(AppState.show(app.get(t.badge))) ?? 0) > 0, label: Text(AppState.show(app.get(t.badge))), child: Icon(t.icon)),
-                label: t.label,
-              ),
-          ],
-        ),
+        bottomNavigationBar: Builder(builder: (context) {
+          // the project's Bottom Nav: its style (minimal = icons only, no pill) and colours
+          final p = pal(context), n = app.nav, minimal = n.style == 'minimal', on = p.resolve(n.active) ?? p.accent, off = p.resolve(n.idle) ?? p.sub;
+          Widget icon(NavTab t, bool sel) => Badge(
+                isLabelVisible: t.badge.isNotEmpty && (num.tryParse(AppState.show(app.get(t.badge))) ?? 0) > 0,
+                label: Text(AppState.show(app.get(t.badge))),
+                child: Icon(sel && t.icon == Icons.home_outlined ? Icons.home : t.icon, color: sel ? on : off, size: minimal ? 28 : 24),
+              );
+          return NavigationBarTheme(
+            data: NavigationBarThemeData(labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: s.contains(WidgetState.selected) ? on : off))),
+            child: NavigationBar(
+              selectedIndex: app.tab,
+              onDestinationSelected: app.pickTab,
+              backgroundColor: p.resolve(n.bar) ?? p.card,
+              indicatorColor: minimal ? Colors.transparent : on.withValues(alpha: 0.18),
+              labelBehavior: minimal ? NavigationDestinationLabelBehavior.alwaysHide : NavigationDestinationLabelBehavior.alwaysShow,
+              height: minimal ? 60 : null,
+              destinations: [for (final t in app.tabs) NavigationDestination(icon: icon(t, false), selectedIcon: icon(t, true), label: t.label)],
+            ),
+          );
+        }),
       );
 }
 
@@ -290,9 +376,12 @@ class _Tabs extends StatelessWidget {
 // ---------------------------------------------------------------------------------------------------------------
 
 /// A page: the app bar with its title, then what's on it (a list or form fills the rest).
+/// Things that run edge to edge on a page (a feed), instead of inside the page's side margins.
+mixin FullBleed on Widget {}
+
 class PocketPage extends StatelessWidget {
-  const PocketPage({super.key, required this.title, required this.body, this.fab, this.appBar = true, this.scroll = true});
-  final String title;
+  const PocketPage({super.key, required this.title, required this.body, this.page = '', this.fab, this.appBar = true, this.scroll = true});
+  final String title, page;
   final List<Widget> Function(BuildContext context) body;
   final Widget? fab;
   final bool appBar, scroll;
@@ -302,17 +391,58 @@ class PocketPage extends StatelessWidget {
         builder: (context, _) {
           final kids = body(context);
           return Scaffold(
-            appBar: appBar ? AppBar(title: Text(app.fill(title), style: const TextStyle(fontWeight: FontWeight.w800))) : null,
+            appBar: appBar ? _bar(context) : null,
             floatingActionButton: fab,
             body: SafeArea(
               child: scroll
-                  ? ListView(padding: const EdgeInsets.fromLTRB(16, 12, 16, 96), children: _spaced(kids))
-                  : Padding(padding: const EdgeInsets.fromLTRB(12, 8, 12, 0), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: _spaced(kids))),
+                  ? ListView(padding: const EdgeInsets.only(top: 12, bottom: 96), children: _spaced(kids, 16))
+                  : Padding(padding: const EdgeInsets.only(top: 8), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: _spaced(kids, 12))),
             ),
           );
         },
       );
-  static List<Widget> _spaced(List<Widget> k) => [for (var i = 0; i < k.length; i++) ...[if (i > 0 && k[i] is! Expanded && k[i] is! Spacer) const SizedBox(height: 12), k[i]]];
+
+  /// The project's App Bar: its look (x: your avatar on the left and the app's name on the home page), title position, buttons with badges, colours.
+  PreferredSizeWidget _bar(BuildContext context) {
+    final p = pal(context), b = app.bar, back = Navigator.of(context).canPop();
+    final brand = b.look != 'standard' && !back && (b.brandPages.isEmpty || b.brandPages.contains(page));
+    final ic = p.resolve(b.icon) ?? p.text, dark = Theme.of(context).brightness == Brightness.dark;
+    return AppBar(
+      backgroundColor: p.resolve(b.bg) ?? p.card,
+      foregroundColor: p.resolve(b.text) ?? p.text,
+      iconTheme: IconThemeData(color: ic),
+      centerTitle: b.center,
+      shape: b.border ? Border(bottom: BorderSide(color: p.line)) : null,
+      leading: back ? null : b.avatar ? Padding(padding: const EdgeInsets.all(10), child: Avatar(meName, me, size: 34)) : null,
+      automaticallyImplyLeading: back,
+      title: Text(brand ? app.name : app.fill(title), style: TextStyle(fontWeight: brand ? FontWeight.w900 : FontWeight.w800, fontSize: brand ? 22 : b.size)),
+      actions: [
+        for (final a in b.actions.reversed) // (the first sits at the right edge)
+          if (a.only.isEmpty || a.only.contains(page))
+            IconButton(
+              tooltip: a.icon,
+              icon: Badge(
+                isLabelVisible: a.badge.isNotEmpty && (num.tryParse(AppState.show(app.get(a.badge))) ?? 0) > 0,
+                label: Text(AppState.show(app.get(a.badge))),
+                child: Icon(iconNamed(a.icon == 'theme' ? (dark ? 'sun' : 'moon') : a.icon), color: ic),
+              ),
+              onPressed: () {
+                if (a.does.contains('dark mode')) { app.set('darkMode', !dark); }
+                else if (a.does.startsWith('page:')) { app.go(a.does.substring(5)); }
+                else { debugPrint('TODO: the App Bar button sends "${a.does}"'); }
+              },
+            ),
+        const SizedBox(width: 4),
+      ],
+    );
+  }
+
+  static List<Widget> _spaced(List<Widget> k, double side) => [
+        for (var i = 0; i < k.length; i++) ...[
+          if (i > 0 && k[i] is! Expanded && k[i] is! Spacer) const SizedBox(height: 12),
+          k[i] is FullBleed || k[i] is Spacer ? k[i] : k[i] is Expanded ? Expanded(child: Padding(padding: EdgeInsets.symmetric(horizontal: side), child: (k[i] as Expanded).child)) : Padding(padding: EdgeInsets.symmetric(horizontal: side), child: k[i]),
+        ],
+      ];
 }
 
 /// Text with {variables} filled in.
@@ -360,8 +490,9 @@ class PCard extends StatelessWidget {
 
 /// A text box that edits a variable (search boxes too).
 class VarField extends StatefulWidget {
-  const VarField(this.variable, {super.key, this.placeholder = '', this.keyboard = 'text'});
+  const VarField(this.variable, {super.key, this.placeholder = '', this.keyboard = 'text', this.outlined = false});
   final String variable, placeholder, keyboard;
+  final bool outlined;
   @override
   State<VarField> createState() => _VarFieldState();
 }
@@ -371,13 +502,23 @@ class _VarFieldState extends State<VarField> {
   @override
   void dispose() { c.dispose(); super.dispose(); }
   @override
-  Widget build(BuildContext context) => TextField(
-        controller: c,
-        obscureText: widget.keyboard == 'password',
-        keyboardType: widget.keyboard == 'number' ? TextInputType.number : widget.keyboard == 'email' ? TextInputType.emailAddress : TextInputType.text,
-        decoration: InputDecoration(hintText: widget.placeholder, prefixIcon: widget.keyboard == 'search' ? const Icon(Icons.search) : null),
-        onChanged: (v) => app.set(widget.variable, widget.keyboard == 'number' ? num.tryParse(v) ?? 0 : v),
-      );
+  Widget build(BuildContext context) {
+    final p = pal(context), line = OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: p.line));
+    return TextField(
+      controller: c,
+      obscureText: widget.keyboard == 'password',
+      keyboardType: widget.keyboard == 'number' ? TextInputType.number : widget.keyboard == 'email' ? TextInputType.emailAddress : TextInputType.text,
+      decoration: InputDecoration(
+        hintText: widget.placeholder,
+        prefixIcon: widget.keyboard == 'search' ? Icon(Icons.search, color: p.sub) : null,
+        // outlined: a white box with a thin line (the project's input has a stroke)
+        fillColor: widget.outlined ? p.card : null,
+        enabledBorder: widget.outlined ? line : null,
+        focusedBorder: widget.outlined ? line.copyWith(borderSide: BorderSide(color: p.accent, width: 2)) : null,
+      ),
+      onChanged: (v) => app.set(widget.variable, widget.keyboard == 'number' ? num.tryParse(v) ?? 0 : v),
+    );
+  }
 }
 
 /// A switch for a yes/no variable (darkMode switches the app's look).
@@ -394,8 +535,10 @@ class VarSwitch extends StatelessWidget {
 
 /// The records of a collection: tap one to open it, tick its checkbox, swipe to delete.
 class RecordList extends StatelessWidget {
-  const RecordList({super.key, required this.collection, this.title = '{title}', this.subtitle = '', this.icon = '', this.check = '', this.search = '', this.filter = '', this.sort = 'newest first', this.openPage = '', this.empty = 'Nothing here yet'});
-  final String collection, title, subtitle, icon, check, search, filter, sort, openPage, empty;
+  const RecordList({super.key, required this.collection, this.title = '{title}', this.subtitle = '', this.right = '', this.icon = '', this.check = '', this.search = '', this.filter = '', this.sort = 'newest first', this.openPage = '', this.empty = 'Nothing here yet', this.swipeDelete = true, this.rowH = 64, this.gap = 8, this.radius = 14, this.doneLook = true});
+  final String collection, title, subtitle, right, icon, check, search, filter, sort, openPage, empty;
+  final bool swipeDelete, doneLook;
+  final double rowH, gap, radius;
   @override
   Widget build(BuildContext context) {
     final p = pal(context), rows = app.query(collection, filter: filter, search: search.isEmpty ? '' : AppState.show(app.get(search)), sort: sort);
@@ -403,26 +546,52 @@ class RecordList extends StatelessWidget {
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 96),
       itemCount: rows.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
+      separatorBuilder: (_, _) => SizedBox(height: gap),
       itemBuilder: (context, i) {
-        final r = rows[i], id = '${r['_id']}', done = check.isNotEmpty && (r[check] == true || r[check] == 1);
+        final r = rows[i], id = '${r['_id']}', done = check.isNotEmpty && (r[check] == true || r[check] == 1), faded = done && doneLook;
+        // a row the way the app draws it: a round tick, the title (struck through when done), the line under it, swipe left to delete
+        final row = Material(
+          color: p.card,
+          borderRadius: BorderRadius.circular(radius),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(radius),
+            onTap: openPage.isEmpty ? null : () { app.open(collection, id); app.go(openPage); },
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: rowH),
+              child: Opacity(
+                opacity: faded ? 0.55 : 1,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  child: Row(children: [
+                    if (check.isNotEmpty)
+                      GestureDetector(
+                        onTap: () => app.updateRecord(collection, id, {check: !done}),
+                        child: Container(
+                          width: 28, height: 28, margin: const EdgeInsets.only(right: 14),
+                          decoration: BoxDecoration(shape: BoxShape.circle, color: done ? p.accent : null, border: Border.all(color: done ? p.accent : p.sub, width: 2)),
+                          child: done ? const Icon(Icons.check, size: 18, color: Colors.white) : null,
+                        ),
+                      )
+                    else if (icon.isNotEmpty)
+                      Padding(padding: const EdgeInsets.only(right: 14), child: Text(app.fill(icon, r, collection), style: const TextStyle(fontSize: 26))),
+                    Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                      Text(app.fill(title, r, collection), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: p.text, decoration: done ? TextDecoration.lineThrough : null)),
+                      if (subtitle.isNotEmpty) Text(app.fill(subtitle, r, collection), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.sub, fontWeight: FontWeight.w600)),
+                    ])),
+                    if (right.isNotEmpty) Text(app.fill(right, r, collection), style: TextStyle(color: p.sub, fontWeight: FontWeight.w700)),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+        );
+        if (!swipeDelete) return row;
         return Dismissible(
           key: ValueKey(id),
           direction: DismissDirection.endToStart,
-          background: Container(alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 24), decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(16)), child: const Icon(Icons.delete_outline, color: Colors.white)),
+          background: Container(alignment: Alignment.centerRight, padding: const EdgeInsets.only(right: 24), decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(radius)), child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800))),
           onDismissed: (_) => app.deleteRecord(collection, id),
-          child: Card(
-            child: ListTile(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              leading: check.isNotEmpty
-                  ? Checkbox(value: done, shape: const CircleBorder(), onChanged: (v) => app.updateRecord(collection, id, {check: v ?? false}))
-                  : icon.isNotEmpty ? Text(app.fill(icon, r), style: const TextStyle(fontSize: 26)) : null,
-              title: Text(app.fill(title, r), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: done ? p.sub : p.text, decoration: done ? TextDecoration.lineThrough : null)),
-              subtitle: subtitle.isEmpty ? null : Text(app.fill(subtitle, r), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.sub)),
-              trailing: openPage.isEmpty ? null : Icon(Icons.chevron_right, color: p.sub),
-              onTap: openPage.isEmpty ? null : () { app.open(collection, id); app.go(openPage); },
-            ),
-          ),
+          child: row,
         );
       },
     );
@@ -560,12 +729,45 @@ String get meName => AppState.show(app.get('playerName')).isEmpty ? 'Me' : AppSt
 String sv(Map<String, Object?> r, String k) => AppState.show(r[k]);
 bool isOn(Object? v) => v == true || v == 1 || v == 'yes' || v == 'true';
 num nv(Object? v) => v is num ? v : num.tryParse('${v ?? ''}') ?? 0;
-const _avatarColors = [0xFFEF4444, 0xFFF59E0B, 0xFF10B981, 0xFF3B82F6, 0xFF8B5CF6, 0xFFEC4899, 0xFF14B8A6, 0xFFF97316];
-Color avatarColor(String s) => Color(_avatarColors[s.codeUnits.fold<int>(0, (a, c) => a + c) % _avatarColors.length]);
-String firstMedia(Object? m) => AppState.show(m).split('|').first.trim();
+// the engine's avatar colours and initials (Maya Chen → MC)
+const _avatarColors = [0xFFEF5350, 0xFFEC407A, 0xFFAB47BC, 0xFF7E57C2, 0xFF5C6BC0, 0xFF42A5F5, 0xFF26A69A, 0xFF66BB6A, 0xFFFFA726, 0xFF8D6E63];
+Color avatarColor(String s) {
+  var n = 0;
+  for (final c in (s.isEmpty ? '?' : s).codeUnits) { n = (n * 31 + c) & 0xFFFFFFFF; }
+  return Color(_avatarColors[n % _avatarColors.length]);
+}
+String initials(String s) {
+  final w = s.trim().split(RegExp(r'\s+')).where((x) => x.isNotEmpty).take(2).map((x) => String.fromCharCode(x.runes.first).toUpperCase()).join();
+  return w.isEmpty ? '?' : w;
+}
+List<String> mediaList(Object? m) => AppState.show(m).split('|').map((x) => x.trim()).where((x) => x.isNotEmpty).toList();
+String firstMedia(Object? m) { final l = mediaList(m); return l.isEmpty ? '' : l.first; }
 bool isUrl(String s) => s.startsWith('http:') || s.startsWith('https:');
-Color colorOf(Map<String, Object?> r, String seed) => pal0.resolve(sv(r, 'color')) ?? avatarColor(seed);
-Palette get pal0 => app.light;
+Color? hexColor(String v) => RegExp(r'^#[0-9a-fA-F]{6}$').hasMatch(v) ? Color(int.parse('FF${v.substring(1)}', radix: 16)) : null;
+Color colorOf(Map<String, Object?> r, String seed) => hexColor(sv(r, 'color')) ?? avatarColor(seed);
+/// 1284 → 1.3K, 48200 → 48K.
+String compactNum(Object? v) {
+  final n = nv(v);
+  if (n < 1000) return '${n.round()}';
+  if (n < 10000) return '${((n / 100).round() / 10).toString().replaceAll('.0', '')}K';
+  if (n < 1e6) return '${(n / 1000).round()}K';
+  return '${((n / 1e5).round() / 10).toString().replaceAll('.0', '')}M';
+}
+/// 9m, 2h, 3d, then the date.
+String ago(Object? at) {
+  final t = nv(at);
+  if (t < 1e11) return '';
+  final s = (DateTime.now().millisecondsSinceEpoch - t) / 1000;
+  if (s < 60) return 'now';
+  if (s < 3600) return '${s ~/ 60}m';
+  if (s < 86400) return '${s ~/ 3600}h';
+  if (s < 604800) return '${s ~/ 86400}d';
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  final d = DateTime.fromMillisecondsSinceEpoch(t.toInt());
+  return '${months[d.month - 1]} ${d.day}';
+}
+/// The colours of a CSS gradient ("linear-gradient(135deg,#f58529,#dd2a7b)").
+List<Color> gradientColors(Object? bg) => RegExp(r'#[0-9a-fA-F]{6}').allMatches(AppState.show(bg)).map((m) => hexColor(m[0]!)!).toList();
 
 /// Opens a person's profile page (it shows {profile} and {profile_name}).
 void openProfile(String page, String handle, String name) {
@@ -583,12 +785,24 @@ class Avatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) => CircleAvatar(
         radius: size / 2,
-        backgroundColor: avatarColor(seed.isEmpty ? name : seed),
-        child: Text(label ?? (name.trim().isEmpty ? '?' : name.trim()[0].toUpperCase()), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: size * 0.42)),
+        backgroundColor: avatarColor(name.isEmpty ? seed : name),
+        child: Text(label ?? initials(name.isEmpty ? seed : name), style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: size * (label == null ? 0.38 : 0.5))),
       );
 }
 
-/// A post's picture: a photo from the web, or an emoji on the post's colour.
+/// A picture: a photo from the web, or an emoji on a colour.
+class Tile extends StatelessWidget {
+  const Tile(this.media, this.color, {super.key, this.height = 200});
+  final String media;
+  final Color color;
+  final double height;
+  @override
+  Widget build(BuildContext context) => isUrl(media)
+      ? Image.network(media, height: height, width: double.infinity, fit: BoxFit.cover)
+      : Container(height: height, width: double.infinity, alignment: Alignment.center, color: color, child: Text(media, style: TextStyle(fontSize: (height < 150 ? height : 150) * 0.42)));
+}
+
+/// A post's first picture (rounded).
 class Media extends StatelessWidget {
   const Media(this.row, {super.key, this.height = 200, this.radius = 12});
   final Map<String, Object?> row;
@@ -597,20 +811,52 @@ class Media extends StatelessWidget {
   Widget build(BuildContext context) {
     final m = firstMedia(row['media']);
     if (m.isEmpty) return const SizedBox.shrink();
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(radius),
-      child: isUrl(m)
-          ? Image.network(m, height: height, width: double.infinity, fit: BoxFit.cover)
-          : Container(height: height, width: double.infinity, alignment: Alignment.center, color: colorOf(row, sv(row, 'handle') + m), child: Text(m, style: TextStyle(fontSize: height * 0.4))),
-    );
+    return ClipRRect(borderRadius: BorderRadius.circular(radius), child: Tile(m, colorOf(row, sv(row, 'handle') + m), height: height));
   }
 }
 
-/// Posts, newest first: like, repost, save; tap the author for their profile. look: timeline, reels or grid.
-class SocialFeed extends StatelessWidget {
-  const SocialFeed({super.key, this.collection = 'Posts', this.look = 'timeline', this.filter = '', this.search = '', this.columns = 3, this.profilePage = '', this.empty = 'No posts yet'});
+/// 1 to 4 pictures, laid out like the app's feed: one big, two side by side, one big and two stacked, two by two.
+class MediaGrid extends StatelessWidget {
+  const MediaGrid(this.row, {super.key, this.height = 220});
+  final Map<String, Object?> row;
+  final double height;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), l = mediaList(row['media']).take(4).toList();
+    if (l.isEmpty) return const SizedBox.shrink();
+    final bg = colorOf(row, sv(row, 'handle') + l.first), half = height / 2 - 1;
+    Widget col(List<String> ms) => Expanded(child: Column(children: [Tile(ms[0], bg, height: half), const SizedBox(height: 2), Tile(ms[1], bg, height: half)]));
+    final Widget body = switch (l.length) {
+      1 => Tile(l[0], bg, height: height),
+      2 => Row(children: [Expanded(child: Tile(l[0], bg, height: height)), const SizedBox(width: 2), Expanded(child: Tile(l[1], bg, height: height))]),
+      3 => Row(children: [Expanded(child: Tile(l[0], bg, height: height)), const SizedBox(width: 2), col([l[1], l[2]])]),
+      _ => Row(children: [col([l[0], l[2]]), const SizedBox(width: 2), col([l[1], l[3]])]),
+    };
+    return Container(decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), border: Border.all(color: p.line)), clipBehavior: Clip.antiAlias, child: body);
+  }
+}
+
+/// A tab on top of a feed: its name and which posts it shows (following, saved, media, replies, posts, likes, or a filter).
+class FeedTab {
+  const FeedTab(this.label, [this.only = '', this.look = '']);
+  final String label, only, look;
+}
+
+/// Posts, newest first, the way the app draws them (X style): avatar, name ✓ @handle · 9m, text with #tags, pictures, and
+/// comment / repost / like / views / save / share. Tap the author for their profile. look: timeline, reels or grid.
+class SocialFeed extends StatefulWidget with FullBleed {
+  const SocialFeed({super.key, this.collection = 'Posts', this.look = 'timeline', this.filter = '', this.search = '', this.columns = 3, this.profilePage = '', this.empty = 'No posts yet', this.tabs = const [], this.actions = const ['comment', 'repost', 'like', 'share']});
   final String collection, look, filter, search, profilePage, empty;
   final int columns;
+  final List<FeedTab> tabs;
+  final List<String> actions;
+  @override
+  State<SocialFeed> createState() => _SocialFeedState();
+}
+
+class _SocialFeedState extends State<SocialFeed> {
+  int tab = 0;
+  String get collection => widget.collection;
 
   void _toggle(Map<String, Object?> r, String flag, [String? count]) {
     final now = !isOn(r[flag]);
@@ -619,49 +865,150 @@ class SocialFeed extends StatelessWidget {
     app.updateRecord(collection, sv(r, '_id'), change);
   }
 
+  /// A tab's test, or null when "only" is a filter for the query.
+  bool Function(Map<String, Object?>)? _test(String only) {
+    final o = only.trim().toLowerCase();
+    switch (o) {
+      case '': return (_) => true;
+      case 'following':
+        final f = {for (final r in app.rows('Follows')) if (sv(r, 'follower') == me) sv(r, 'followee')};
+        return (r) => f.contains(sv(r, 'handle')) || isOn(r['following']);
+      case 'saved': return (r) => isOn(r['saved']);
+      case 'media': return (r) => firstMedia(r['media']).isNotEmpty;
+      case 'replies': return (r) => sv(r, 'reply_to').isNotEmpty;
+      case 'posts': return (r) => sv(r, 'reply_to').isEmpty;
+      case 'likes': return (r) => isOn(r['liked']);
+      default: return null;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final p = pal(context), rows = app.query(collection, filter: filter, search: search.isEmpty ? '' : AppState.show(app.get(search)));
-    if (rows.isEmpty) return Padding(padding: const EdgeInsets.all(32), child: Text(empty, textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
-    if (look == 'grid') {
-      return GridView.count(
-        crossAxisCount: columns, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 4, crossAxisSpacing: 4,
-        children: [for (final r in rows) GestureDetector(onTap: () => openProfile(profilePage, sv(r, 'handle'), sv(r, 'author')), child: firstMedia(r['media']).isEmpty ? Container(color: p.field, padding: const EdgeInsets.all(6), child: Text(sv(r, 'text'), maxLines: 4, style: const TextStyle(fontSize: 11))) : Media(r, height: 120, radius: 6))],
-      );
-    }
-    Widget action(String label, bool lit, Color color, VoidCallback? tap) => Flexible(child: TextButton(
-          onPressed: tap ?? () {},
-          style: TextButton.styleFrom(foregroundColor: lit ? color : p.sub, padding: const EdgeInsets.symmetric(horizontal: 6), minimumSize: const Size(0, 36)),
-          child: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
-        ));
+    final p = pal(context), t = widget.tabs.isEmpty ? null : widget.tabs[tab.clamp(0, widget.tabs.length - 1)];
+    final test = t == null ? null : _test(t.only);
+    final filter = [widget.filter, if (t != null && test == null) t.only].where((x) => x.isNotEmpty).join(' and ');
+    final rows = app.query(collection, filter: filter, search: widget.search.isEmpty ? '' : AppState.show(app.get(widget.search))).where(test ?? (_) => true).toList();
+    final look = (t?.look.isNotEmpty ?? false) ? t!.look : widget.look;
+    final Widget body = rows.isEmpty
+        ? Padding(padding: const EdgeInsets.all(32), child: Text(widget.empty, textAlign: TextAlign.center, style: TextStyle(color: p.sub)))
+        : look == 'grid'
+            ? Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: GridView.count(
+                  crossAxisCount: widget.columns, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(), mainAxisSpacing: 4, crossAxisSpacing: 4,
+                  children: [for (final r in rows) GestureDetector(onTap: () => openProfile(widget.profilePage, sv(r, 'handle'), sv(r, 'author')), child: firstMedia(r['media']).isEmpty ? Container(color: avatarColor(sv(r, 'author')), padding: const EdgeInsets.all(6), child: Text(sv(r, 'text'), maxLines: 4, style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w700))) : Media(r, height: 120, radius: 6))],
+                ),
+              )
+            : Column(children: [for (final r in rows) look == 'reels' ? _reel(r, p) : _post(r, p)]);
+    if (widget.tabs.length < 2) return body;
     return Column(children: [
-      for (final r in rows)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            InkWell(
-              onTap: () => openProfile(profilePage, sv(r, 'handle'), sv(r, 'author')),
-              child: Row(children: [
-                Avatar(sv(r, 'author'), sv(r, 'handle')),
-                const SizedBox(width: 10),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${sv(r, 'author')}${isOn(r['verified']) ? ' ✓' : ''}', style: const TextStyle(fontWeight: FontWeight.w800)),
-                  Text('@${sv(r, 'handle')}${sv(r, 'location').isEmpty ? '' : ' · ${sv(r, 'location')}'}', style: TextStyle(color: p.sub)),
-                ])),
-              ]),
-            ),
-            if (sv(r, 'text').isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(sv(r, 'text'), style: const TextStyle(fontSize: 16))),
-            if (firstMedia(r['media']).isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Media(r, height: look == 'reels' ? 380 : 200)),
-            Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              action('💬 ${AppState.show(nv(r['comments']))}', false, p.accent, null),
-              action('🔁 ${AppState.show(nv(r['reposts']))}', isOn(r['reposted']), Colors.green, () => _toggle(r, 'reposted', 'reposts')),
-              action('${isOn(r['liked']) ? '❤️' : '🤍'} ${AppState.show(nv(r['likes']))}', isOn(r['liked']), p.danger, () => _toggle(r, 'liked', 'likes')),
-              action(isOn(r['saved']) ? '🔖 Saved' : '🔖', isOn(r['saved']), p.accent, () => _toggle(r, 'saved')),
-            ]),
-          ]))),
-        ),
+      Container(
+        decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+        child: Row(children: [
+          for (var i = 0; i < widget.tabs.length; i++)
+            Expanded(child: InkWell(
+              onTap: () => setState(() => tab = i),
+              child: Padding(padding: const EdgeInsets.only(top: 14), child: Column(children: [
+                Text(widget.tabs[i].label, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: i == tab ? p.text : p.sub)),
+                const SizedBox(height: 10),
+                Container(height: 4, width: 48, decoration: BoxDecoration(color: i == tab ? p.accent : Colors.transparent, borderRadius: BorderRadius.circular(2))),
+              ])),
+            )),
+        ]),
+      ),
+      body,
     ]);
   }
+
+  Widget _actions(Map<String, Object?> r, Palette p) {
+    Widget btn(IconData icon, String count, bool lit, Color color, VoidCallback? tap, {bool grow = true}) {
+      final b = InkWell(onTap: tap, child: Padding(padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4), child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, size: 19, color: lit ? color : p.sub),
+        if (count.isNotEmpty) Flexible(child: Padding(padding: const EdgeInsets.only(left: 4), child: Text(count, maxLines: 1, overflow: TextOverflow.clip, softWrap: false, style: TextStyle(fontSize: 13.5, color: lit ? color : p.sub)))),
+      ])));
+      return grow ? Expanded(child: Align(alignment: Alignment.centerLeft, child: b)) : b;
+    }
+    const pink = Color(0xFFF91880), green = Color(0xFF00BA7C);
+    return Row(children: [
+      for (final a in widget.actions)
+        switch (a) {
+          'comment' => btn(Icons.chat_bubble_outline, compactNum(r['comments']), false, p.accent, null),
+          'repost' => btn(Icons.repeat, compactNum(r['reposts']), isOn(r['reposted']), green, () => _toggle(r, 'reposted', 'reposts')),
+          'like' => btn(isOn(r['liked']) ? Icons.favorite : Icons.favorite_border, compactNum(r['likes']), isOn(r['liked']), pink, () => _toggle(r, 'liked', 'likes')),
+          'views' => btn(Icons.bar_chart, compactNum(r['views']), false, p.accent, null),
+          'save' => btn(isOn(r['saved']) ? Icons.bookmark : Icons.bookmark_border, '', isOn(r['saved']), p.accent, () => _toggle(r, 'saved'), grow: false),
+          'share' => Padding(padding: const EdgeInsets.only(left: 10), child: btn(Icons.ios_share, '', false, p.accent, null, grow: false)),
+          _ => const SizedBox.shrink(),
+        },
+    ]);
+  }
+
+  Widget _post(Map<String, Object?> r, Palette p) {
+    final grad = firstMedia(r['media']).isEmpty ? gradientColors(r['background']) : <Color>[];
+    final sub = ['@${sv(r, 'handle')}', ago(r['_at']), if (sv(r, 'location').isNotEmpty) '📍 ${sv(r, 'location')}'].where((x) => x.isNotEmpty).join(' · ');
+    void open() => openProfile(widget.profilePage, sv(r, 'handle'), sv(r, 'author'));
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 2),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: p.line))),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        GestureDetector(onTap: open, child: Avatar(sv(r, 'author'), sv(r, 'handle'), size: 46)),
+        const SizedBox(width: 10),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          GestureDetector(onTap: open, child: Row(children: [
+            Flexible(child: Text(sv(r, 'author'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text))),
+            if (isOn(r['verified'])) Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.verified, size: 17, color: p.accent)),
+            const SizedBox(width: 4),
+            Expanded(child: Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.sub, fontSize: 15))),
+            Icon(Icons.more_horiz, size: 20, color: p.sub),
+          ])),
+          const SizedBox(height: 4),
+          if (grad.isNotEmpty)
+            Container(
+              height: 150, width: double.infinity, alignment: Alignment.center, padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: LinearGradient(colors: grad.length > 1 ? grad : [grad.first, grad.first], begin: Alignment.topLeft, end: Alignment.bottomRight)),
+              child: Text(sv(r, 'text'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w800)),
+            )
+          else if (sv(r, 'text').isNotEmpty)
+            Text.rich(TextSpan(children: [
+              for (final w in sv(r, 'text').splitMapJoin(RegExp(r'[#@]\w+'), onMatch: (m) => '\u0000${m[0]}\u0000', onNonMatch: (n) => n).split('\u0000'))
+                if (w.isNotEmpty) TextSpan(text: w, style: TextStyle(color: RegExp(r'^[#@]\w+$').hasMatch(w) ? p.accent : p.text)),
+            ]), style: const TextStyle(fontSize: 16)),
+          if (sv(r, 'poll').isNotEmpty)
+            for (final o in sv(r, 'poll').split('|'))
+              Container(
+                margin: const EdgeInsets.only(top: 6), padding: const EdgeInsets.symmetric(vertical: 7), width: double.infinity, alignment: Alignment.center,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(999), border: Border.all(color: p.accent)),
+                child: Text(o.trim(), style: TextStyle(color: p.accent, fontWeight: FontWeight.w700)),
+              ),
+          if (sv(r, 'link').isNotEmpty)
+            Container(
+              margin: const EdgeInsets.only(top: 8), padding: const EdgeInsets.all(10), width: double.infinity,
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), border: Border.all(color: p.line)),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(sv(r, 'link_title').isEmpty ? sv(r, 'link') : sv(r, 'link_title'), style: const TextStyle(fontWeight: FontWeight.w700)),
+                Text(Uri.tryParse(sv(r, 'link'))?.host ?? '', style: TextStyle(color: p.sub)),
+              ]),
+            ),
+          if (firstMedia(r['media']).isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: MediaGrid(r)),
+          _actions(r, p),
+        ])),
+      ]),
+    );
+  }
+
+  Widget _reel(Map<String, Object?> r, Palette p) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+        child: Card(child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          InkWell(onTap: () => openProfile(widget.profilePage, sv(r, 'handle'), sv(r, 'author')), child: Row(children: [
+            Avatar(sv(r, 'author'), sv(r, 'handle')),
+            const SizedBox(width: 10),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(sv(r, 'author'), style: const TextStyle(fontWeight: FontWeight.w800)), Text('@${sv(r, 'handle')}', style: TextStyle(color: p.sub))])),
+          ])),
+          const SizedBox(height: 8),
+          if (firstMedia(r['media']).isNotEmpty) Media(r, height: 380) else Text(sv(r, 'text'), style: const TextStyle(fontSize: 16)),
+          _actions(r, p),
+        ]))),
+      );
 }
 
 /// A box to write a post: Post adds it to the top of the feed.
@@ -683,43 +1030,63 @@ class _ComposerState extends State<Composer> {
     c.clear();
   }
   @override
-  Widget build(BuildContext context) => Card(child: Padding(padding: const EdgeInsets.all(8), child: Row(children: [
+  Widget build(BuildContext context) => Row(children: [
         Avatar(meName, me),
-        const SizedBox(width: 8),
-        Expanded(child: TextField(controller: c, decoration: InputDecoration(hintText: widget.placeholder, isDense: true), onSubmitted: (_) => post())),
-        const SizedBox(width: 8),
-        FilledButton(onPressed: post, child: const Text('Post')),
-      ])));
+        const SizedBox(width: 10),
+        Expanded(child: TextField(controller: c, decoration: InputDecoration(hintText: widget.placeholder, isDense: true, border: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide.none)), onSubmitted: (_) => post())),
+        const SizedBox(width: 10),
+        FilledButton(onPressed: post, style: FilledButton.styleFrom(textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16)), child: const Text('Post')),
+      ]);
 }
 
-/// Story circles; tap one to see it.
+/// Story circles, one per person (newest first), "Your story" first; tap one to see it.
 class Stories extends StatelessWidget {
-  const Stories({super.key, this.collection = 'Stories'});
+  const Stories({super.key, this.collection = 'Stories', this.yours = true});
   final String collection;
+  final bool yours;
   @override
   Widget build(BuildContext context) {
-    final rows = app.query(collection);
+    final p = pal(context), seen = <String>{};
+    final rows = [for (final r in app.query(collection)) if (sv(r, 'handle') != me && seen.add(sv(r, 'handle').isEmpty ? sv(r, 'author') : sv(r, 'handle'))) r];
+    Widget label(String t) => Padding(padding: const EdgeInsets.only(top: 4), child: Text(t, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: p.text)));
     return SizedBox(
-      height: 92,
+      height: 98,
       child: ListView(scrollDirection: Axis.horizontal, children: [
+        if (yours)
+          Padding(padding: const EdgeInsets.only(right: 14), child: Column(children: [
+            Stack(clipBehavior: Clip.none, children: [
+              Padding(padding: const EdgeInsets.all(3), child: Avatar(meName, me, size: 62)),
+              Positioned(right: 0, bottom: 0, child: Container(
+                width: 22, height: 22, alignment: Alignment.center,
+                decoration: BoxDecoration(shape: BoxShape.circle, color: p.accent, border: Border.all(color: p.bg, width: 2)),
+                child: const Icon(Icons.add, size: 14, color: Colors.white),
+              )),
+            ]),
+            label('Your story'),
+          ])),
         for (final r in rows)
           GestureDetector(
             onTap: () => showDialog<void>(context: context, builder: (_) => Dialog(
-              backgroundColor: colorOf(r, sv(r, 'handle')),
+              backgroundColor: colorOf(r, sv(r, 'author')),
               child: SizedBox(height: 460, child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                 Text(sv(r, 'author'), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 18)),
                 Text(firstMedia(r['media']), style: const TextStyle(fontSize: 110)),
                 Text(sv(r, 'text'), textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 16)),
               ]))),
             )),
-            child: Padding(padding: const EdgeInsets.only(right: 12), child: Column(children: [
+            child: Padding(padding: const EdgeInsets.only(right: 14), child: Column(children: [
               Container(
                 padding: const EdgeInsets.all(3),
-                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFF8B5CF6)])),
-                child: CircleAvatar(radius: 28, backgroundColor: colorOf(r, sv(r, 'handle')), child: Text(isUrl(firstMedia(r['media'])) || firstMedia(r['media']).isEmpty ? '${sv(r, 'author')}?'[0] : firstMedia(r['media']), style: const TextStyle(fontSize: 26, color: Colors.white))),
+                decoration: const BoxDecoration(shape: BoxShape.circle, gradient: LinearGradient(colors: [Color(0xFFF59E0B), Color(0xFFEC4899), Color(0xFF8B5CF6)], begin: Alignment.bottomLeft, end: Alignment.topRight)),
+                child: Container(
+                  padding: const EdgeInsets.all(2),
+                  decoration: BoxDecoration(shape: BoxShape.circle, color: p.bg),
+                  child: firstMedia(r['media']).isEmpty || isUrl(firstMedia(r['media']))
+                      ? Avatar(sv(r, 'author'), sv(r, 'handle'), size: 58)
+                      : CircleAvatar(radius: 29, backgroundColor: colorOf(r, sv(r, 'author')), child: Text(firstMedia(r['media']), style: const TextStyle(fontSize: 27))),
+                ),
               ),
-              const SizedBox(height: 4),
-              Text(sv(r, 'author').split(' ').first, style: const TextStyle(fontSize: 11)),
+              label(sv(r, 'author').split(' ').first),
             ])),
           ),
       ]),
@@ -809,7 +1176,7 @@ class ProfileHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = pal(context), n = app.fill(name), h = app.fill(handle);
-    final own = {'posts_count': app.rows('Posts').where((r) => sv(r, 'handle') == h).length, 'points': nv(app.get('points'))};
+    final own = {'points': nv(app.get('points'))};
     return Card(clipBehavior: Clip.antiAlias, child: Column(children: [
       Container(height: 80, color: p.resolve(cover) ?? p.accent),
       Transform.translate(offset: const Offset(0, -38), child: Container(decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: p.card, width: 3)), child: Avatar(n, h, size: 76))),

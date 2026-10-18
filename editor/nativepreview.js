@@ -25,9 +25,12 @@ const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(
 const ICON_SVG = {
   home: 'M3 11l9-8 9 8v10a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z', search: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zm10 17l-5-5', user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-8 9a8 8 0 0 1 16 0',
   chat: 'M4 5h16v11H8l-4 4z', bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zm4 4h4', heart: 'M12 20s-8-5-8-11a4 4 0 0 1 8-1 4 4 0 0 1 8 1c0 6-8 11-8 11z', star: 'M12 3l2.7 6 6.3.6-4.8 4.2 1.5 6.2L12 17l-5.7 3 1.5-6.2L3 9.6 9.3 9z',
+  comment: 'M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z', repost: 'M17 2l3 3-3 3M4 11V9a4 4 0 0 1 4-4h12M7 22l-3-3 3-3M20 13v2a4 4 0 0 1-4 4H4', views: 'M5 20V10M10 20V4M15 20v-7M20 20v-4',
+  bookmark: 'M6 3h12v18l-6-4-6 4z', share: 'M12 3v13M7 8l5-5 5 5M5 14v6h14v-6', more: 'M5 12h.01M12 12h.01M19 12h.01', moon: 'M21 13A9 9 0 1 1 11 3a7 7 0 0 0 10 10z', sun: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
+  users: 'M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM1 21a8 8 0 0 1 16 0M17 3.5a4 4 0 0 1 0 7.5M23 21a7 7 0 0 0-4-6.3', info: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 16v-4M12 8h.01', back: 'M15 18l-6-6 6-6', check2: 'M5 12l5 5L20 7',
   settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm8-3l2-1-2-4-2 1-2-1V5h-4v2l-2 1-2-1-2 4 2 1v2l-2 1 2 4 2-1 2 1v2h4v-2l2-1 2 1 2-4-2-1z', plus: 'M12 5v14M5 12h14', video: 'M4 6h12v12H4zm12 4l5-3v10l-5-3', list: 'M4 6h16M4 12h16M4 18h16', circle: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z',
 };
-const ICON_ALIAS = { explore: 'search', profile: 'user', users: 'user', gear: 'settings', add: 'plus', play: 'video', menu: 'list' };
+const ICON_ALIAS = { explore: 'search', profile: 'user', friends: 'users', gear: 'settings', add: 'plus', play: 'video', menu: 'list' };
 const svgIcon = (name) => { const d = ICON_SVG[ICON_ALIAS[name] || name] || ICON_SVG.circle; const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'npv-ic'); const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); return s; };
 
 /** Fits the phone to the space it has (or a size you pick with − / +): sets --npv-zoom on the preview. */
@@ -61,12 +64,24 @@ function placer(root, host, redraw) {
 /** The app's state, with the same rules as the native runtimes. */
 function makeApp(model) {
   const A = { vars: { ...model.vars }, data: {}, tab: 0, stacks: model.tabs.length ? model.tabs.map(() => []) : [[]], openCollection: null, openId: null, roots: {} };
-  const now = Date.now();
-  for (const c of model.collections) A.data[c.name] = c.rows.map((r, i) => ({ _id: 's' + i, _at: now - i * 1000, ...r }));
   A.def = (name) => model.collections.find((c) => c.name === name);
   A.rows = (name) => A.data[name] || [];
+  // starting rows: missing fields get their defaults; later rows count as newer (the same as the engine)
+  const fieldDef = (f) => (f.def !== '' && f.def != null ? (f.type === 'yes/no' ? isOn(f.def) : ['number', 'money', 'rating'].includes(f.type) ? +f.def || 0 : f.def === 'today' && f.type === 'date' ? today() : f.def)
+    : f.type === 'yes/no' ? false : f.type === 'date' ? today() : f.type === 'choice' ? f.options[0] || '' : ['number', 'money', 'rating'].includes(f.type) ? 0 : '');
+  A.blank = (name) => Object.fromEntries((A.def(name)?.fields || []).map((f) => [f.key, fieldDef(f)]));
+  for (const c of model.collections) A.data[c.name] = c.rows.map((r, i) => ({ ...A.blank(c.name), ...r, _id: 's' + i, _at: r._at ?? i }));
   A.opened = () => (A.openCollection && A.openId ? A.rows(A.openCollection).find((r) => r._id === A.openId) || null : null);
-  A.fill = (t, row) => String(t).replace(/\{(\w+)\}/g, (m, k) => (row && k in row ? show(row[k]) : k.startsWith('record_') ? show(A.opened()?.[k.slice(7)]) : show(A.vars[k])));
+  /** How a value reads: dates as Today / Tomorrow / 3 Mar, money with $ (the engine's fieldText). */
+  A.text = (coll, k, v) => {
+    const f = A.def(coll)?.fields.find((x) => x.key === k); if (v == null || v === '') return '';
+    if (f?.type === 'money') { const n = +v || 0; return (n < 0 ? '−' : '') + '$' + Math.abs(n).toFixed(2).replace(/\.00$/, ''); }
+    if (f?.type === 'date') { const k0 = String(v).slice(0, 10), d = new Date(k0 + 'T00:00'); if (isNaN(d)) return show(v); const day = (n) => { const x = new Date(Date.now() + n * 864e5); return `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`; };
+      return k0 === day(0) ? 'Today' : k0 === day(-1) ? 'Yesterday' : k0 === day(1) ? 'Tomorrow' : d.toLocaleDateString('en', { day: 'numeric', month: 'short', ...(d.getFullYear() !== new Date().getFullYear() ? { year: 'numeric' } : {}) }); }
+    if (f?.type === 'yes/no') return isOn(v) ? '✓' : '';
+    return show(v);
+  };
+  A.fill = (t, row, coll) => String(t).replace(/\{(\w+)\}/g, (m, k) => (row && k in row ? (coll ? A.text(coll, k, row[k]) : show(row[k])) : k.startsWith('record_') ? (A.openCollection ? A.text(A.openCollection, k.slice(7), A.opened()?.[k.slice(7)]) : '') : show(A.vars[k])));
   const passes = (r, filter) => {
     if (!String(filter).trim()) return true;
     for (const part of String(filter).split(/\s+and\s+/i)) {
@@ -96,7 +111,16 @@ function makeApp(model) {
     const sum = ns.reduce((a, b) => a + b, 0);
     return how === 'sum' ? Math.round(sum * 100) / 100 : how === 'average' ? Math.round(sum / ns.length * 100) / 100 : how === 'min' ? Math.min(...ns) : Math.max(...ns);
   };
-  A.work = () => { for (const s of model.stats) A.vars[s.var] = A.stat(s.collection, s.how, s.field, s.filter); };
+  /** Stats, {posts_count}-style counts, and the social counts the engine keeps ({unread}, {notifications_unread}, {friend_requests}). */
+  A.work = () => {
+    const me = show(A.vars.playerHandle) || 'me', mine = new Set(model.stats.map((s) => s.var));
+    for (const c of model.collections) A.vars[c.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_') + '_count'] = A.rows(c.name).length;
+    if (A.def('Notifications')) A.vars.notifications_unread = A.rows('Notifications').filter((r) => show(r.to) === me && !isOn(r.read)).length;
+    if (A.def('Friends')) A.vars.friend_requests = A.rows('Friends').filter((r) => show(r.status) !== 'accepted' && show(r.to) === me).length;
+    if (A.def('Messages') && !mine.has('unread')) { const read = {}; for (const r of A.rows('Reads')) if (show(r.handle) === me) read[r.chat] = +r.at || 0;
+      A.vars.unread = A.rows('Messages').filter((r) => show(r.handle) !== me && (r._at || 0) > (read[r.chat] || 0)).length; }
+    for (const s of model.stats) A.vars[s.var] = A.stat(s.collection, s.how, s.field, s.filter);
+  };
   A.set = (k, v) => { A.vars[k] = v; A.work(); };
   A.add = (k, by) => A.set(k, (num(A.vars[k]) ?? 0) + by);
   A.addRecord = (name, values) => { (A.data[name] ||= []).push({ _id: 'r' + Math.random().toString(36).slice(2), _at: Date.now(), ...values }); A.work(); };
@@ -163,7 +187,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     switch (x.kind) {
       case 'text': return h('div', { class: 'npv-text', style: `font-size:${Math.round(x.size)}px;font-weight:${parseInt(x.weight, 10) || 600};color:${col(x.color, P) || P.text}` }, A.fill(x.value));
       case 'button': return h('button', { class: 'npv-pbtn ' + (x.outlined ? (/danger/.test(x.color) ? 'danger' : 'outlined') : 'filled'), onclick: () => act(x.action, x.value, x.amount) }, A.fill(x.label));
-      case 'input': return h('div', { class: 'npv-field' + (x.keyboard === 'search' ? ' search' : '') }, x.keyboard === 'search' && svgIcon('search'),
+      case 'input': return h('div', { class: 'npv-field' + (x.keyboard === 'search' ? ' search' : '') + (x.outlined ? ' outlined' : '') }, x.keyboard === 'search' && svgIcon('search'),
         h('input', { 'data-k': 'v:' + x.var, type: x.keyboard === 'password' ? 'password' : x.keyboard === 'number' ? 'number' : 'text', placeholder: x.placeholder, value: show(A.vars[x.var]), oninput: (e) => { A.set(x.var, x.keyboard === 'number' ? +e.target.value || 0 : e.target.value); drawPhone(); } }));
       case 'toggle': { const on = A.vars[x.var] != null ? isOn(A.vars[x.var]) : x.var === 'darkMode' && dark(); return h('label', { class: 'npv-toggle' }, x.label ? h('span', {}, A.fill(x.label)) : h('span'), h('input', { type: 'checkbox', role: 'switch', checked: on, onchange: (e) => { A.set(x.var, e.target.checked); drawPhone(); } })); }
       case 'row': return h('div', { class: 'npv-card row' }, x.children.map((c) => element(c, P, entry)));
@@ -171,7 +195,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       case 'image': return h('img', { class: 'npv-img', src: x.src, alt: '', style: `height:${x.h}px` });
       case 'list': return list(x, P);
       case 'form': return form(x, P, entry);
-      case 'feed': return feed(x, P);
+      case 'feed': return feed(x, P, entry);
       case 'composer': return composer(x, entry);
       case 'stories': return stories(x);
       case 'inbox': return inbox(x);
@@ -188,14 +212,21 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   function list(x, P) {
     const rows = A.query(x.collection, x.filter, x.search ? show(A.vars[x.search]) : '', x.sort);
     if (!rows.length) return h('div', { class: 'npv-empty' + (x.fill ? ' fill' : '') }, x.empty);
-    return h('div', { class: 'npv-list' + (x.fill ? ' fill' : '') }, rows.map((r) => {
+    return h('div', { class: 'npv-list' + (x.fill ? ' fill' : ''), style: `gap:${x.gap}px` }, rows.map((r) => {
       const done = x.check && isOn(r[x.check]);
-      return h('div', { class: 'npv-row' + (done ? ' done' : ''), 'data-id': r._id, onclick: () => { if (!x.openPage) return; A.openCollection = x.collection; A.openId = r._id; A.go(x.openPage); drawPhone(); } },
-        x.check ? h('input', { type: 'checkbox', class: 'npv-check', checked: done, 'aria-label': 'Done', onclick: (e) => e.stopPropagation(), onchange: (e) => { A.updateRecord(x.collection, r._id, { [x.check]: e.target.checked }); drawPhone(); } })
-          : x.icon ? h('span', { class: 'npv-rowic' }, A.fill(x.icon, r)) : null,
-        h('div', { class: 'npv-rowt' }, h('b', {}, A.fill(x.title, r)), x.subtitle && h('small', {}, A.fill(x.subtitle, r))),
-        h('button', { class: 'npv-del', 'aria-label': 'Delete', title: kind === 'swift' ? 'Swipe to delete' : 'Delete', onclick: (e) => { e.stopPropagation(); A.deleteRecord(x.collection, r._id); drawPhone(); } }, '🗑'),
-        x.openPage && h('span', { class: 'npv-chev' }, '›'));
+      const row = h('div', { class: 'npv-row' + (done && x.doneLook ? ' done' : ''), 'data-id': r._id, style: `min-height:${x.rowH - 20}px;border-radius:${x.radius}px`, onclick: () => { if (row.dataset.moved || !x.openPage) return; A.openCollection = x.collection; A.openId = r._id; A.go(x.openPage); drawPhone(); } },
+        x.check ? h('button', { class: 'npv-check' + (done ? ' on' : ''), role: 'checkbox', 'aria-checked': String(!!done), 'aria-label': 'Done', onclick: (e) => { e.stopPropagation(); A.updateRecord(x.collection, r._id, { [x.check]: !done }); drawPhone(); } }, done && svgIcon('check2'))
+          : x.icon ? h('span', { class: 'npv-rowic' }, A.fill(x.icon, r, x.collection)) : null,
+        h('div', { class: 'npv-rowt' }, h('b', {}, A.fill(x.title, r, x.collection)), x.subtitle && h('small', {}, A.fill(x.subtitle, r, x.collection))),
+        x.right && h('span', { class: 'npv-right' }, A.fill(x.right, r, x.collection)));
+      if (!x.swipeDelete) return row;
+      // swipe left to delete (the same as the app; the native lists do it too)
+      let x0 = null, dx = 0;
+      row.addEventListener('pointerdown', (e) => { x0 = e.clientX; dx = 0; delete row.dataset.moved; });
+      row.addEventListener('pointermove', (e) => { if (x0 == null) return; dx = Math.min(0, e.clientX - x0); if (dx < -8) { row.dataset.moved = '1'; row.parentElement.classList.add('sw'); row.style.transform = `translateX(${dx}px)`; } });
+      const end = () => { if (x0 == null) return; x0 = null; if (dx < -90) { A.deleteRecord(x.collection, r._id); drawPhone(); } else { row.style.transform = ''; setTimeout(() => { delete row.dataset.moved; row.parentElement?.classList.remove('sw'); }, 160); } };
+      row.addEventListener('pointerup', end); row.addEventListener('pointerleave', end); row.addEventListener('pointercancel', end);
+      return h('div', { class: 'npv-swipe', style: `border-radius:${x.radius}px` }, h('span', { class: 'npv-swdel' }, 'Delete'), row);
     }));
   }
   function form(x, P, entry) {
@@ -222,41 +253,98 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   }
   // ---------- social: the same rules as the native SocialFeed, Chat, Profile… building blocks ----------
   const me = () => show(A.vars.playerHandle) || 'me', meName = () => show(A.vars.playerName) || 'Me';
-  const AV = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
-  const avColor = (s) => AV[[...String(s)].reduce((a, c) => a + c.charCodeAt(0), 0) % AV.length];
-  const avatar = (name, handle, size = 40) => h('span', { class: 'npv-av', style: `width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${avColor(handle || name)}` }, (show(name).trim()[0] || '?').toUpperCase());
-  const firstMedia = (m) => show(m).split('|')[0].trim();
-  const media = (r, height) => { const m = firstMedia(r.media); if (!m) return null; const bg = /^#[0-9a-f]{6}$/i.test(show(r.color)) ? r.color : avColor(r.handle || r.title || m);
-    return /^(https?:|data:)/.test(m) ? h('img', { class: 'npv-media', src: m, alt: '', style: `height:${height}px` }) : h('div', { class: 'npv-media', style: `height:${height}px;background:${bg};font-size:${Math.round(height * 0.4)}px` }, m); };
+  // the engine's avatar colours and initials (Maya Chen → MC)
+  const AV = ['#ef5350', '#ec407a', '#ab47bc', '#7e57c2', '#5c6bc0', '#42a5f5', '#26a69a', '#66bb6a', '#ffa726', '#8d6e63'];
+  const avColor = (s) => { let n = 0; for (const ch of String(s || '?')) n = (n * 31 + ch.charCodeAt(0)) >>> 0; return AV[n % AV.length]; };
+  const initials = (s) => String(s || '').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => [...w][0].toUpperCase()).join('') || '?';
+  const avatar = (name, handle, size = 40, label) => h('span', { class: 'npv-av', style: `width:${size}px;height:${size}px;font-size:${Math.round(size * (label ? 0.5 : 0.38))}px;background:${avColor(name || handle)}` }, label || initials(name || handle));
+  const mediaList = (m) => show(m).split('|').map((x) => x.trim()).filter(Boolean);
+  const firstMedia = (m) => mediaList(m)[0] || '';
+  const isUrl = (m) => /^(https?:|data:)/.test(m);
+  const hexOf = (c) => (/^#[0-9a-f]{6}$/i.test(show(c)) ? show(c) : null);
+  const tile = (m, bg, height, size) => (isUrl(m) ? h('img', { class: 'npv-media', src: m, alt: '', style: `height:${height}px` }) : h('div', { class: 'npv-media', style: `height:${height}px;background:${bg};font-size:${size || Math.round(height * 0.4)}px` }, m));
+  const media = (r, height) => { const m = firstMedia(r.media); return m ? tile(m, hexOf(r.color) || avColor(r.handle || r.title || m), height) : null; };
+  /** 1 to 4 pictures, laid out like the engine's feed (one big, two side by side, one big and two stacked, two by two). */
+  const mediaGrid = (r, height) => {
+    const L = mediaList(r.media).slice(0, 4), bg = hexOf(r.color) || avColor(r.handle || L[0]); if (!L.length) return null;
+    const cell = (m, hh) => tile(m, bg, hh, Math.round(Math.min(hh, 150) * 0.42));
+    if (L.length === 1) return h('div', { class: 'npv-mgrid' }, cell(L[0], height));
+    if (L.length === 2) return h('div', { class: 'npv-mgrid two' }, L.map((m) => cell(m, height)));
+    if (L.length === 3) return h('div', { class: 'npv-mgrid two' }, cell(L[0], height), h('div', { class: 'npv-mcol' }, cell(L[1], height / 2 - 1), cell(L[2], height / 2 - 1)));
+    return h('div', { class: 'npv-mgrid two' }, h('div', { class: 'npv-mcol' }, cell(L[0], height / 2 - 1), cell(L[2], height / 2 - 1)), h('div', { class: 'npv-mcol' }, cell(L[1], height / 2 - 1), cell(L[3], height / 2 - 1)));
+  };
+  /** 1284 → 1.3K, 48200 → 48K (the engine's short counts). */
+  const compact = (v) => { const n = num(v) || 0; return n < 1000 ? String(Math.round(n)) : n < 1e4 ? (Math.round(n / 100) / 10 + 'K').replace('.0K', 'K') : n < 1e6 ? Math.round(n / 1000) + 'K' : (Math.round(n / 1e5) / 10 + 'M').replace('.0M', 'M'); };
+  /** 9m, 2h, 3d, then the date. */
+  const ago = (at) => { const s0 = (Date.now() - (+at || 0)) / 1000; if (!(+at > 1e11)) return ''; return s0 < 60 ? 'now' : s0 < 3600 ? Math.floor(s0 / 60) + 'm' : s0 < 86400 ? Math.floor(s0 / 3600) + 'h' : s0 < 604800 ? Math.floor(s0 / 86400) + 'd' : new Date(+at).toLocaleDateString('en', { day: 'numeric', month: 'short' }); };
+  /** Text with #hashtags and @mentions in the accent colour. */
+  const rich = (t) => show(t).split(/([#@]\w+)/).map((w) => (/^[#@]\w+/.test(w) ? h('span', { class: 'npv-tag' }, w) : w));
+  const gradient = (bg) => { const c = show(bg).match(/#[0-9a-f]{6}/gi) || []; return c.length ? `linear-gradient(135deg,${c.join(',')})` : null; };
   const openProfile = (page, handle, name) => { if (!page) return; A.vars.profile = handle; A.vars.profile_name = name; A.go(page); drawPhone(); };
   const toggle = (coll, r, flag, count) => { const on = !isOn(r[flag]); A.updateRecord(coll, r._id, count ? { [flag]: on, [count]: Math.max(0, (num(r[count]) || 0) + (on ? 1 : -1)) } : { [flag]: on }); drawPhone(); };
-  function feed(x) {
-    const rows = A.query(x.collection, x.filter, x.search ? show(A.vars[x.search]) : '', 'newest first');
-    if (!rows.length) return h('div', { class: 'npv-empty' }, x.empty);
-    if (x.look === 'grid') return h('div', { class: 'npv-grid', style: `grid-template-columns:repeat(${x.columns},1fr)` }, rows.map((r) => h('div', { class: 'npv-tile', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, media(r, 110) || h('div', { class: 'npv-media', style: 'height:110px' }, show(r.text).slice(0, 40)))));
-    return h('div', { class: 'npv-feed' }, rows.map((r) => h('div', { class: 'npv-post', 'data-id': r._id },
+  /** A feed tab's "only where…": following, saved, media, replies, posts, likes, or a filter. */
+  const tabPasses = (only) => {
+    const o = String(only || '').trim().toLowerCase(), meH = me();
+    if (!o) return () => true;
+    if (o === 'following') { const f = new Set(A.rows('Follows').filter((r) => show(r.follower) === meH).map((r) => show(r.followee))); return (r) => f.has(show(r.handle)) || isOn(r.following); }
+    if (o === 'saved') return (r) => isOn(r.saved);
+    if (o === 'media') return (r) => !!firstMedia(r.media);
+    if (o === 'replies') return (r) => !!show(r.reply_to);
+    if (o === 'posts') return (r) => !show(r.reply_to);
+    if (o === 'likes') return (r) => isOn(r.liked);
+    return null; // a filter: handled by the query
+  };
+  function feed(x, P, entry) {
+    const t = x.tabs.length ? x.tabs[Math.min(entry.tab || 0, x.tabs.length - 1)] : null, test = t ? tabPasses(t.only) : null;
+    const rows = A.query(x.collection, [x.filter, t && !test ? t.only : ''].filter(Boolean).join(' and '), x.search ? show(A.vars[x.search]) : '', 'newest first').filter(test || (() => true));
+    const look = t?.look || x.look;
+    const tabs = x.tabs.length > 1 && h('div', { class: 'npv-ftabs' }, x.tabs.map((tb, i) => h('button', { class: (entry.tab || 0) === i ? 'on' : '', onclick: () => { entry.tab = i; drawPhone(); } }, h('span', {}, tb.label))));
+    const body = !rows.length ? h('div', { class: 'npv-empty' }, x.empty)
+      : look === 'grid' ? h('div', { class: 'npv-grid', style: `grid-template-columns:repeat(${x.columns},1fr)` }, rows.map((r) => h('div', { class: 'npv-tile', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, media(r, 120) || h('div', { class: 'npv-media txt', style: `height:120px;background:${gradient(r.background) || avColor(r.author)}` }, show(r.text).slice(0, 60)))))
+      : look === 'reels' ? h('div', { class: 'npv-feed' }, rows.map((r) => reel(x, r)))
+      : h('div', { class: 'npv-xfeed' }, rows.map((r) => xpost(x, r)));
+    return tabs ? h('div', { class: 'npv-feedw' }, tabs, body) : body;
+  }
+  const ACT = { comment: ['comment', 'comments'], repost: ['repost', 'reposts', 'reposted', 'good'], like: ['heart', 'likes', 'liked', 'bad'], views: ['views', 'views'], save: ['bookmark', '', 'saved', 'acc'], share: ['share', ''] };
+  function actions(x, r) {
+    return h('div', { class: 'npv-xacts' }, x.actions.filter((a) => ACT[a]).map((a) => { const [ic, count, flag, tone] = ACT[a], on = flag && isOn(r[flag]);
+      return h('button', { 'data-act': a === 'save' ? 'save' : a, class: (on ? 'on ' + tone : '') + (a === 'save' || a === 'share' ? ' end' : ''), onclick: flag ? () => toggle(x.collection, r, flag, count || undefined) : null },
+        svgIcon(ic), count && h('span', {}, compact(r[count]))); }));
+  }
+  function xpost(x, r) {
+    const bgText = !firstMedia(r.media) && gradient(r.background);
+    return h('div', { class: 'npv-xpost', 'data-id': r._id },
+      h('div', { class: 'npv-xav', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, avatar(r.author, r.handle, 46)),
+      h('div', { class: 'npv-xbody' },
+        h('div', { class: 'npv-xhead', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, h('b', {}, show(r.author)), isOn(r.verified) && h('span', { class: 'npv-ver' }, svgIcon('check2')),
+          h('span', { class: 'npv-xsub' }, ['@' + show(r.handle), ago(r._at), r.location && '📍 ' + show(r.location)].filter(Boolean).join(' · ')), h('span', { class: 'npv-xmore' }, svgIcon('more'))),
+        bgText ? h('div', { class: 'npv-xbg', style: `background:${bgText}` }, show(r.text)) : r.text && h('div', { class: 'npv-ptext' }, rich(r.text)),
+        r.poll && h('div', { class: 'npv-poll' }, show(r.poll).split('|').map((o) => h('div', {}, o.trim()))),
+        r.link && h('div', { class: 'npv-link' }, h('b', {}, show(r.link_title || r.link)), h('small', {}, show(r.link).replace(/^https?:\/\//, '').split('/')[0])),
+        mediaGrid(r, 220),
+        actions(x, r)));
+  }
+  function reel(x, r) {
+    return h('div', { class: 'npv-post', 'data-id': r._id },
       h('div', { class: 'npv-phead', onclick: () => openProfile(x.profilePage, r.handle, r.author) }, avatar(r.author, r.handle),
-        h('div', { class: 'npv-rowt' }, h('b', {}, show(r.author), isOn(r.verified) && h('span', { class: 'npv-ver' }, ' ✓')), h('small', {}, '@' + show(r.handle) + (r.location ? ' · ' + show(r.location) : '')))),
-      r.text && h('div', { class: 'npv-ptext' }, show(r.text)),
-      media(r, x.look === 'reels' ? 380 : 200),
-      h('div', { class: 'npv-acts2' },
-        h('button', { 'data-act': 'comments' }, '💬 ' + show(num(r.comments) || 0)),
-        h('button', { 'data-act': 'repost', class: isOn(r.reposted) ? 'on good' : '', onclick: () => toggle(x.collection, r, 'reposted', 'reposts') }, '🔁 ' + show(num(r.reposts) || 0)),
-        h('button', { 'data-act': 'like', class: isOn(r.liked) ? 'on bad' : '', onclick: () => toggle(x.collection, r, 'liked', 'likes') }, (isOn(r.liked) ? '❤️ ' : '🤍 ') + show(num(r.likes) || 0)),
-        h('button', { 'data-act': 'save', class: isOn(r.saved) ? 'on' : '', onclick: () => toggle(x.collection, r, 'saved') }, isOn(r.saved) ? '🔖 Saved' : '🔖')))));
+        h('div', { class: 'npv-rowt' }, h('b', {}, show(r.author)), h('small', {}, '@' + show(r.handle)))),
+      media(r, 380) || (r.text && h('div', { class: 'npv-ptext' }, rich(r.text))), actions(x, r));
   }
   function composer(x, entry) {
-    const post = () => { const t = show(entry.draft).trim(); if (!t) return; A.addRecord(x.collection, { author: meName(), handle: me(), text: t, likes: 0, comments: 0, reposts: 0, liked: false, reposted: false, saved: false }); entry.draft = ''; drawPhone(); };
-    return h('div', { class: 'npv-compose' }, avatar(meName(), me()),
+    const post = () => { const t = show(entry.draft).trim(); if (!t) return; A.addRecord(x.collection, { ...A.blank(x.collection), author: meName(), handle: me(), text: t }); entry.draft = ''; drawPhone(); };
+    return h('div', { class: 'npv-compose' }, avatar(meName(), me(), 40),
       h('input', { class: 'npv-input', 'data-k': 'compose', placeholder: x.placeholder, value: show(entry.draft), oninput: (e) => { entry.draft = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') post(); } }),
       h('button', { class: 'npv-pbtn filled small', 'data-post': '', onclick: post }, 'Post'));
   }
   let story = null;
+  /** One bubble per person (newest first), "Your story" first. */
   function stories(x) {
-    const rows = A.query(x.collection);
-    return h('div', { class: 'npv-stories' }, rows.map((r) => h('button', { class: 'npv-story', onclick: () => { story = r; drawPhone(); } },
-      h('span', { class: 'npv-ring' }, h('span', { class: 'npv-av', style: `width:56px;height:56px;font-size:26px;background:${/^#/.test(show(r.color)) ? r.color : avColor(r.handle)}` }, firstMedia(r.media) && !/^(https?:|data:)/.test(firstMedia(r.media)) ? firstMedia(r.media) : (show(r.author)[0] || '?'))),
-      h('small', {}, show(r.author).split(' ')[0]))));
+    const by = new Map(); for (const r of A.query(x.collection)) if (!by.has(show(r.handle) || show(r.author))) by.set(show(r.handle) || show(r.author), r);
+    const bubble = (r) => { const m = firstMedia(r.media); return h('button', { class: 'npv-story', onclick: () => { story = r; drawPhone(); } },
+      h('span', { class: 'npv-ring' }, m && !isUrl(m) ? h('span', { class: 'npv-av', style: `width:60px;height:60px;font-size:28px;background:${hexOf(r.color) || avColor(r.author)}` }, m) : avatar(r.author, r.handle, 60)),
+      h('small', {}, show(r.author).split(' ')[0])); };
+    return h('div', { class: 'npv-stories' }, x.yours && h('button', { class: 'npv-story you' }, h('span', { class: 'npv-you' }, avatar(meName(), me(), 64), h('i', {}, '+')), h('small', {}, 'Your story')),
+      [...by.values()].filter((r) => show(r.handle) !== me()).map(bubble));
   }
   const chats = (coll) => { const by = new Map(); for (const r of A.query(coll, '', '', 'newest first')) if (r.chat && !by.has(r.chat)) by.set(r.chat, r); return [...by.values()]; };
   const chatName = (coll, id) => { const o = A.rows(coll).find((r) => r.chat === id && show(r.handle) !== me()); return o ? show(o.author) : show(id).replace(/^dm-/, '').split('-').filter((s) => s !== me()).join(', ') || show(id); };
@@ -275,7 +363,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
         h('button', { class: 'npv-pbtn filled small', 'data-send': '', onclick: send }, 'Send')));
   }
   function profile(x, P) {
-    const name = A.fill(x.name), handle = A.fill(x.handle), own = { posts_count: A.rows('Posts').filter((r) => show(r.handle) === handle).length, points: num(A.vars.points) || 0 };
+    const name = A.fill(x.name), handle = A.fill(x.handle), own = { points: num(A.vars.points) || 0 };
     return h('div', { class: 'npv-prof' }, h('div', { class: 'npv-cover', style: `background:${col(x.cover, P) || P.accent}` }), avatar(name, handle, 76),
       h('b', { class: 'npv-pname' }, name), h('small', { class: 'npv-sub' }, '@' + handle), x.bio && h('div', {}, A.fill(x.bio)),
       x.stats.length && h('div', { class: 'npv-stats' }, x.stats.map((s) => h('div', {}, h('b', {}, A.fill(s.value, own)), h('small', {}, s.label)))));
@@ -323,6 +411,28 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   }
   function act(action, value, amount) { const msg = A.run(action, value, amount); note = msg; drawPhone(); }
 
+  // ---------- the app's own bars: the App Bar's look and buttons, the Bottom Nav's style and colours ----------
+  function appBar(page, stack, P) {
+    const B = model.bar, ios = kind === 'swift';
+    const brand = B.look !== 'standard' && !stack.length && (!B.brandPages.length || B.brandPages.includes(page.value));
+    const icon = (a) => (a.icon === 'theme' ? (dark() ? 'sun' : 'moon') : a.icon);
+    const tap = (a) => { if (/dark mode/.test(a.does)) A.set('darkMode', !dark()); else if (a.does.startsWith('page:')) A.go(a.does.slice(5)); else note = `“${a.does}” is a message: the native code has a TODO there`; drawPhone(); };
+    const acts = B.actions.filter((a) => !a.only.length || a.only.includes(page.value)).reverse(); // (the first sits at the right edge)
+    return h('div', { class: 'npv-bar ' + (ios || B.align === 'center' ? 'center' : 'left') + (B.border ? ' line' : ''), style: `background:${col(B.bg, P) || P.card};color:${col(B.text, P) || P.text};--ic:${col(B.icon, P) || P.text}` },
+      h('div', { class: 'npv-bl' }, stack.length ? h('button', { class: 'npv-back', 'aria-label': 'Back', onclick: () => { A.back(); drawPhone(); } }, svgIcon('back'), ios ? 'Back' : '')
+        : B.avatar ? avatar(meName(), me(), 34) : null),
+      h('b', { class: 'npv-btitle' + (brand ? ' brand' : ''), style: `font-size:${B.size}px` }, brand ? model.name : A.fill(page.title)),
+      h('div', { class: 'npv-br' }, acts.map((a) => { const n = a.badge ? num(A.vars[a.badge]) || 0 : 0;
+        return h('button', { class: 'npv-bact', 'aria-label': a.icon, 'data-act': a.does, onclick: () => tap(a) }, svgIcon(icon(a)), n > 0 && h('i', {}, n > 99 ? '99+' : n)); })));
+  }
+  function navBar(P) {
+    const N = model.nav || { style: 'pill', bar: '@bar', active: '@accent', idle: '@sub' }, labels = N.style !== 'minimal';
+    return h('div', { class: 'npv-tabs ' + N.style, style: `background:${col(N.bar, P) || P.card};--on:${col(N.active, P) || P.accent};--off:${col(N.idle, P) || P.sub}` }, model.tabs.map((t, i) => {
+      const n = t.badge ? num(A.vars[t.badge]) || 0 : 0;
+      return h('button', { class: 'npv-tab' + (i === A.tab ? ' on' : ''), 'data-tab': t.page, 'aria-label': t.label, onclick: () => { A.go(t.page); drawPhone(); } }, h('span', { class: 'npv-tabic' }, svgIcon(t.icon), n > 0 && h('i', {}, n > 99 ? '99+' : n)), labels && h('small', {}, t.label));
+    }));
+  }
+
   function drawPhone() {
     const focus = document.activeElement?.dataset?.k, sel = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
     const P = pal(), stack = A.stack(), entry = stack[stack.length - 1] || (A.roots[A.tab] ||= { form: null });
@@ -333,16 +443,11 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     phone.style.cssText = vars;
     phone.replaceChildren(...[
       h('div', { class: 'npv-status' }, h('span', {}, '9:41'), h('span', {}, '▂▄▆ ◉')),
-      model.appBar && h('div', { class: 'npv-bar' },
-        stack.length ? h('button', { class: 'npv-back', 'aria-label': 'Back', onclick: () => { A.back(); drawPhone(); } }, kind === 'swift' ? '‹ Back' : '←') : h('span', { class: 'npv-back-sp' }),
-        h('b', { class: 'npv-btitle' }, A.fill(page.title)), h('span', { class: 'npv-back-sp' })),
+      model.appBar && appBar(page, stack, P),
       h('div', { class: 'npv-page' + (fills ? ' fills' : ''), 'data-page': page.value }, page.items.map((x) => element(x, P, entry))),
       page.fab && h('button', { class: 'npv-fab', 'aria-label': 'Add', onclick: () => act(page.fab.action, page.fab.value, page.fab.amount) }, '+'),
       overlay(),
-      model.tabs.length && !stack.length && h('div', { class: 'npv-tabs' }, model.tabs.map((t, i) => {
-        const n = t.badge ? num(A.vars[t.badge]) || 0 : 0;
-        return h('button', { class: 'npv-tab' + (i === A.tab ? ' on' : ''), 'data-tab': t.page, onclick: () => { A.go(t.page); drawPhone(); } }, h('span', { class: 'npv-tabic' }, svgIcon(t.icon), n > 0 && h('i', {}, n > 99 ? '99+' : n)), h('small', {}, t.label));
-      })),
+      model.tabs.length && !stack.length && navBar(P),
     ].filter((c) => c && c.nodeType));
     root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;
     if (focus) { const el = phone.querySelector(`[data-k="${CSS.escape(focus)}"]`); if (el) { el.focus(); try { el.setSelectionRange(sel[0], sel[1]); } catch { /* number inputs */ } } }

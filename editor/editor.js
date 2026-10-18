@@ -167,6 +167,7 @@ function saveNow({ force = false } = {}) {
   store.set(CURRENT_KEY, projectId);
   autoPending = false; if (!manualSave()) savedAt = Date.now(); setDirty(false); edited = false; clearDraft();
 }
+let nativeView = null; // the native preview docked in the scene view (File › Native Preview, the phone button)
 function commitSave() { if (!project) return; savedAt = Date.now(); saveNow({ force: true }); const sb = $('#saveBtn'); if (sb) { sb.classList.remove('saved'); void sb.offsetWidth; sb.classList.add('saved'); } toast(`Saved “${root.name}”`); buzz(8); if (!$('#home').hidden) showHome({ keep: true }); }
 /** Not a save: if the app is closed with unsaved changes, it offers them back next time. */
 function writeDraft(now = false) {
@@ -266,6 +267,7 @@ const levelName = (lv, i) => lv.levelName || `Level ${i + 1}`;
 function normalize(lv) { lv.entities ||= []; lv.settings ||= {}; lv.vars ||= {}; return lv; }
 
 function openProject(json, id = uid('p')) {
+  nativeView?.close();
   root = json;
   normalize(root); root.vars.score ??= 0;
   (root.levels || []).forEach(normalize);
@@ -467,6 +469,7 @@ function changed({ structure = false, inspector = false } = {}) {
   if (!reqBusy) queueReqCheck();
   saveSoon();
   pushHistorySoon();
+  nativeView?.refreshSoon(); // the native preview in the scene view follows your edits
   if (structure) { renderHierarchy(); renderInspector(); updateCtxBar(); if (dockTab === 'scripts') renderScripts(); }
   else if (inspector) renderInspector();
   else { // a field changed: keep the prefab banner's "changed here" state current
@@ -7446,12 +7449,16 @@ async function nativeFilesFor(kind, so, game, icon) {
   return { model: r.model, files: [...xcodeShell(xo, { icon }, r.files), { name: codeName(so.name) + '/README.md', data: nativeReadme(r.model, xo, 'swift') }], zipName: slug(so.name) + '-swiftui.zip' };
 }
 /** Native App Preview: try the app the way the Flutter / Kotlin / SwiftUI exports build it, and read their code. */
+const setPhoneBtn = () => $('#phoneBtn')?.classList.toggle('on', !!nativeView);
+/** Shows the native preview in the scene view (it follows your edits); ⤢ makes it full screen. */
+function dockNative(view) { nativeView = view; view.onClose = () => { if (nativeView === view) nativeView = null; setPhoneBtn(); }; setPhoneBtn(); }
+function toggleNative() { if (nativeView) nativeView.close(); else openNativeApp(); }
 function openNativeApp() {
   if (!root.settings?.app) return openNativeGame();
+  nativeView?.close();
   saveNow();
   const so = nativeOpts(); if (!validAppId(so.appId)) so.appId = suggestAppId(buildOpts().author, so.name);
-  const { game } = buildGameJSON();
-  openNativePreview({ game, toast, download: (kind) => exportNative(kind), files: async (kind) => (await nativeFilesFor(kind, so, game, new Uint8Array(0))).files });
+  dockNative(openNativePreview({ game: () => buildGameJSON().game, host: $('#viewport'), toast, download: (kind) => exportNative(kind), files: async (kind) => (await nativeFilesFor(kind, so, buildGameJSON().game, new Uint8Array(0))).files }));
 }
 const kotlinWrapper = async () => {
   const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });
@@ -7477,12 +7484,13 @@ async function exportKotlinGame() {
 }
 /** Native Preview for a game: the real game in the phone, in a web view the way each project hosts it, with the native bridge simulated. */
 function openNativeGame() {
+  nativeView?.close();
   saveNow();
   const so = nativeOpts(); if (!validAppId(so.appId)) so.appId = suggestAppId(buildOpts().author, so.name);
-  let built = null; const html = async () => (built ||= (await buildHTML({ native: true })).html);
-  openGamePreview({ game: { name: so.name }, html, bridge: BRIDGE, products: so.products || [], toast,
+  let built = null; const html = async (fresh) => { if (fresh) built = null; return (built ||= (await buildHTML({ native: true })).html); };
+  dockNative(openGamePreview({ game: { name: so.name }, html, bridge: BRIDGE, products: so.products || [], toast, host: $('#viewport'),
     download: (kind) => (kind === 'flutter' ? exportFlutter() : kind === 'kotlin' ? exportKotlinGame() : exportXcode()),
-    files: async (kind) => gameFilesFor(kind, so, await html(), new Uint8Array(0)) });
+    files: async (kind) => gameFilesFor(kind, so, await html(), new Uint8Array(0)) }));
 }
 /** Native code: the app as Flutter widgets or SwiftUI views (no web view). */
 async function exportNative(kind) {
@@ -8056,6 +8064,7 @@ function openBuildSettings() {
 // ============================================================================
 let sheetBeforePlay = null;
 function play() {
+  nativeView?.close();
   if (playing) return;
   closeLayer();
   document.activeElement?.blur?.();
@@ -8239,6 +8248,7 @@ for (const grip of [$('#pbDock'), $('#pbHandle')]) grip.addEventListener('pointe
   addEventListener('pointermove', mv); addEventListener('pointerup', up);
 });
 $('#undoBtn').append(icon('undo')); $('#redoBtn').append(icon('redo'));
+$('#phoneBtn').append(icon('phone')); $('#phoneBtn').addEventListener('click', toggleNative);
 $('#snapBtn').append(icon('magnet')); $('#gridBtn').append(icon('grid')); $('#frameBtn').append(icon('frame'));
 for (const [name, ic, label] of [['scene', 'scene', 'Scene'], ['hierarchy', 'list', 'Hierarchy'], ['inspector', 'info', 'Inspector'], ['scripts', 'nodes', 'Scripts'], ['project', 'folder', 'Project'], ['console', 'terminal', 'Console']]) {
   $(`#dockTabs [data-dock="${name}"]`).append(icon(ic), label);

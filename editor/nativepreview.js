@@ -30,6 +30,34 @@ const ICON_SVG = {
 const ICON_ALIAS = { explore: 'search', profile: 'user', users: 'user', gear: 'settings', add: 'plus', play: 'video', menu: 'list' };
 const svgIcon = (name) => { const d = ICON_SVG[ICON_ALIAS[name] || name] || ICON_SVG.circle; const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('class', 'npv-ic'); const p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', d); s.append(p); return s; };
 
+/** Fits the phone to the space it has (or a size you pick with − / +): sets --npv-zoom on the preview. */
+function zoomer(root, box, phone) {
+  let mode = 'fit', shown = 1;
+  const label = h('button', { class: 'npv-btn npv-zl', title: 'Fit the phone to the space' }, 'Fit');
+  const apply = () => {
+    let z = mode;
+    if (mode === 'fit') {
+      const others = [...box.children].filter((c) => c !== phone && !c.hidden).reduce((a, c) => a + c.offsetHeight + 10, 0);
+      z = Math.max(0.4, Math.min(1.8, (box.clientWidth - 24) / 380, (box.clientHeight - 32 - others) / 740));
+    }
+    shown = Math.round(z * 100) / 100;
+    root.style.setProperty('--npv-zoom', String(shown));
+    label.textContent = mode === 'fit' ? `Fit · ${Math.round(shown * 100)}%` : `${Math.round(shown * 100)}%`;
+  };
+  label.onclick = () => { mode = 'fit'; apply(); };
+  const step = (d) => { mode = Math.max(0.4, Math.min(2, Math.round((shown + d) * 10) / 10)); apply(); };
+  const controls = h('div', { class: 'npv-zoom' }, h('button', { class: 'npv-btn', 'aria-label': 'Smaller', onclick: () => step(-0.1) }, '−'), label, h('button', { class: 'npv-btn', 'aria-label': 'Bigger', onclick: () => step(0.1) }, '+'));
+  const ro = typeof ResizeObserver === 'function' ? new ResizeObserver(() => apply()) : null;
+  ro?.observe(box);
+  return { controls, apply, stop: () => ro?.disconnect() };
+}
+/** Docked in the scene view (host) or full screen; the button switches. */
+function placer(root, host, redraw) {
+  const place = (docked) => { root.classList.toggle('docked', docked); (docked ? host : document.body).append(root); redraw(); };
+  const button = () => host && h('button', { class: 'npv-btn', title: root.classList.contains('docked') ? 'Full screen' : 'Back into the scene view', 'aria-label': 'Full screen', onclick: () => place(!root.classList.contains('docked')) }, root.classList.contains('docked') ? '⤢' : '⊡');
+  return { place, button };
+}
+
 /** The app's state, with the same rules as the native runtimes. */
 function makeApp(model) {
   const A = { vars: { ...model.vars }, data: {}, tab: 0, stacks: model.tabs.length ? model.tabs.map(() => []) : [[]], openCollection: null, openId: null, roots: {} };
@@ -101,8 +129,9 @@ function makeApp(model) {
 }
 
 /** opts: { game, files(kind) → Promise<[{name, data}]>, download(kind), toast(msg) } */
-export function openNativePreview({ game, files, download, toast = () => {} }) {
-  const model = appModel(game), N = names(model);
+export function openNativePreview({ game, files, download, toast = () => {}, host = null }) {
+  const read = () => (typeof game === 'function' ? game() : game);
+  let model = appModel(read()), N = names(model);
   let kind = 'flutter', view = 'app', A = makeApp(model), codeFiles = null, codeSel = '', note = '';
   const dark = () => { const d = A.vars.darkMode; return typeof d === 'boolean' ? d : model.theme === 'dark' ? true : model.theme === 'light' ? false : matchMedia('(prefers-color-scheme: dark)').matches; };
   const pal = () => (dark() ? { ...PALETTES.dark } : { ...PALETTES.light, accent: model.accent });
@@ -113,6 +142,7 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
   const head = h('div', { class: 'npv-head' });
   const body = h('div', { class: 'npv-body' }, h('div', { class: 'npv-app' }, phone, h('div', { class: 'npv-note' })), codeBox);
   const root = h('div', { class: 'npv', role: 'dialog', 'aria-label': 'Native app preview' }, head, body);
+  const zoom = zoomer(root, body.firstChild, phone), where = placer(root, host, () => drawAll());
 
   function drawHead() {
     head.replaceChildren(
@@ -120,8 +150,10 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
       seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI']], kind, (k) => { kind = k; codeFiles = null; drawAll(); }),
       seg([['app', 'App'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
       h('div', { class: 'npv-acts' },
-        h('button', { class: 'npv-btn', title: 'Start again with the sample data', onclick: () => { A = makeApp(model); note = ''; drawPhone(); } }, '↺ Reset'),
+        zoom.controls,
+        h('button', { class: 'npv-btn', title: 'Read the project again and start with the sample data', onclick: () => refresh(true) }, '↺ Reset'),
         h('button', { class: 'npv-btn primary', onclick: () => download(kind) }, '⬇ Download'),
+        where.button(),
         h('button', { class: 'npv-btn', 'aria-label': 'Close', onclick: close }, '✕')),
     );
   }
@@ -348,13 +380,23 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
     return parts.length ? parts : ' ';
   }
 
-  function drawAll() { drawHead(); root.dataset.view = view; drawPhone(); if (view === 'code' || matchMedia('(min-width: 900px)').matches) drawCode(); }
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
-  function close() { root.remove(); removeEventListener('keydown', onKey); }
+  const wide = () => root.isConnected && root.clientWidth >= 900;
+  function drawAll() { drawHead(); root.dataset.view = view; drawPhone(); if (view === 'code' || wide()) drawCode(); zoom.apply(); }
+  /** Read the project again (after an edit): keeps the tab you're on; reset also starts the data again. */
+  function refresh(reset = false) {
+    const tab = A.tab, vars = A.vars, data = A.data, before = Object.fromEntries(model.collections.map((c) => [c.name, JSON.stringify(c.rows)]));
+    model = appModel(read()); N = names(model); A = makeApp(model); codeFiles = null; story = null; listing = null;
+    if (!reset) { A.tab = Math.min(tab, Math.max(0, model.tabs.length - 1)); Object.assign(A.vars, vars); for (const c of model.collections) if (data[c.name] && before[c.name] === JSON.stringify(c.rows)) A.data[c.name] = data[c.name]; A.work(); }
+    note = ''; drawAll();
+  }
+  let soon = 0;
+  const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 700); };
+  const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) close(); };
+  let onClose = null;
+  function close() { clearTimeout(soon); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); onClose?.(); }
   addEventListener('keydown', onKey);
-  document.body.append(root);
-  drawAll();
-  return { root, close, app: A };
+  where.place(!!host);
+  return { root, close, get app() { return A; }, refresh, refreshSoon, set onClose(f) { onClose = f; } };
 }
 
 // =============================================================================================================
@@ -363,12 +405,13 @@ export function openNativePreview({ game, files, download, toast = () => {} }) {
 // =============================================================================================================
 
 /** opts: { game, html() → Promise<string> (the native build), bridge (the window.Capacitor bridge script), products, files(kind), download(kind), toast } */
-export function openGamePreview({ game, html, bridge, products = [], files, download, toast = () => {} }) {
-  let kind = 'flutter', view = 'app', codeFiles = null, codeSel = '', page = null, url = '', perm = 'prompt', owned = new Set(), sheet = null, closed = false;
+export function openGamePreview({ game, html, bridge, products = [], files, download, toast = () => {}, host = null }) {
+  let fresh = false, kind = 'flutter', view = 'app', codeFiles = null, codeSel = '', page = null, url = '', perm = 'prompt', owned = new Set(), sheet = null, closed = false;
   const log = [];
   const phone = h('div', { class: 'npv-phone game' }), codeBox = h('div', { class: 'npv-code' }), logBox = h('div', { class: 'npv-log', 'aria-live': 'polite' });
   const head = h('div', { class: 'npv-head' }), keys = h('div', { class: 'npv-keys' });
   const root = h('div', { class: 'npv', role: 'dialog', 'aria-label': 'Native game preview' }, head, h('div', { class: 'npv-body' }, h('div', { class: 'npv-app' }, phone, keys, logBox), codeBox));
+  const zoom = zoomer(root, root.querySelector('.npv-app'), phone), where = placer(root, host, () => drawAll());
   const platform = () => (kind === 'swift' ? 'ios' : 'android');
   const label = () => ({ flutter: 'Flutter', kotlin: 'Kotlin', swift: 'Xcode (Swift)' }[kind]);
   const seg = (items, cur, pick) => h('div', { class: 'npv-seg', role: 'tablist' }, items.map(([k, l]) => h('button', { class: k === cur ? 'on' : '', role: 'tab', 'aria-selected': String(k === cur), 'data-k': k, onclick: () => pick(k) }, l)));
@@ -384,8 +427,10 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
       seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'Xcode']], kind, (k) => { kind = k; codeFiles = null; perm = 'prompt'; start(); }),
       seg([['app', 'Game'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
       h('div', { class: 'npv-acts' },
-        h('button', { class: 'npv-btn', title: 'Start the game again', onclick: () => start() }, '↺ Restart'),
+        zoom.controls,
+        h('button', { class: 'npv-btn', title: 'Build the game again from the project and restart it', onclick: () => refresh() }, '↺ Restart'),
         h('button', { class: 'npv-btn primary', onclick: () => download(kind) }, '⬇ Download'),
+        where.button(),
         h('button', { class: 'npv-btn', 'aria-label': 'Close', onclick: close }, '✕')));
   }
   function drawLog() {
@@ -457,7 +502,7 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
     phone.className = 'npv-phone game ' + (ios ? 'ios' : 'material');
     if (!url) {
       phone.replaceChildren(h('div', { class: 'npv-empty' }, 'Building the game…'));
-      let src = await html();
+      let src = await html(fresh); fresh = false;
       window.__pkPreviewBridge = onMessage;
       const inject = (p) => `<script>window.__pkPlatform=${JSON.stringify(p)};window.ReactNativeWebView={postMessage:function(s){try{parent.__pkPreviewBridge(s)}catch(e){}}};${bridge.replace(/ true;$/, '')}</script>`;
       url = { android: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('android'))], { type: 'text/html' })), ios: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('ios'))], { type: 'text/html' })) };
@@ -468,7 +513,8 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
     keys.replaceChildren(...(ios ? [h('small', {}, 'iOS has no Back button: the game\'s own buttons go back.')] : [
       h('button', { class: 'npv-key', 'aria-label': 'Back', title: 'Android Back: goes back a page in the game, or closes the app', onclick: () => { note('Back button'); try { win()?.__pkBack?.(); } catch { /* reloading */ } } }, '◁'),
       h('button', { class: 'npv-key', 'aria-label': 'Home', title: 'Restart', onclick: () => start() }, '○')]));
-    if (view === 'code' || matchMedia('(min-width: 900px)').matches) drawCode();
+    if (view === 'code' || wide()) drawCode();
+    zoom.apply();
   }
 
   async function drawCode() {
@@ -484,12 +530,17 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
         h('button', { class: 'npv-btn', onclick: async () => { try { await navigator.clipboard.writeText(f.data); toast('Copied ' + short(f.name)); } catch { toast('Select the text to copy it'); } } }, 'Copy')),
       h('pre', { class: 'npv-pre' }, text.split('\n').map((l) => h('div', {}, l || ' '))));
   }
-  function drawAll() { drawHead(); root.dataset.view = view; if (view === 'code' || matchMedia('(min-width: 900px)').matches) drawCode(); }
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
-  function close() { root.remove(); removeEventListener('keydown', onKey); if (window.__pkPreviewBridge === onMessage) delete window.__pkPreviewBridge; if (url) { URL.revokeObjectURL(url.android); URL.revokeObjectURL(url.ios); } }
+  const wide = () => root.isConnected && root.clientWidth >= 900;
+  function drawAll() { drawHead(); root.dataset.view = view; if (view === 'code' || wide()) drawCode(); zoom.apply(); }
+  /** Build the game again from the project (after an edit) and restart it. */
+  function refresh() { if (url) { URL.revokeObjectURL(url.android); URL.revokeObjectURL(url.ios); } url = ''; fresh = true; codeFiles = null; start(); }
+  let soon = 0, onClose = null;
+  const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 1500); };
+  const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) close(); };
+  function close() { clearTimeout(soon); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); if (window.__pkPreviewBridge === onMessage) delete window.__pkPreviewBridge; if (url) { URL.revokeObjectURL(url.android); URL.revokeObjectURL(url.ios); } onClose?.(); }
   addEventListener('keydown', onKey);
-  document.body.append(root);
   root.dataset.view = view;
+  root.classList.toggle('docked', !!host); (host || document.body).append(root);
   start();
-  return { root, close, onMessage };
+  return { root, close, onMessage, refresh, refreshSoon, set onClose(f) { onClose = f; } };
 }

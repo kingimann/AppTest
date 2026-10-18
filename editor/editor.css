@@ -2358,7 +2358,13 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .ne-code-langs .ne-chip { flex: none; border: 1px solid var(--line, #333); background: transparent; color: var(--text); border-radius: 999px; padding: 7px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
 .ne-code-langs .ne-chip.on { background: var(--accent, #4fa3ff); border-color: transparent; color: #fff; }
 /* Native App Preview (Flutter / Kotlin / SwiftUI) */
-.npv { position: fixed; inset: 0; z-index: 900; background: var(--bg, #0e1014); color: var(--text, #e8e8ea); display: flex; flex-direction: column; font-family: inherit; }
+.npv { position: fixed; inset: 0; z-index: 900; background: var(--bg, #0e1014); color: var(--text, #e8e8ea); display: flex; flex-direction: column; font-family: inherit; container-type: inline-size; }
+/* docked: inside the scene view, with the hierarchy and inspector still there */
+.npv.docked { position: absolute; z-index: 30; background: var(--g2, #15171c); }
+.npv.docked .npv-head { padding: 6px 8px; gap: 6px; }
+.npv.docked .npv-title small { display: none; }
+.npv-btn, .npv-seg button { white-space: nowrap; }
+.npv-zoom { display: inline-flex; gap: 2px; } .npv-zoom .npv-btn { min-width: 34px; } .npv-zl { font-variant-numeric: tabular-nums; }
 .npv-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: calc(env(safe-area-inset-top) + 10px) 14px 10px; border-bottom: 1px solid var(--line, #2a2f38); }
 .npv-title { display: flex; flex-direction: column; margin-right: auto; }
 .npv-title small { color: var(--muted, #9ca3af); font-size: 12px; }
@@ -2371,8 +2377,14 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .npv[data-view="app"] .npv-code { display: none; }
 .npv[data-view="code"] .npv-app { display: none; }
-@media (min-width: 900px) { .npv-body { grid-template-columns: 420px minmax(0, 1fr); } .npv .npv-app, .npv .npv-code { display: flex !important; } }
-.npv-app { display: flex; flex-direction: column; align-items: center; gap: 10px; overflow: auto; padding: 16px; }
+@container (min-width: 900px) { .npv-body { grid-template-columns: minmax(420px, 1fr) minmax(0, 1.2fr); } .npv-app, .npv-code { display: flex !important; } }
+@container (max-width: 640px) {
+  .npv-head { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding: 6px 8px; gap: 6px; }
+  .npv-head > * { flex: none; }
+  .npv-title { display: none; }
+  .npv-seg button, .npv-btn { padding: 6px 9px; font-size: 12.5px; }
+}
+.npv-app { display: flex; flex-direction: column; align-items: safe center; gap: 10px; overflow: auto; padding: 16px; }
 .npv-note { color: var(--muted, #9ca3af); font-size: 12px; text-align: center; max-width: 360px; }
 .npv-code { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line, #2a2f38); }
 .npv-ctools { display: flex; gap: 6px; padding: 10px; align-items: center; }
@@ -2380,7 +2392,7 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-pre { flex: 1; margin: 0; overflow: auto; background: #0f1117; color: #d7dae0; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 10px 14px; white-space: pre; user-select: text; -webkit-user-select: text; }
 .npv-pre .c-com { color: #7f8796; font-style: italic; } .npv-pre .c-str { color: #a5d6a7; } .npv-pre .c-num { color: #f7c06b; } .npv-pre .c-kw { color: #c792ea; font-weight: 600; }
 /* the phone */
-.npv-phone { position: relative; width: 360px; max-width: 100%; height: 720px; max-height: calc(100vh - 160px); flex: none; border-radius: 36px; border: 10px solid #111; background: var(--bg); color: var(--text); overflow: hidden; display: flex; flex-direction: column; font: 15px/1.35 Roboto, system-ui, -apple-system, sans-serif; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
+.npv-phone { position: relative; width: 360px; height: 720px; flex: none; zoom: var(--npv-zoom, 1); border-radius: 36px; border: 10px solid #111; background: var(--bg); color: var(--text); overflow: hidden; display: flex; flex-direction: column; font: 15px/1.35 Roboto, system-ui, -apple-system, sans-serif; box-shadow: 0 20px 60px rgba(0,0,0,.45); }
 .npv-phone.ios { font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; }
 .npv-status { display: flex; justify-content: space-between; padding: 8px 20px 2px; font-size: 12px; font-weight: 700; background: var(--card); }
 .npv-bar { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 8px; background: var(--card); border-bottom: 1px solid var(--line); }
@@ -2490,7 +2502,7 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-home { position: absolute; bottom: 7px; left: 50%; transform: translateX(-50%); width: 120px; height: 5px; border-radius: 3px; background: rgba(255,255,255,.7); pointer-events: none; }
 .npv-keys { display: flex; gap: 40px; justify-content: center; align-items: center; color: var(--muted, #9ca3af); }
 .npv-key { width: 52px; height: 40px; border-radius: 12px; border: 1px solid var(--line, #2a2f38); background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
-.npv-log { width: 360px; max-width: 100%; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; }
+.npv-log { width: 360px; max-width: 100%; max-height: 120px; overflow-y: auto; flex: none; font-size: 12.5px; display: flex; flex-direction: column; gap: 3px; }
 .npv-logl small { color: var(--muted, #9ca3af); font-variant-numeric: tabular-nums; }
 .npv-logl.muted { color: var(--muted, #9ca3af); }
 .npv-over { position: absolute; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 3; }

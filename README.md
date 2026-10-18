@@ -75,7 +75,7 @@ Open **https://kingimann.github.io/AppTest/editor/** on your phone. *☰ → Ins
 
 2. **Scene** fills the screen. Tap an object to select it; drag to move it. The tool rail on the left has Hand, Move, Rotate, Scale and **Paint** (stamp copies by tapping or dragging). Pinch to zoom; drag empty space to pan (2D) or orbit (3D).
 3. **Blue + button**: add things. Tap a tile to add it, or press, hold and drag it to the exact spot.
-4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers, ⋮ copies or removes a component, **Add Component** adds more) and **Project** (prefabs, objects, components). It starts small so the Scene gets the screen.
+4. **Bottom sheet**: **Hierarchy** (all objects; the top row opens game settings), **Inspector** (the selected object's components; −/+ buttons nudge numbers and number fields take sums like `10*3` or `+5`, ⋮ copies, removes or saves a component as a **preset**, **Add Component** adds more; pin settings to the top, add a **note**, copy all components to another object, or **Edit as JSON**) and **Project** (prefabs, objects, components). It starts small so the Scene gets the screen.
    - The tabs (Scene, Hierarchy, Inspector, Scripts, Project, Console) always sit at the bottom edge, where your thumb is, and the panel opens above them. The open tab has a bar over it.
    - Tap a tab to open it, or tap the open tab again (or **Scene**) to put the panel away. Swiping up or down on the tabs opens or closes it too.
    - Drag the handle, or drag a list down from its top, and the panel follows your finger. Let go low to close it, or halfway to make it half height.

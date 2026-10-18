@@ -2327,3 +2327,11 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .toast.has-act { pointer-events: auto; display: flex; align-items: center; gap: 12px; text-align: left; }
 .toast { width: max-content; max-width: min(92vw, 560px); box-sizing: border-box; } /* (centred with translate: without this it shrinks to half the screen and grows tall) */
 .toast-act { flex: none; border: 0; border-radius: 10px; padding: 7px 12px; font: 700 14px system-ui, sans-serif; background: var(--accent, #4c8bd6); color: #fff; cursor: pointer; }
+
+/* Inspector: a note on the object, and the pinned settings */
+.insp-note { margin: 6px 8px 8px; padding: 8px 10px 10px; border-radius: 12px; background: color-mix(in srgb, #ffd54a 22%, var(--g1)); border: 1px solid color-mix(in srgb, #ffd54a 45%, transparent); }
+.insp-note-h { display: flex; align-items: center; gap: 6px; font: 700 12px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .05em; color: color-mix(in srgb, #b8860b 70%, var(--text)); }
+.insp-note-h .ib { margin-left: auto; width: 26px; height: 26px; }
+.insp-note textarea { width: 100%; box-sizing: border-box; margin-top: 6px; border: 0; background: transparent; color: var(--text); font: 14px/1.4 system-ui, sans-serif; resize: none; outline: none; min-height: 2.6em; }
+.comp.pinned-card { --cc: #ffb020; }
+.comp.pinned-card > .comp-h { background: color-mix(in srgb, #ffb020 14%, transparent); }

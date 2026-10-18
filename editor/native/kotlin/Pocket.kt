@@ -43,7 +43,10 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -459,26 +462,236 @@ fun Modifier.bleed(by: Dp = 16.dp) = layout { m, c ->
 
 /** Text with {variables} filled in. */
 @Composable
-fun PText(text: String, size: Int = 16, weight: Int = 600, color: String? = null) {
+fun PText(text: String, size: Int = 16, weight: Int = 600, color: String? = null, align: String = "left") {
     val p = LocalPalette.current
-    Text(app.fill(text), fontSize = size.sp, fontWeight = FontWeight(weight.coerceIn(100, 900)), color = p.resolve(color) ?: p.text)
+    Text(app.fill(text), Modifier.fillMaxWidth(), fontSize = size.sp, lineHeight = (size * 1.2).sp, fontWeight = FontWeight(weight.coerceIn(100, 900)), color = p.resolve(color) ?: p.text,
+        textAlign = when (align) { "center" -> TextAlign.Center; "right" -> TextAlign.End; else -> TextAlign.Start })
 }
 
 enum class Look { Filled, Outlined, Danger, Plain }
 
+/** A button in the project's look: filled, outlined or plain (a link), with its own colours, height and corners. */
 @Composable
-fun PButton(label: String, look: Look = Look.Filled, onClick: () -> Unit) {
+fun PButton(label: String, look: Look = Look.Filled, bg: String? = null, fg: String? = null, stroke: String? = null, height: Int = 52, radius: Int = 16, size: Int = 17, onClick: () -> Unit) {
     val p = LocalPalette.current
-    val m = Modifier.fillMaxWidth().height(52.dp)
-    val shape = RoundedCornerShape(16.dp)
-    val text: @Composable () -> Unit = { Text(app.fill(label), fontSize = 17.sp, fontWeight = FontWeight.ExtraBold) }
+    val m = Modifier.fillMaxWidth().heightIn(min = height.dp)
+    val shape = RoundedCornerShape(radius.dp)
+    val f = p.resolve(fg)
+    val pad = PaddingValues(horizontal = 8.dp)
+    val text: @Composable () -> Unit = { Text(app.fill(label), fontSize = size.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     when (look) {
-        Look.Filled -> Button(onClick, m, shape = shape, colors = ButtonDefaults.buttonColors(containerColor = p.accent, contentColor = p.onAccent)) { text() }
-        Look.Danger -> OutlinedButton(onClick, m, shape = shape, colors = ButtonDefaults.outlinedButtonColors(contentColor = p.danger, containerColor = p.card), border = androidx.compose.foundation.BorderStroke(2.dp, p.danger)) { text() }
-        Look.Outlined -> OutlinedButton(onClick, m, shape = shape, colors = ButtonDefaults.outlinedButtonColors(contentColor = p.accent), border = androidx.compose.foundation.BorderStroke(2.dp, p.accent)) { text() }
-        Look.Plain -> TextButton(onClick, m) { text() }
+        Look.Filled -> Button(onClick, m, shape = shape, contentPadding = pad, colors = ButtonDefaults.buttonColors(containerColor = p.resolve(bg) ?: p.accent, contentColor = f ?: p.onAccent)) { text() }
+        Look.Danger -> OutlinedButton(onClick, m, shape = shape, contentPadding = pad, colors = ButtonDefaults.outlinedButtonColors(contentColor = f ?: p.danger, containerColor = p.resolve(bg) ?: p.card), border = androidx.compose.foundation.BorderStroke(2.dp, p.resolve(stroke) ?: p.danger)) { text() }
+        Look.Outlined -> OutlinedButton(onClick, m, shape = shape, contentPadding = pad, colors = ButtonDefaults.outlinedButtonColors(contentColor = f ?: p.accent, containerColor = p.resolve(bg) ?: Color.Transparent), border = androidx.compose.foundation.BorderStroke(2.dp, p.resolve(stroke) ?: f ?: p.accent)) { text() }
+        Look.Plain -> TextButton(onClick, m, contentPadding = pad, colors = ButtonDefaults.textButtonColors(contentColor = f ?: p.accent)) { text() }
     }
 }
+
+/** Where a thing sits in a card (PBox): the anchor (0, ½ or 1 of the width / height), the offset from it, its size and how its text lines up,
+ *  all in the design's sizes (the card scales them to the phone's width). */
+class Pin(val fx: Float = 0.5f, val fy: Float = 0.5f, val x: Float = 0f, val y: Float = 0f, val w: Float = 0f, val h: Float = 0f, val align: String = "center", val m: Float = -1f, val wrap: Float = 0f, val cell: Int = -1, val cells: Int = 0, val content: @Composable () -> Unit)
+
+/** A card, badge, picture box or tappable row: its size, colours, corners, its own centred text, and the things in it where the design puts them. */
+@Composable
+fun PBox(w: Int = 368, h: Int = 48, radius: Int = 0, fill: String = "", stroke: String = "", strokeW: Int = 0, shadow: Boolean = false, text: String = "", textSize: Int = 16, textWeight: Int = 600, textColor: String = "", row: Int? = null, onTap: (() -> Unit)? = null, pins: List<Pin> = emptyList()) {
+    val p = LocalPalette.current
+    val shape = RoundedCornerShape(radius.dp)
+    var mod = Modifier.fillMaxWidth().height(h.dp)
+    if (shadow) mod = mod.shadow(4.dp, shape, clip = false)
+    mod = mod.clip(shape).background(p.resolve(fill) ?: Color.Transparent, shape)
+    if (stroke.isNotEmpty()) mod = mod.border((if (strokeW > 0) strokeW else 1).dp, p.resolve(stroke) ?: p.line, shape)
+    if (onTap != null) mod = mod.clickable { onTap() }
+    Layout(
+        modifier = mod,
+        content = {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { if (text.isNotEmpty()) Text(app.fill(text), fontSize = textSize.sp, fontWeight = FontWeight(textWeight.coerceIn(100, 900)), color = p.resolve(textColor) ?: p.text, textAlign = TextAlign.Center) }
+            for (q in pins) Box(contentAlignment = when (q.align) { "left" -> Alignment.CenterStart; "right" -> Alignment.CenterEnd; else -> Alignment.Center }) { q.content() }
+        },
+    ) { ms, c ->
+        val width = c.maxWidth.toFloat()
+        val dens = density
+        val dw = (if (w > 0) w else 368) * dens
+        val s = width / dw
+        val hp = h * dens
+        val bg = ms[0].measure(Constraints.fixed(c.maxWidth, (hp).toInt()))
+        val placed = pins.mapIndexed { i, q ->
+            val px = q.fx * width + q.x * dens * s
+            val top = q.fy * hp + q.y * dens
+            var left: Float
+            var wd: Float
+            if (q.cells > 0 && row != null) { val g = row * dens * s; val cw = (width - g * (q.cells - 1)) / q.cells; left = q.cell * (cw + g) + q.m * dens * s; wd = cw - 2 * q.m * dens * s }
+            else if (q.m >= 0) { left = q.m * dens * s; wd = width - 2 * q.m * dens * s }
+            else if (q.w > 0) { wd = q.w * dens * s; left = px - wd / 2 }
+            else if (q.align == "left") { wd = (if (q.wrap > 0) q.wrap * dens * s else width).coerceAtMost(width - px - 2); left = px }
+            else if (q.align == "right") { wd = (if (q.wrap > 0) q.wrap * dens * s else width).coerceAtMost(px - 2); left = px - wd }
+            else { val half = minOf(px, width - px) - 2; wd = if (q.wrap > 0 && q.wrap * dens * s < 2 * half) q.wrap * dens * s else 2 * half; left = px - wd / 2 }
+            val wi = wd.coerceAtLeast(0f).toInt()
+            val pl = ms[i + 1].measure(if (q.h > 0) Constraints.fixed(wi, (q.h * dens).toInt()) else Constraints(minWidth = wi, maxWidth = wi))
+            Triple(pl, left.toInt(), (top - pl.height / 2f).toInt())
+        }
+        layout(c.maxWidth, hp.toInt()) {
+            bg.place(0, 0)
+            for ((pl, x, y) in placed) pl.place(x, y)
+        }
+    }
+}
+
+/** A thing narrower than the page on its own line: left, centred or right, as in the design. */
+@Composable
+fun Place(fx: Float = 0.5f, width: Int, content: @Composable () -> Unit) {
+    Box(Modifier.fillMaxWidth(), contentAlignment = when { fx < 0.25f -> Alignment.CenterStart; fx > 0.75f -> Alignment.CenterEnd; else -> Alignment.Center }) {
+        Box(Modifier.widthIn(max = width.dp).fillMaxWidth()) { content() }
+    }
+}
+
+/** Room between things. */
+@Composable
+fun PSpace(h: Int) { Spacer(Modifier.height(maxOf(0, h - 12).dp)) }
+
+/** A bar that fills from a variable (XP, health…). */
+@Composable
+fun PBar(variable: String, max: Double = 100.0, height: Int = 12, fill: String = "@accent", bg: String = "@line", radius: Int = 6) {
+    val p = LocalPalette.current
+    val v = ((num(app.get(variable)) ?: 0.0) / (if (max == 0.0) 1.0 else max)).coerceIn(0.0, 1.0).toFloat()
+    Box(Modifier.fillMaxWidth().height(height.dp).clip(RoundedCornerShape(radius.dp)).background(p.resolve(bg) ?: p.line)) {
+        Box(Modifier.fillMaxWidth(v).fillMaxHeight().background(p.resolve(fill) ?: p.accent))
+    }
+}
+
+/** A slider for a number variable. */
+@Composable
+fun PSlider(variable: String, min: Double = 0.0, max: Double = 100.0, step: Double = 1.0) {
+    val v = (num(app.get(variable)) ?: min).coerceIn(min, max).toFloat()
+    val steps = if (step > 0) (((max - min) / step).toInt() - 1).coerceIn(0, 200) else 0
+    Slider(value = v, onValueChange = { app.set(variable, it.toDouble()) }, valueRange = min.toFloat()..max.toFloat(), steps = if (steps > 60) 0 else steps)
+}
+
+/** Segmented tabs: pick one (keeps its text, or its position 1, 2, 3…). */
+@Composable
+fun Segmented(variable: String, options: List<String>, index: Boolean = false) {
+    val p = LocalPalette.current
+    val cur = show(app.get(variable))
+    Row(Modifier.fillMaxWidth().background(p.field, RoundedCornerShape(12.dp)).padding(3.dp)) {
+        options.forEachIndexed { i, o ->
+            val on = if (index) cur == (i + 1).toString() else cur == o
+            Box(Modifier.weight(1f).clip(RoundedCornerShape(10.dp)).background(if (on) p.accent else Color.Transparent).clickable { app.set(variable, if (index) (i + 1).toDouble() else o) }.padding(vertical = 9.dp), contentAlignment = Alignment.Center) {
+                Text(o, fontWeight = FontWeight.Bold, color = if (on) p.onAccent else p.sub, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** Chips: pick one. */
+@Composable
+fun Chips(variable: String, options: List<String>) {
+    val cur = show(app.get(variable))
+    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        for (o in options) FilterChip(selected = cur == o, onClick = { app.set(variable, o) }, label = { Text(o) })
+    }
+}
+
+/** A drop-down list: label to value. */
+@Composable
+fun PDropdown(variable: String, options: List<Pair<String, String>>, placeholder: String = "Choose…") {
+    val p = LocalPalette.current
+    var open by remember { mutableStateOf(false) }
+    val cur = show(app.get(variable))
+    Box(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().background(p.field, RoundedCornerShape(12.dp)).clickable { open = true }.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(options.firstOrNull { it.second == cur }?.first ?: placeholder, Modifier.weight(1f), color = if (cur.isEmpty()) p.sub else p.text)
+            Icon(Icons.Filled.ArrowDropDown, contentDescription = null, tint = p.sub)
+        }
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            for ((label, value) in options) DropdownMenuItem(text = { Text(label) }, onClick = { app.set(variable, value); open = false })
+        }
+    }
+}
+
+/** − number + */
+@Composable
+fun PStepper(variable: String, min: Double = 0.0, max: Double = 10.0, step: Double = 1.0) {
+    val p = LocalPalette.current
+    val v = num(app.get(variable)) ?: min
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        FilledIconButton(onClick = { app.set(variable, (v - step).coerceIn(min, max)) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = p.accent, contentColor = p.onAccent)) { Text("−", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold) }
+        Text(show(v), Modifier.width(48.dp), textAlign = TextAlign.Center, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+        FilledIconButton(onClick = { app.set(variable, (v + step).coerceIn(min, max)) }, colors = IconButtonDefaults.filledIconButtonColors(containerColor = p.accent, contentColor = p.onAccent)) { Text("+", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold) }
+    }
+}
+
+/** Tap a star. */
+@Composable
+fun PRating(variable: String, max: Int = 5) {
+    val p = LocalPalette.current
+    val v = num(app.get(variable)) ?: 0.0
+    Row { for (i in 0 until max) Text("★", Modifier.clickable { app.set(variable, (i + 1).toDouble()) }, fontSize = 30.sp, color = if (i < v) Color(0xFFF5B301) else p.line) }
+}
+
+/** A thin line, with a word in the middle. */
+@Composable
+fun PDivider(label: String = "") {
+    val p = LocalPalette.current
+    if (label.isEmpty()) { HorizontalDivider(color = p.line); return }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        HorizontalDivider(Modifier.weight(1f), color = p.line)
+        Text(app.fill(label), Modifier.padding(horizontal = 10.dp), color = p.sub, fontSize = 13.sp)
+        HorizontalDivider(Modifier.weight(1f), color = p.line)
+    }
+}
+
+/** A notice: info, success, warning or error. */
+@Composable
+fun PBanner(tone: String = "info", title: String = "", text: String = "", icon: String = "") {
+    val p = LocalPalette.current
+    val (bg, fg) = when (tone) { "warning" -> Color(0xFFFFF4D6) to Color(0xFF7A5200); "error" -> Color(0xFFFFE1E1) to Color(0xFF8A1C1C); "success" -> Color(0xFFDDF6E8) to Color(0xFF145C34); else -> p.accent.copy(alpha = 0.14f) to p.text }
+    Row(Modifier.fillMaxWidth().background(bg, RoundedCornerShape(14.dp)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+        if (icon.isNotEmpty()) Text(icon, Modifier.padding(end = 10.dp), fontSize = 18.sp)
+        Column {
+            if (title.isNotEmpty()) Text(app.fill(title), fontWeight = FontWeight.ExtraBold, color = fg)
+            if (text.isNotEmpty()) Text(app.fill(text), color = fg)
+        }
+    }
+}
+
+/** Level badge, XP bar and xp / needed (each level needs base × growth^(level − 1)). */
+@Composable
+fun XpBar(xpVar: String = "xp", levelVar: String = "playerLevel", base: Double = 100.0, growth: Double = 1.4) {
+    val p = LocalPalette.current
+    val lv = maxOf(1, (num(app.get(levelVar)) ?: 1.0).toInt())
+    val xp = num(app.get(xpVar)) ?: 0.0
+    var need = base
+    repeat(lv - 1) { need *= growth }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(30.dp).background(p.accent, CircleShape), contentAlignment = Alignment.Center) { Text("$lv", color = p.onAccent, fontWeight = FontWeight.ExtraBold) }
+        Spacer(Modifier.width(10.dp))
+        LinearProgressIndicator(progress = { (xp / need).coerceIn(0.0, 1.0).toFloat() }, modifier = Modifier.weight(1f).height(12.dp).clip(RoundedCornerShape(6.dp)), color = p.accent, trackColor = p.line)
+        Spacer(Modifier.width(10.dp))
+        Text("${show(xp)} / ${kotlin.math.round(need).toLong()}", color = p.sub, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** Numbered steps (the one in the variable is lit). */
+@Composable
+fun PSteps(variable: String, steps: List<String>) {
+    val p = LocalPalette.current
+    val cur = maxOf(1.0, num(app.get(variable)) ?: 1.0)
+    Row(Modifier.fillMaxWidth()) {
+        steps.forEachIndexed { i, t ->
+            Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                Box(Modifier.size(28.dp).background(if (i + 1 <= cur) p.accent else p.line, CircleShape), contentAlignment = Alignment.Center) { Text(if (i + 1 < cur) "✓" else "${i + 1}", color = if (i + 1 <= cur) p.onAccent else p.sub, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp) }
+                Text(t, color = if (i + 1.0 == cur) p.text else p.sub, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+}
+
+/** Loading. */
+@Composable
+fun PSpinner() { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } }
+
+/** Your picture: an emoji, or the initials of {playerName}. */
+@Composable
+fun PAvatar(emoji: String = "", size: Int = 64) { Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Avatar(meName, me, size, emoji.ifEmpty { null }) } }
 
 /** A card with things side by side (a settings row, a summary). */
 @Composable

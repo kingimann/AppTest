@@ -115,6 +115,17 @@ Lists live in variables and show in text as `1, 2, 3`. Positions start at **1**.
 - **Lists:** Add (end or start), Insert At, Remove (last, first, position, value), Set At, Clear, Shuffle / Sort / Reverse, Fill With Numbers, Item At, Length, Contains, Position Of, Random Item, Sum / Min / Max / Average, Keep Only, Change Every Item, Remove Duplicates, Join Two, Copy Part, Text To Array.
 - **Dictionaries** (key → value, like `hp: 100, xp: 5`): Set, Get / Get Number, Add To, Has Key, Remove, Clear, Size, Keys To Array, For Each (with Loop Key and Loop Item).
 
+## View as code
+
+**⋯ › View as Code…** in the node editor writes the script out as JavaScript-style code, to read, learn from or paste into a note:
+
+- each event becomes an `on("start", async () => { … })` handler, and each **Function** an `async function name(a, b, c) { … }`;
+- **If** becomes `if / else`, the loops become `for` / `while`, **Wait** is `await wait(…)`, **Return Value** is `return`, and game variables are `vars.name`;
+- every other node is a call named after it with its inputs and settings (`await sound({ sound: "win" })`), and a node with several ways out (*loaded*, *not saved yet*…) becomes a `switch` on the way it took;
+- turned-off nodes and steps not joined to any event are marked in comments.
+
+Tap a line to jump to its node, or **Copy** the lot. The code is read-only: the nodes stay the script, and nothing is compiled from this text.
+
 ## Functions and custom events
 
 - **Function** names a piece of script. Give it **Function Input** values (a, b, c) and a **Return Value**.

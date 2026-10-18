@@ -3,6 +3,7 @@
 // drag empty space to pan, pinch to zoom. Edits are written straight back through onChange().
 import { NODE_TYPES, OBJ_WORDS } from '../engine/pocket.js';
 import { icon } from './icons.js';
+import { graphToCode } from './graphcode.js';
 
 const NODE_W = 260;
 export const CAT_COLOR = { Events: '#3d8b40', Flow: '#7e57c2', Actions: '#2c6cb0', Move: '#1f7f99', Looks: '#9c3f86', Animation: '#c2185b', Tween: '#00897b', Objects: '#5a7a2a', Game: '#b0453a', Values: '#a86b16', Math: '#8a6d1a', Physics: '#c0572b', Sensing: '#3f6fd0', Online: '#0e8a8a', Social: '#1d6fd8', Variables: '#b8860b', 'Save Files': '#2e7d6b', Instructions: '#5c6bc0', Conditions: '#8d6e00', Lists: '#8d6e63', Functions: '#6a5acd', Text: '#43a047', Time: '#0277bd', Input: '#ad1457', Camera: '#455a64', Audio: '#8e24aa', AI: '#d84315', Device: '#546e7a', UI: '#c2185b', App: '#1e88e5', Plugins: '#e65100' };
@@ -677,6 +678,21 @@ export function openNodeEditor(opts) {
     for (const n of g.nodes) for (const [k, v] of Object.entries(n.params || {})) { if (typeof v !== 'string') continue; let nv = v.replace(re, '{' + to + '}'); if (VAR_KEYS.has(k) && nv.trim() === from) nv = to; if (nv !== v) { n.params[k] = nv; c++; } }
     emit(); render(); toast(`Renamed “${from}” to “${to}” in ${c} place${c === 1 ? '' : 's'}`);
   }
+  /** The script written out as code to read: tap a line to find its node; Copy puts it on the clipboard. */
+  function codeLine(text) {
+    const parts = [], re = /(\/\/.*$)|("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|\b(\d+(?:\.\d+)?)\b|\b(async|await|function|return|if|else|for|while|let|const|switch|case|break|continue|true|false)\b|\b(vars)\b/g;
+    let at = 0, m;
+    while ((m = re.exec(text))) { if (m.index > at) parts.push(text.slice(at, m.index)); const cls = m[1] ? 'c-com' : m[2] ? 'c-str' : m[3] ? 'c-num' : m[4] ? 'c-kw' : 'c-var'; parts.push(h('span', { class: cls }, m[0])); at = m.index + m[0].length; }
+    if (at < text.length) parts.push(text.slice(at));
+    return parts;
+  }
+  function viewCode() {
+    const L = graphToCode(g, NODE_TYPES), text = L.map((l) => l.text).join('\n');
+    const copy = h('button', { class: 'ne-btn ne-code-copy', onclick: async () => { try { await navigator.clipboard.writeText(text); toast('Code copied'); } catch { toast('Couldn’t copy here: select the text instead'); } } }, icon('copy'), ' Copy');
+    const list = sheet('Script as code', (P) => [h('div', { class: 'ne-code-tools' }, h('small', {}, `${L.filter((l) => l.text.trim() && !l.text.trim().startsWith('//')).length} lines · tap a line to find its node`), copy), P]);
+    list.classList.add('ne-code');
+    list.append(h('pre', { class: 'ne-code-pre' }, L.map((l) => h('div', { class: 'ne-code-line' + (l.id ? ' has-node' : ''), 'data-node': l.id || '', onclick: () => { if (!l.id) return; closePicker(); focusNode(l.id); } }, l.text ? codeLine(l.text) : '\u00a0'))));
+  }
   function moreMenu(anchor) {
     const anyMin = g.nodes.some((n) => n.min);
     popMenu(anchor, [
@@ -684,6 +700,7 @@ export function openNodeEditor(opts) {
       { icon: 'tidy', label: 'Tidy Up (arrange in order)', fn: tidy },
       { icon: 'warn', label: 'Check for Problems', fn: checkProblems },
       { icon: 'list', label: 'Variables in This Script…', fn: openVars },
+      { icon: 'script', label: 'View as Code…', fn: viewCode },
       { icon: 'collapse', label: anyMin ? 'Expand All' : 'Collapse All', fn: () => { for (const n of g.nodes) { if (anyMin) delete n.min; else if (!def(n).comment) n.min = true; } emit(); render(); } },
       { icon: 'frame', label: 'Fit All Nodes', fn: () => fit() },
       '-',

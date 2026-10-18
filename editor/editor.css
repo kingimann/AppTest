@@ -2339,3 +2339,18 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .insp-note textarea { width: 100%; box-sizing: border-box; margin-top: 6px; border: 0; background: transparent; color: var(--text); font: 14px/1.4 system-ui, sans-serif; resize: none; outline: none; min-height: 2.6em; }
 .comp.pinned-card { --cc: #ffb020; }
 .comp.pinned-card > .comp-h { background: color-mix(in srgb, #ffb020 14%, transparent); }
+/* Node editor › View as Code */
+.ne-code-tools { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 2px 8px; }
+.ne-code-tools small { color: var(--muted); font-size: 12px; }
+.ne-code-copy { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 12px; }
+.ne-code-copy svg { width: 16px; height: 16px; }
+.ne-code { background: #0f1117; border-radius: 12px; padding: 10px 0; }
+.ne-code-pre { margin: 0; font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: #d7dae0; white-space: pre; overflow-x: auto; -webkit-overflow-scrolling: touch; user-select: text; -webkit-user-select: text; }
+.ne-code-line { padding: 0 14px; min-width: max-content; border-radius: 4px; }
+.ne-code-line.has-node { cursor: pointer; }
+.ne-code-line.has-node:active { background: rgba(79,163,255,.18); }
+.ne-code .c-com { color: #7f8796; font-style: italic; }
+.ne-code .c-str { color: #a5d6a7; }
+.ne-code .c-num { color: #f7c06b; }
+.ne-code .c-kw { color: #c792ea; font-weight: 600; }
+.ne-code .c-var { color: #4fc3f7; }

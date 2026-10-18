@@ -3,7 +3,7 @@
 // App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and data become Compose code over a fixed
 // runtime (editor/native/kotlin/Pocket.kt); anything else is a TODO placeholder.
 import { appModel, PALETTES } from './appmodel.js';
-import { nativeReadme, names, listExtras } from './nativecode.js';
+import { nativeReadme, names, listExtras, pinArgs, placeOf, btnExtras } from './nativecode.js';
 import { pbxproj, plist } from './native.js';
 
 /** Versions that go together (built and checked with these). */
@@ -22,11 +22,28 @@ const ICON_K = { home: 'Home', search: 'Search', explore: 'Search', user: 'Perso
   trash: 'Delete', info: 'Info', menu: 'Menu', bookmark: 'Star', wallet: 'ShoppingCart', money: 'ShoppingCart', chart: 'Info', note: 'Edit', book: 'Info', music: 'PlayArrow', globe: 'Place', gamepad: 'PlayArrow', circle: 'CheckCircle' };
 const iconK = (n) => 'Icons.Filled.' + (ICON_K[String(n || '').toLowerCase()] || 'CheckCircle');
 
+const kf = (v) => `${+v}f`, kd = (v) => (Number.isInteger(+v) ? `${+v}.0` : String(+v));
+
 function kElement(x, ind, fill) {
   const pad = ' '.repeat(ind), mod = fill ? ', modifier = Modifier.weight(1f)' : '';
   switch (x.kind) {
-    case 'text': return `PText(${ks(x.value)}${x.size !== 16 ? `, size = ${Math.round(x.size)}` : ''}${x.weight !== '600' ? `, weight = ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color = ${ks(tokenColor(x.color))}` : ''})`;
-    case 'button': return `PButton(${ks(x.label)}${x.outlined ? `, look = ${/danger/.test(x.color) ? 'Look.Danger' : 'Look.Outlined'}` : ''}) { app.run(${ks(x.action)}, ${kv(x.value)}${x.amount !== 1 && x.amount != null ? `, ${kv(+x.amount || 0)}` : ''}) }`;
+    case 'text': return `PText(${ks(x.value)}${x.size !== 16 ? `, size = ${Math.round(x.size)}` : ''}${x.weight !== '600' ? `, weight = ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color = ${ks(tokenColor(x.color))}` : ''}${x.align && x.align !== 'left' ? `, align = ${ks(x.align)}` : ''})`;
+    case 'box': return `PBox(w = ${Math.round(x.w || 368)}, h = ${Math.round(x.h)}${x.radius ? `, radius = ${Math.round(x.radius)}` : ''}${tokenColor(x.fill) ? `, fill = ${ks(x.fill)}` : ''}${tokenColor(x.stroke) ? `, stroke = ${ks(x.stroke)}, strokeW = ${Math.round(x.strokeW || 1)}` : ''}${x.shadow ? ', shadow = true' : ''}${x.text ? `, text = ${ks(x.text.value)}, textSize = ${Math.round(x.text.size)}, textWeight = ${parseInt(x.text.weight, 10) || 600}${tokenColor(x.text.color) ? `, textColor = ${ks(x.text.color)}` : ''}` : ''}${x.row != null ? `, row = ${Math.round(x.row)}` : ''}${x.action ? `, onTap = { app.run(${ks(x.action.action)}, ${kv(x.action.value)}) }` : ''}${x.children.length ? `, pins = listOf(\n${x.children.map((c) => pad + '    ' + `Pin(${pinArgs(c.pin, ' = ', kf)}) { ${kElement(c, ind + 4, false)} }`).join(',\n')},\n${pad})` : ''})`;
+    case 'space': return `PSpace(${Math.round(x.h)})`;
+    case 'bar': return `PBar(${ks(x.var)}, max = ${kd(x.max)}, height = ${Math.round(x.h)}, fill = ${ks(tokenColor(x.fill) || '@accent')}, bg = ${ks(tokenColor(x.bg) || '@line')}, radius = ${Math.round(x.radius)})`;
+    case 'slider': return `PSlider(${ks(x.var)}, min = ${kd(x.min)}, max = ${kd(x.max)}, step = ${kd(x.step)})`;
+    case 'segmented': return `Segmented(${ks(x.var)}, listOf(${x.options.map(ks).join(', ')})${x.index ? ', index = true' : ''})`;
+    case 'chips': return `Chips(${ks(x.var)}, listOf(${x.options.map(ks).join(', ')}))`;
+    case 'dropdown': return `PDropdown(${ks(x.var)}, listOf(${x.options.map((o) => `${ks(o.label)} to ${ks(o.value)}`).join(', ')}), placeholder = ${ks(x.placeholder)})`;
+    case 'stepper': return `PStepper(${ks(x.var)}, min = ${kd(x.min)}, max = ${kd(x.max)}, step = ${kd(x.step)})`;
+    case 'rating': return `PRating(${ks(x.var)}, max = ${Math.round(x.max)})`;
+    case 'divider': return `PDivider(${x.label ? ks(x.label) : ''})`;
+    case 'avatar': return `PAvatar(${x.emoji ? `emoji = ${ks(x.emoji)}, ` : ''}size = ${Math.round(x.size)})`;
+    case 'banner': return `PBanner(tone = ${ks(x.tone)}, title = ${ks(x.title)}, text = ${ks(x.text)}, icon = ${ks(x.icon)})`;
+    case 'xpbar': return `XpBar(xpVar = ${ks(x.xpVar)}, levelVar = ${ks(x.levelVar)}, base = ${kd(x.base)}, growth = ${kd(x.growth)})`;
+    case 'steps': return `PSteps(${ks(x.var)}, listOf(${x.steps.map(ks).join(', ')}))`;
+    case 'spinner': return 'PSpinner()';
+    case 'button': return `PButton(${ks(x.label)}${x.plain ? ', look = Look.Plain' : x.outlined ? `, look = ${/danger/.test(x.color) ? 'Look.Danger' : 'Look.Outlined'}` : ''}${btnExtras({ ...x, h: x.h && Math.round(x.h), radius: x.radius != null ? Math.round(x.radius) : x.radius, size: x.size && Math.round(x.size) }, ' = ', ks)}) { app.run(${ks(x.action)}, ${kv(x.value)}${x.amount !== 1 && x.amount != null ? `, ${kv(+x.amount || 0)}` : ''}) }`;
     case 'list': return `RecordList(${ks(x.collection)}${mod}, title = ${ks(x.title)}${x.subtitle ? `, subtitle = ${ks(x.subtitle)}` : ''}${x.icon ? `, icon = ${ks(x.icon)}` : ''}${x.check ? `, check = ${ks(x.check)}` : ''}${x.search ? `, search = ${ks(x.search)}` : ''}${x.filter ? `, filter = ${ks(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort = ${ks(x.sort)}` : ''}${x.openPage ? `, openPage = ${ks(x.openPage)}` : ''}, empty = ${ks(x.empty)}${listExtras(x, ' = ', ks)})`;
     case 'form': return `RecordForm(${ks(x.collection)}${mod}${x.fields.length ? `, fields = listOf(${x.fields.map(ks).join(', ')})` : ''}, mode = FormMode.${{ new: 'NewRecord', edit: 'EditOpened', auto: 'Auto' }[x.mode]}, saveLabel = ${ks(x.saveLabel)}${x.after !== 'go back' ? `, after = ${ks(x.after)}` : ''}${x.page ? `, page = ${ks(x.page)}` : ''})`;
     case 'input': return `VarField(${ks(x.var)}${x.placeholder ? `, placeholder = ${ks(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard = ${ks(x.keyboard)}` : ''}${x.outlined ? ', outlined = true' : ''})`;
@@ -51,8 +68,8 @@ function kElement(x, ind, fill) {
 
 function kPage(p, fn, pkg) {
   const fills = p.items.some((x) => x.fill && (x.kind === 'list' || x.kind === 'form'));
-  const parts = p.items.map((x) => kElement(x, 8, fills && x.fill && (x.kind === 'list' || x.kind === 'form')));
-  const firstBtn = p.items.findIndex((x) => x.kind === 'button');
+  const parts = p.items.map((x) => { const pl = placeOf(x), code = kElement(x, 8, fills && x.fill && (x.kind === 'list' || x.kind === 'form')); return pl ? `Place(${kf(pl.fx)}, ${Math.round(pl.w)}) { ${code} }` : code; });
+  const firstBtn = p.items.findIndex((x) => x.kind === 'button' && x.pin?.fy === 1); // (buttons anchored to the bottom of the page sit at the bottom)
   if (!fills && firstBtn > 0) parts.splice(firstBtn, 0, 'Spacer(Modifier.weight(1f))');
   const scroll = !fills && firstBtn <= 0;
   const fab = p.fab ? `, fab = { app.run(${ks(p.fab.action)}, ${kv(p.fab.value)}) }` : '';

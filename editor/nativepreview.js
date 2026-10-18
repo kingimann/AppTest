@@ -45,7 +45,7 @@ function zoomer(root, box, phone) {
     }
     shown = Math.round(z * 100) / 100;
     root.style.setProperty('--npv-zoom', String(shown));
-    label.textContent = mode === 'fit' ? `Fit · ${Math.round(shown * 100)}%` : `${Math.round(shown * 100)}%`;
+    label.textContent = `${Math.round(shown * 100)}%`; label.classList.toggle('on', mode === 'fit'); label.title = mode === 'fit' ? 'Sized to fit (tap − or + to pick a size)' : 'Tap to fit the phone to the space';
   };
   label.onclick = () => { mode = 'fit'; apply(); };
   const step = (d) => { mode = Math.max(0.4, Math.min(2, Math.round((shown + d) * 10) / 10)); apply(); };
@@ -185,8 +185,28 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   // ---------- the app ----------
   function element(x, P, entry) {
     switch (x.kind) {
-      case 'text': return h('div', { class: 'npv-text', style: `font-size:${Math.round(x.size)}px;font-weight:${parseInt(x.weight, 10) || 600};color:${col(x.color, P) || P.text}` }, A.fill(x.value));
-      case 'button': return h('button', { class: 'npv-pbtn ' + (x.outlined ? (/danger/.test(x.color) ? 'danger' : 'outlined') : 'filled'), onclick: () => act(x.action, x.value, x.amount) }, A.fill(x.label));
+      case 'text': return h('div', { class: 'npv-text', style: `font-size:${Math.round(x.size)}px;font-weight:${parseInt(x.weight, 10) || 600};color:${col(x.color, P) || P.text};text-align:${x.align || 'left'}` }, A.fill(x.value));
+      case 'button': { // filled, outlined or plain (a link), in the project's colours
+        const look = x.plain ? 'plain' : x.outlined ? 'outlined' : 'filled', fg = col(x.color, P) || (look === 'filled' ? P.onAccent : P.accent);
+        const bg = look === 'filled' ? col(x.fill, P) || P.accent : look === 'outlined' && x.fill ? col(x.fill, P) || 'transparent' : 'transparent';
+        return h('button', { class: 'npv-pbtn ' + look, style: `min-height:${x.h || 52}px;border-radius:${x.radius ?? 16}px;font-size:${x.size || 17}px;background:${bg};color:${fg};${look === 'outlined' ? `border-color:${col(x.stroke, P) || fg}` : ''}`, onclick: () => act(x.action, x.value, x.amount) }, A.fill(x.label)); }
+      case 'box': return boxEl(x, P, entry);
+      case 'space': return h('div', { class: 'npv-space', style: `height:${Math.max(0, x.h - 12)}px` });
+      case 'bar': { const v = Math.max(0, Math.min(1, (num(A.vars[x.var]) || 0) / (x.max || 100))); return h('div', { class: 'npv-bar2', style: `height:${x.h}px;border-radius:${x.radius}px;background:${col(x.bg, P) || P.line}` }, h('i', { style: `width:${v * 100}%;background:${col(x.fill, P) || P.accent};border-radius:${x.radius}px` })); }
+      case 'slider': { const v = num(A.vars[x.var]) ?? x.min; return h('input', { class: 'npv-slider', type: 'range', min: x.min, max: x.max, step: x.step, value: v, 'data-k': 's:' + x.var, oninput: (e) => { A.set(x.var, +e.target.value); drawPhone(); } }); }
+      case 'segmented': { const cur = show(A.vars[x.var]); return h('div', { class: 'npv-segc' }, x.options.map((o, i) => h('button', { class: (x.index ? cur === String(i + 1) : cur === o) ? 'on' : '', onclick: () => { A.set(x.var, x.index ? i + 1 : o); drawPhone(); } }, o))); }
+      case 'chips': { const cur = show(A.vars[x.var]); return h('div', { class: 'npv-chips' }, x.options.map((o) => h('button', { class: 'npv-chip' + (cur === o ? ' on' : ''), onclick: () => { A.set(x.var, o); drawPhone(); } }, o))); }
+      case 'dropdown': return h('select', { class: 'npv-input npv-select', value: show(A.vars[x.var]), onchange: (e) => { A.set(x.var, e.target.value); drawPhone(); } }, h('option', { value: '', disabled: true }, x.placeholder), x.options.map((o) => h('option', { value: o.value, selected: show(A.vars[x.var]) === String(o.value) }, o.label)));
+      case 'stepper': { const v = num(A.vars[x.var]) ?? x.min, set = (d) => { A.set(x.var, Math.max(x.min, Math.min(x.max, v + d))); drawPhone(); };
+        return h('div', { class: 'npv-stepper' }, h('button', { 'aria-label': 'Less', onclick: () => set(-x.step) }, '−'), h('b', {}, show(v)), h('button', { 'aria-label': 'More', onclick: () => set(x.step) }, '+')); }
+      case 'rating': { const v = num(A.vars[x.var]) || 0; return h('div', { class: 'npv-rating' }, Array.from({ length: x.max }, (_, i) => h('button', { class: i < v ? 'on' : '', 'aria-label': `${i + 1} stars`, onclick: () => { A.set(x.var, i + 1); drawPhone(); } }, '★'))); }
+      case 'divider': return h('div', { class: 'npv-divider' }, x.label && h('span', {}, A.fill(x.label)));
+      case 'avatar': return h('div', { class: 'npv-avw' }, avatar(meName(), me(), x.size, x.emoji || undefined));
+      case 'banner': return h('div', { class: 'npv-banner2 ' + x.tone }, x.icon && h('span', {}, x.icon), h('div', {}, x.title && h('b', {}, A.fill(x.title)), x.text && h('div', {}, A.fill(x.text))));
+      case 'xpbar': { const lv = Math.max(1, num(A.vars[x.levelVar]) || 1), need = Math.round(x.base * Math.pow(x.growth, lv - 1)), xp = num(A.vars[x.xpVar]) || 0;
+        return h('div', { class: 'npv-xp' }, h('span', { class: 'npv-xplv' }, show(lv)), h('div', { class: 'npv-bar2', style: 'height:12px;border-radius:6px;flex:1' }, h('i', { style: `width:${Math.min(100, xp / need * 100)}%` })), h('small', {}, `${show(xp)} / ${need}`)); }
+      case 'steps': { const cur = Math.max(1, num(A.vars[x.var]) || 1); return h('div', { class: 'npv-steps' }, x.steps.map((t, i) => h('div', { class: i + 1 < cur ? 'done' : i + 1 === cur ? 'on' : '' }, h('i', {}, i + 1 < cur ? '✓' : i + 1), h('small', {}, t)))); }
+      case 'spinner': return h('div', { class: 'npv-spin' });
       case 'input': return h('div', { class: 'npv-field' + (x.keyboard === 'search' ? ' search' : '') + (x.outlined ? ' outlined' : '') }, x.keyboard === 'search' && svgIcon('search'),
         h('input', { 'data-k': 'v:' + x.var, type: x.keyboard === 'password' ? 'password' : x.keyboard === 'number' ? 'number' : 'text', placeholder: x.placeholder, value: show(A.vars[x.var]), oninput: (e) => { A.set(x.var, x.keyboard === 'number' ? +e.target.value || 0 : e.target.value); drawPhone(); } }));
       case 'toggle': { const on = A.vars[x.var] != null ? isOn(A.vars[x.var]) : x.var === 'darkMode' && dark(); return h('label', { class: 'npv-toggle' }, x.label ? h('span', {}, A.fill(x.label)) : h('span'), h('input', { type: 'checkbox', role: 'switch', checked: on, onchange: (e) => { A.set(x.var, e.target.checked); drawPhone(); } })); }
@@ -209,6 +229,33 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       default: return h('div', { class: 'npv-todo' }, h('b', {}, x.name), h('small', {}, `${x.type}: a TODO placeholder in the native code`));
     }
   }
+  // ---------- cards with things inside, laid out where the design puts them (as a share of the card's width, so it fits any phone) ----------
+  function boxEl(x, P, entry) {
+    const DW = x.w || 368, t = x.text;
+    return h('div', { class: 'npv-box' + (x.action ? ' tap' : ''), style: `height:${x.h}px;border-radius:${x.radius}px;background:${col(x.fill, P) || 'transparent'};${x.stroke ? `border:${x.strokeW || 1}px solid ${col(x.stroke, P) || P.line};` : ''}${x.shadow ? 'box-shadow:0 3px 12px rgba(0,0,0,.10);' : ''}`,
+      onclick: x.action ? () => act(x.action.action, x.action.value, x.action.amount) : null },
+      t && h('div', { class: 'npv-boxt', style: `font-size:${t.size}px;font-weight:${parseInt(t.weight, 10) || 600};color:${col(t.color, P) || P.text}` }, A.fill(t.value)),
+      x.children.map((c) => pinned(c, DW, P, entry, x.row)));
+  }
+  function pinned(c, DW, P, entry, gap) {
+    const q = c.pin || { fx: 0.5, fy: 0.5, x: 0, y: 0, w: 0, h: 0, align: 'center', m: -1, wrap: 0 }, pc = (v) => `${(v * 100).toFixed(3)}%`;
+    let st = `top:calc(${q.fy * 100}% + ${q.y}px);`, tr = 'translateY(-50%)';
+    if (q.cells && gap != null) { const cw = (DW - gap * (q.cells - 1)) / q.cells; st += `left:${pc((q.cell * (cw + gap) + q.m) / DW)};width:${pc((cw - 2 * q.m) / DW)};`; } // a cell of a row
+    else if (q.m >= 0) st += `left:${pc(q.m / DW)};right:${pc(q.m / DW)};`;
+    else if (q.w) st += `left:${pc(q.fx + (q.x - q.w / 2) / DW)};width:${pc(q.w / DW)};`;
+    else if (q.align === 'left') st += `left:${pc(q.fx + q.x / DW)};${q.wrap ? `max-width:${pc(q.wrap / DW)}` : 'right:3%'};text-align:left;`;
+    else if (q.align === 'right') st += `right:${pc(1 - q.fx - q.x / DW)};${q.wrap ? `max-width:${pc(q.wrap / DW)}` : 'left:3%'};text-align:right;`;
+    else { st += `left:${pc(q.fx + q.x / DW)};max-width:${q.wrap ? pc(q.wrap / DW) : '94%'};width:max-content;text-align:center;`; tr = 'translate(-50%,-50%)'; }
+    if (c.kind === 'slider') st += `height:${Math.max(q.h, 24)}px;`; else if (q.h) st += `height:${q.h}px;`;
+    return h('div', { class: 'npv-pin', style: st + `transform:${tr}` }, element(c, P, entry));
+  }
+  /** A thing narrower than the page, on its own line: left, centred or right, as in the design. */
+  function placed(x, P, entry) {
+    const el = element(x, P, entry), q = x.pin;
+    if (!q || q.m >= 0 || !q.w || !['box', 'button', 'image', 'avatar'].includes(x.kind)) return el;
+    return h('div', { class: 'npv-place', style: `justify-content:${q.fx === 0 ? 'flex-start' : q.fx === 1 ? 'flex-end' : 'center'}` }, h('div', { style: `width:${q.w}px;max-width:100%` }, el));
+  }
+
   function list(x, P) {
     const rows = A.query(x.collection, x.filter, x.search ? show(A.vars[x.search]) : '', x.sort);
     if (!rows.length) return h('div', { class: 'npv-empty' + (x.fill ? ' fill' : '') }, x.empty);
@@ -343,7 +390,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     const bubble = (r) => { const m = firstMedia(r.media); return h('button', { class: 'npv-story', onclick: () => { story = r; drawPhone(); } },
       h('span', { class: 'npv-ring' }, m && !isUrl(m) ? h('span', { class: 'npv-av', style: `width:60px;height:60px;font-size:28px;background:${hexOf(r.color) || avColor(r.author)}` }, m) : avatar(r.author, r.handle, 60)),
       h('small', {}, show(r.author).split(' ')[0])); };
-    return h('div', { class: 'npv-stories' }, x.yours && h('button', { class: 'npv-story you' }, h('span', { class: 'npv-you' }, avatar(meName(), me(), 64), h('i', {}, '+')), h('small', {}, 'Your story')),
+    return h('div', { class: 'npv-stories' }, x.yours && h('button', { class: 'npv-story you' }, h('span', { class: 'npv-you' }, avatar(meName(), me(), 60), h('i', {}, '+')), h('small', {}, 'Your story')),
       [...by.values()].filter((r) => show(r.handle) !== me()).map(bubble));
   }
   const chats = (coll) => { const by = new Map(); for (const r of A.query(coll, '', '', 'newest first')) if (r.chat && !by.has(r.chat)) by.set(r.chat, r); return [...by.values()]; };
@@ -444,7 +491,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     phone.replaceChildren(...[
       h('div', { class: 'npv-status' }, h('span', {}, '9:41'), h('span', {}, '▂▄▆ ◉')),
       model.appBar && appBar(page, stack, P),
-      h('div', { class: 'npv-page' + (fills ? ' fills' : ''), 'data-page': page.value }, page.items.map((x) => element(x, P, entry))),
+      h('div', { class: 'npv-page' + (fills ? ' fills' : ''), 'data-page': page.value }, page.items.map((x) => placed(x, P, entry))),
       page.fab && h('button', { class: 'npv-fab', 'aria-label': 'Add', onclick: () => act(page.fab.action, page.fab.value, page.fab.amount) }, '+'),
       overlay(),
       model.tabs.length && !stack.length && navBar(P),
@@ -501,7 +548,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   function close() { clearTimeout(soon); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); onClose?.(); }
   addEventListener('keydown', onKey);
   where.place(!!host);
-  return { root, close, get app() { return A; }, refresh, refreshSoon, set onClose(f) { onClose = f; } };
+  return { root, close, get app() { return A; }, refresh, refreshSoon, go: (pg) => { A.go(pg); drawPhone(); }, set onClose(f) { onClose = f; } };
 }
 
 // =============================================================================================================

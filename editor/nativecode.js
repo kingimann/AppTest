@@ -21,6 +21,14 @@ export const listExtras = (x, sep, q = (v) => (typeof v === 'string' ? JSON.stri
 ].filter(Boolean).map(([k, v]) => `, ${k}${sep}${v}`).join('');
 /** Colour tokens kept as text for the runtime to resolve ("@bar", "#1d9bf0"); anything else → the fallback. */
 const tok = (c, fb) => tokenColor(c) || fb;
+/** A button's own colours, height, corners and text size (when they differ from the defaults). */
+const btnExtras = (x, sep, q) => [tokenColor(x.fill) && !x.plain && ['bg', q(x.fill)], tokenColor(x.color) && ['fg', q(x.color)], tokenColor(x.stroke) && ['stroke', q(x.stroke)], x.h && x.h !== 52 && ['height', x.h], x.radius != null && x.radius !== 16 && ['radius', x.radius], x.size && x.size !== 17 && ['size', x.size]].filter(Boolean).map(([k, v]) => `, ${k}${sep}${v}`).join('');
+/** Where a thing sits in a card (see Pin in the runtimes). */
+export const pinArgs = (q, sep, f = (v) => v) => [['fx', f(q.fx)], ['fy', f(q.fy)], ['x', f(q.x)], ['y', f(q.y)], q.w && ['w', f(q.w)], q.h && ['h', f(q.h)], q.align && q.align !== 'center' && ['align', JSON.stringify(q.align)], q.m >= 0 && ['m', f(q.m)], q.wrap && ['wrap', f(q.wrap)], q.cells && ['cell', q.cell], q.cells && ['cells', q.cells]]
+  .filter(Boolean).map(([k, v]) => `${k}${sep}${v}`).join(', ');
+export { btnExtras, tok as tokOr };
+/** A thing narrower than the page, on its own line (left / centre / right). */
+export const placeOf = (x) => (x.pin && x.pin.m < 0 && x.pin.w && ['box', 'button', 'image', 'avatar'].includes(x.kind) ? { fx: x.pin.fx, w: x.pin.w } : null);
 
 /** Page class / file names that don't clash. */
 function names(model) {
@@ -38,8 +46,23 @@ function dartValue(v) { return lit(v) ?? (v == null ? 'null' : ds(v)); }
 function dartElement(x, ind) {
   const pad = ' '.repeat(ind);
   switch (x.kind) {
-    case 'text': return `PText(${ds(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ds(tokenColor(x.color))}` : ''})`;
-    case 'button': return `PButton(${ds(x.label)}, onTap: () => app.run(${ds(x.action)}, ${dartValue(x.value)}${x.amount !== 1 && x.amount != null ? `, ${+x.amount || 0}` : ''})${x.outlined ? `, look: ${/danger/.test(x.color) ? 'Look.danger' : 'Look.outlined'}` : ''})`;
+    case 'text': return `PText(${ds(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ds(tokenColor(x.color))}` : ''}${x.align && x.align !== 'left' ? `, align: ${ds(x.align)}` : ''})`;
+    case 'button': return `PButton(${ds(x.label)}, onTap: () => app.run(${ds(x.action)}, ${dartValue(x.value)}${x.amount !== 1 && x.amount != null ? `, ${+x.amount || 0}` : ''})${x.plain ? ', look: Look.plain' : x.outlined ? `, look: ${/danger/.test(x.color) ? 'Look.danger' : 'Look.outlined'}` : ''}${btnExtras(x, ': ', ds)})`;
+    case 'box': return `PBox(w: ${x.w || 368}, h: ${x.h}${x.radius ? `, radius: ${x.radius}` : ''}${tokenColor(x.fill) ? `, fill: ${ds(x.fill)}` : ''}${tokenColor(x.stroke) ? `, stroke: ${ds(x.stroke)}, strokeW: ${x.strokeW || 1}` : ''}${x.shadow ? ', shadow: true' : ''}${x.text ? `, text: ${ds(x.text.value)}, textSize: ${x.text.size}, textWeight: ${parseInt(x.text.weight, 10) || 600}${tokenColor(x.text.color) ? `, textColor: ${ds(x.text.color)}` : ''}` : ''}${x.row != null ? `, row: ${x.row}` : ''}${x.action ? `, onTap: () => app.run(${ds(x.action.action)}, ${dartValue(x.action.value)})` : ''}${x.children.length ? `, pins: [\n${x.children.map((c) => pad + '  ' + `Pin(${pinArgs(c.pin, ': ')}, child: ${dartElement(c, ind + 2)})`).join(',\n')},\n${pad}]` : ''})`;
+    case 'space': return `PSpace(${x.h})`;
+    case 'bar': return `PBar(${ds(x.var)}, max: ${x.max}, height: ${x.h}, fill: ${ds(tok(x.fill, '@accent'))}, bg: ${ds(tok(x.bg, '@line'))}, radius: ${x.radius})`;
+    case 'slider': return `PSlider(${ds(x.var)}, min: ${x.min}, max: ${x.max}, step: ${x.step})`;
+    case 'segmented': return `Segmented(${ds(x.var)}, [${x.options.map(ds).join(', ')}]${x.index ? ', index: true' : ''})`;
+    case 'chips': return `Chips(${ds(x.var)}, [${x.options.map(ds).join(', ')}])`;
+    case 'dropdown': return `PDropdown(${ds(x.var)}, [${x.options.map((o) => `(${ds(o.label)}, ${ds(o.value)})`).join(', ')}], placeholder: ${ds(x.placeholder)})`;
+    case 'stepper': return `PStepper(${ds(x.var)}, min: ${x.min}, max: ${x.max}, step: ${x.step})`;
+    case 'rating': return `PRating(${ds(x.var)}, max: ${x.max})`;
+    case 'divider': return `PDivider(${x.label ? `label: ${ds(x.label)}` : ''})`;
+    case 'avatar': return `PAvatar(${x.emoji ? `emoji: ${ds(x.emoji)}, ` : ''}size: ${x.size})`;
+    case 'banner': return `PBanner(tone: ${ds(x.tone)}, title: ${ds(x.title)}, text: ${ds(x.text)}, icon: ${ds(x.icon)})`;
+    case 'xpbar': return `XpBar(xpVar: ${ds(x.xpVar)}, levelVar: ${ds(x.levelVar)}, base: ${x.base}, growth: ${x.growth})`;
+    case 'steps': return `PSteps(${ds(x.var)}, [${x.steps.map(ds).join(', ')}])`;
+    case 'spinner': return 'const PSpinner()';
     case 'list': return `RecordList(collection: ${ds(x.collection)}, title: ${ds(x.title)}${x.subtitle ? `, subtitle: ${ds(x.subtitle)}` : ''}${x.icon ? `, icon: ${ds(x.icon)}` : ''}${x.check ? `, check: ${ds(x.check)}` : ''}${x.search ? `, search: ${ds(x.search)}` : ''}${x.filter ? `, filter: ${ds(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort: ${ds(x.sort)}` : ''}${x.openPage ? `, openPage: ${ds(x.openPage)}` : ''}, empty: ${ds(x.empty)}${listExtras(x, ': ', ds)})`;
     case 'form': return `RecordForm(collection: ${ds(x.collection)}${x.fields.length ? `, fields: [${x.fields.map(ds).join(', ')}]` : ''}, mode: FormMode.${{ new: 'newRecord', edit: 'editOpened', auto: 'auto' }[x.mode]}, saveLabel: ${ds(x.saveLabel)}${x.after !== 'go back' ? `, after: ${ds(x.after)}` : ''}${x.page ? `, page: ${ds(x.page)}` : ''})`;
     case 'input': return `VarField(${ds(x.var)}${x.placeholder ? `, placeholder: ${ds(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard: ${ds(x.keyboard)}` : ''}${x.outlined ? ', outlined: true' : ''})`;
@@ -67,13 +90,13 @@ function dartPage(p, cls, model) {
   const parts = [];
   let bottom = false;
   for (const x of p.items) {
-    const code = dartElement(x, 8);
+    const pl = placeOf(x), code = pl ? `Place(fx: ${pl.fx}, width: ${pl.w}, child: ${dartElement(x, 8)})` : dartElement(x, 8);
     if (fills && x.fill && (x.kind === 'list' || x.kind === 'form')) parts.push(`Expanded(child: ${code})`);
     else parts.push(code);
-    if (x.kind === 'button') bottom = true;
+    if (x.kind === 'button' && x.pin?.fy === 1) bottom = true; // (a button anchored to the bottom of the page)
   }
   // buttons that sit at the bottom of a page without a list: pushed down with a Spacer
-  if (!fills && bottom) { const i = parts.findIndex((_, k) => p.items[k].kind === 'button'); if (i > 0) parts.splice(i, 0, 'const Spacer()'); }
+  if (!fills && bottom) { const i = parts.findIndex((_, k) => p.items[k].kind === 'button' && p.items[k].pin?.fy === 1); if (i > 0) parts.splice(i, 0, 'const Spacer()'); }
   const scroll = !fills && !(bottom && parts.includes('const Spacer()'));
   const fab = p.fab ? `\n      fab: FloatingActionButton(onPressed: () => app.run(${ds(p.fab.action)}, ${dartValue(p.fab.value)}), child: const Icon(Icons.add)),` : '';
   return `// ${p.name}: made by Pocket Engine's native export. Change anything you like.
@@ -271,8 +294,23 @@ const swiftVal = (v) => (typeof v === 'number' ? `.n(${v})` : typeof v === 'bool
 function swiftElement(x, ind) {
   const pad = ' '.repeat(ind);
   switch (x.kind) {
-    case 'text': return `PText(${ss(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ss(tokenColor(x.color))}` : ''})`;
-    case 'button': return `PButton(${ss(x.label)}${x.outlined ? `, look: ${/danger/.test(x.color) ? '.danger' : '.outlined'}` : ''}) { app.run(${ss(x.action)}, ${swiftVal(x.value)}${x.amount !== 1 && x.amount != null ? `, ${+x.amount || 0}` : ''}) }`;
+    case 'text': return `PText(${ss(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ss(tokenColor(x.color))}` : ''}${x.align && x.align !== 'left' ? `, align: ${ss(x.align)}` : ''})`;
+    case 'box': return `PBox(w: ${x.w || 368}, h: ${x.h}${x.radius ? `, radius: ${x.radius}` : ''}${tokenColor(x.fill) ? `, fill: ${ss(x.fill)}` : ''}${tokenColor(x.stroke) ? `, stroke: ${ss(x.stroke)}, strokeW: ${x.strokeW || 1}` : ''}${x.shadow ? ', shadow: true' : ''}${x.text ? `, text: ${ss(x.text.value)}, textSize: ${x.text.size}, textWeight: ${parseInt(x.text.weight, 10) || 600}${tokenColor(x.text.color) ? `, textColor: ${ss(x.text.color)}` : ''}` : ''}${x.row != null ? `, row: ${x.row}` : ''}${x.action ? `, onTap: { app.run(${ss(x.action.action)}, ${swiftVal(x.action.value)}) }` : ''}${x.children.length ? `, pins: [\n${x.children.map((c) => pad + '    ' + `Pin(${pinArgs(c.pin, ': ')}) { ${swiftElement(c, ind + 4)} }`).join(',\n')},\n${pad}]` : ''})`;
+    case 'space': return `PSpace(${x.h})`;
+    case 'bar': return `PBar(${ss(x.var)}, max: ${x.max}, height: ${x.h}, fill: ${ss(tok(x.fill, '@accent'))}, bg: ${ss(tok(x.bg, '@line'))}, radius: ${x.radius})`;
+    case 'slider': return `PSlider(${ss(x.var)}, min: ${x.min}, max: ${x.max}, step: ${x.step})`;
+    case 'segmented': return `Segmented(${ss(x.var)}, [${x.options.map(ss).join(', ')}]${x.index ? ', index: true' : ''})`;
+    case 'chips': return `Chips(${ss(x.var)}, [${x.options.map(ss).join(', ')}])`;
+    case 'dropdown': return `PDropdown(${ss(x.var)}, [${x.options.map((o) => `(${ss(o.label)}, ${ss(o.value)})`).join(', ')}], placeholder: ${ss(x.placeholder)})`;
+    case 'stepper': return `PStepper(${ss(x.var)}, min: ${x.min}, max: ${x.max}, step: ${x.step})`;
+    case 'rating': return `PRating(${ss(x.var)}, max: ${x.max})`;
+    case 'divider': return `PDivider(${x.label ? ss(x.label) : ''})`;
+    case 'avatar': return `PAvatar(${x.emoji ? `emoji: ${ss(x.emoji)}, ` : ''}size: ${x.size})`;
+    case 'banner': return `PBanner(tone: ${ss(x.tone)}, title: ${ss(x.title)}, text: ${ss(x.text)}, icon: ${ss(x.icon)})`;
+    case 'xpbar': return `XpBar(xpVar: ${ss(x.xpVar)}, levelVar: ${ss(x.levelVar)}, base: ${x.base}, growth: ${x.growth})`;
+    case 'steps': return `PSteps(${ss(x.var)}, [${x.steps.map(ss).join(', ')}])`;
+    case 'spinner': return 'PSpinner()';
+    case 'button': return `PButton(${ss(x.label)}${x.plain ? ', look: .plain' : x.outlined ? `, look: ${/danger/.test(x.color) ? '.danger' : '.outlined'}` : ''}${btnExtras(x, ': ', ss)}) { app.run(${ss(x.action)}, ${swiftVal(x.value)}${x.amount !== 1 && x.amount != null ? `, ${+x.amount || 0}` : ''}) }`;
     case 'list': return `RecordList(collection: ${ss(x.collection)}, title: ${ss(x.title)}${x.subtitle ? `, subtitle: ${ss(x.subtitle)}` : ''}${x.right ? `, right: ${ss(x.right)}` : ''}${x.icon ? `, icon: ${ss(x.icon)}` : ''}${x.check ? `, check: ${ss(x.check)}` : ''}${x.search ? `, search: ${ss(x.search)}` : ''}${x.filter ? `, filter: ${ss(x.filter)}` : ''}${x.sort !== 'newest first' ? `, sort: ${ss(x.sort)}` : ''}${x.openPage ? `, openPage: ${ss(x.openPage)}` : ''}, empty: ${ss(x.empty)}${listExtras(x, ': ', ss, false)})`;
     case 'form': return `RecordForm(collection: ${ss(x.collection)}${x.fields.length ? `, fields: [${x.fields.map(ss).join(', ')}]` : ''}, mode: .${{ new: 'newRecord', edit: 'editOpened', auto: 'auto' }[x.mode]}, saveLabel: ${ss(x.saveLabel)}${x.after !== 'go back' ? `, after: ${ss(x.after)}` : ''}${x.page ? `, page: ${ss(x.page)}` : ''})`;
     case 'input': return `VarField(${ss(x.var)}${x.placeholder ? `, placeholder: ${ss(x.placeholder)}` : ''}${x.keyboard !== 'text' ? `, keyboard: ${ss(x.keyboard)}` : ''}${x.outlined ? ', outlined: true' : ''})`;
@@ -300,8 +338,8 @@ const swiftBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
 
 function swiftPage(p, cls, model) {
   const fills = p.items.some((x) => x.fill && (x.kind === 'list' || x.kind === 'form'));
-  const parts = p.items.map((x) => swiftElement(x, 12));
-  const firstBtn = p.items.findIndex((x) => x.kind === 'button');
+  const parts = p.items.map((x) => { const pl = placeOf(x), code = swiftElement(x, 12); return pl ? `Place(fx: ${pl.fx}, width: ${pl.w}) { ${code} }` : code; });
+  const firstBtn = p.items.findIndex((x) => x.kind === 'button' && x.pin?.fy === 1); // (buttons anchored to the bottom of the page sit at the bottom)
   if (!fills && firstBtn > 0) parts.splice(firstBtn, 0, 'Spacer()');
   const scroll = !fills && firstBtn <= 0;
   const fab = p.fab ? `, fab: (action: ${ss(p.fab.action)}, value: ${swiftVal(p.fab.value)})` : '';
@@ -313,12 +351,14 @@ struct ${cls}: View {
 
     var body: some View {
         PocketPage(title: ${ss(p.title)}, page: ${ss(p.value)}${scroll ? '' : ', scroll: false'}${fab}) {
-${parts.map((c) => '            ' + c).join('\n')}
+${(parts.length > 9 ? groups(parts, 8).map((g) => `Group {\n${g.map((c) => '                ' + c).join('\n')}\n            }`) : parts).map((c) => '            ' + c).join('\n')}
         }
     }
 }
 `;
 }
+/** SwiftUI takes up to 10 views in a block (iOS 16): longer pages go in Groups. */
+const groups = (a, n) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
 
 function swiftApp(model, N, appName) {
   const hex = (h) => '0x' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();

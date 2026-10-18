@@ -217,6 +217,8 @@ What becomes native code:
 | Data List (search, filter, sort, checkbox, open a page, swipe to delete) | `RecordList` |
 | Form (adds, or changes the opened record; text, numbers, dates, choices, yes/no) | `RecordForm` |
 | Text inputs, switches (Dark mode too), cards, plain lists, web pictures | native controls |
+| Cards, badges, picture boxes and menu rows with things inside (every Page Template: Welcome, Sign In, Settings, Dashboard, Pricing, FAQ, Game Shop, Levels, Leaderboard…) | `PBox`: the card's size, colours, corners and shadow, with each thing in it pinned where the design puts it (left, centred or right, scaled to the phone's width); rows share their width |
+| Slider, Segmented tabs, Chips, Dropdown, Stepper, Star Rating, Divider, Avatar, Banner, XP Bar, Steps, Spinner, Back Button, Animated Counter, progress bars, empty space | `PSlider`, `Segmented`, `Chips`, `PDropdown`, `PStepper`, `PRating`, `PDivider`, `PAvatar`, `PBanner`, `XpBar`, `PSteps`, `PSpinner`, `PBar`, `PSpace` |
 | Data collections and their sample records, Data Stats | `AppState`, saved on the phone |
 | Social: Feed (timeline, reels, grid; like, repost, save, tap an author for their profile), Composer, Stories, Inbox and Chat, Profile header, Marketplace (details, Message seller), Notifications, Saved, Friends / Who to follow, Achievements, Trending | `SocialFeed`, `Composer`, `Stories`, `Inbox`, `Chat`, `ProfileHeader`, `Marketplace`, `Activity`, `People`, `Achievements`, `Trending`, reading the same Posts, Messages, Stories, Listings, Profiles and Notifications collections |
 

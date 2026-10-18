@@ -447,37 +447,317 @@ class PocketPage extends StatelessWidget {
 
 /// Text with {variables} filled in.
 class PText extends StatelessWidget {
-  const PText(this.text, {super.key, this.size = 16, this.weight = 600, this.color});
+  const PText(this.text, {super.key, this.size = 16, this.weight = 600, this.color, this.align = 'left'});
   final String text;
   final double size;
   final int weight;
   final String? color;
+  final String align; // left, center or right
   @override
   Widget build(BuildContext context) {
-    final p = pal(context);
-    return Text(app.fill(text), style: TextStyle(fontSize: size, fontWeight: FontWeight.values[((weight ~/ 100) - 1).clamp(0, 8)], color: p.resolve(color) ?? p.text));
+    final p = pal(context), a = align == 'center' ? TextAlign.center : align == 'right' ? TextAlign.right : TextAlign.left;
+    return SizedBox(
+      width: double.infinity,
+      child: Text(app.fill(text), textAlign: a, style: TextStyle(fontSize: size, height: 1.2, fontWeight: FontWeight.values[((weight ~/ 100) - 1).clamp(0, 8)], color: p.resolve(color) ?? p.text)),
+    );
   }
 }
 
 enum Look { filled, outlined, danger, plain }
 
+/// A button in the project's look: filled, outlined or plain (a link), with its own colours, height and corners.
 class PButton extends StatelessWidget {
-  const PButton(this.label, {super.key, required this.onTap, this.look = Look.filled});
+  const PButton(this.label, {super.key, required this.onTap, this.look = Look.filled, this.bg, this.fg, this.stroke, this.height = 52, this.radius = 16, this.size = 17});
   final String label;
   final VoidCallback onTap;
   final Look look;
+  final String? bg, fg, stroke;
+  final double height, radius, size;
   @override
   Widget build(BuildContext context) {
-    final p = pal(context), text = Text(app.fill(label), style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800));
-    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(16));
-    const size = Size.fromHeight(52);
+    final p = pal(context), text = Text(app.fill(label), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: size, fontWeight: FontWeight.w800));
+    final shape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius));
+    final min = Size.fromHeight(height);
+    final f = p.resolve(fg);
     return switch (look) {
-      Look.filled => FilledButton(onPressed: onTap, style: FilledButton.styleFrom(minimumSize: size, shape: shape, backgroundColor: p.accent, foregroundColor: p.onAccent), child: text),
-      Look.danger => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(minimumSize: size, shape: shape, foregroundColor: p.danger, side: BorderSide(color: p.danger, width: 2), backgroundColor: p.card), child: text),
-      Look.outlined => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(minimumSize: size, shape: shape, foregroundColor: p.accent, side: BorderSide(color: p.accent, width: 2)), child: text),
-      Look.plain => TextButton(onPressed: onTap, child: text),
+      Look.filled => FilledButton(onPressed: onTap, style: FilledButton.styleFrom(minimumSize: min, shape: shape, padding: const EdgeInsets.symmetric(horizontal: 8), backgroundColor: p.resolve(bg) ?? p.accent, foregroundColor: f ?? p.onAccent), child: text),
+      Look.danger => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(minimumSize: min, shape: shape, foregroundColor: f ?? p.danger, side: BorderSide(color: p.resolve(stroke) ?? p.danger, width: 2), backgroundColor: p.resolve(bg) ?? p.card), child: text),
+      Look.outlined => OutlinedButton(onPressed: onTap, style: OutlinedButton.styleFrom(minimumSize: min, shape: shape, padding: const EdgeInsets.symmetric(horizontal: 8), foregroundColor: f ?? p.accent, backgroundColor: p.resolve(bg), side: BorderSide(color: p.resolve(stroke) ?? f ?? p.accent, width: 2)), child: text),
+      Look.plain => TextButton(onPressed: onTap, style: TextButton.styleFrom(minimumSize: min, foregroundColor: f ?? p.accent), child: text),
     };
   }
+}
+
+/// Where a thing sits in a card (PBox): the anchor (0, ½ or 1 of the width / height), the offset from it, its size and how its text lines up,
+/// all in the design's sizes (the card scales them to the phone's width).
+class Pin {
+  const Pin({this.fx = 0.5, this.fy = 0.5, this.x = 0, this.y = 0, this.w = 0, this.h = 0, this.align = 'center', this.m = -1, this.wrap = 0, this.cell = -1, this.cells = 0, required this.child});
+  final double fx, fy, x, y, w, h, m, wrap;
+  final String align;
+  final int cell, cells;
+  final Widget child;
+}
+
+/// A card, badge, picture box or tappable row: its size, colours, corners, its own centred text, and the things in it where the design puts them.
+class PBox extends StatelessWidget {
+  const PBox({super.key, this.w = 368, this.h = 48, this.radius = 0, this.fill = '', this.stroke = '', this.strokeW = 0, this.shadow = false, this.text = '', this.textSize = 16, this.textWeight = 600, this.textColor = '', this.row, this.onTap, this.pins = const []});
+  final double w, h, radius, strokeW, textSize;
+  final String fill, stroke, text, textColor;
+  final int textWeight;
+  final bool shadow;
+  final double? row; // a row: its stretched things share the width, this far apart
+  final VoidCallback? onTap;
+  final List<Pin> pins;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context);
+    final body = LayoutBuilder(builder: (context, c) {
+      final double dw = w > 0 ? w : 368, width = c.hasBoundedWidth ? c.maxWidth : dw, s = width / dw;
+      return SizedBox(width: width, height: h, child: Stack(clipBehavior: Clip.none, children: [
+        if (text.isNotEmpty) Center(child: Text(app.fill(text), textAlign: TextAlign.center, style: TextStyle(fontSize: textSize, height: 1.15, fontWeight: FontWeight.values[((textWeight ~/ 100) - 1).clamp(0, 8)], color: p.resolve(textColor) ?? p.text))),
+        for (final q in pins) _place(q, width, s),
+      ]));
+    });
+    final deco = BoxDecoration(
+      color: p.resolve(fill),
+      borderRadius: BorderRadius.circular(radius),
+      border: stroke.isEmpty ? null : Border.all(color: p.resolve(stroke) ?? p.line, width: strokeW > 0 ? strokeW : 1),
+      boxShadow: shadow ? const [BoxShadow(color: Color(0x1A000000), blurRadius: 12, offset: Offset(0, 3))] : null,
+    );
+    final card = Container(height: h, decoration: deco, clipBehavior: Clip.antiAlias, child: body);
+    return onTap == null ? card : Material(color: Colors.transparent, child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(radius), child: card));
+  }
+
+  Widget _place(Pin q, double width, double s) {
+    final px = q.fx * width + q.x * s, top = q.fy * h + q.y;
+    double left, wd;
+    if (q.cells > 0 && row != null) { final cw = (width - row! * s * (q.cells - 1)) / q.cells; left = q.cell * (cw + row! * s) + q.m * s; wd = cw - 2 * q.m * s; }
+    else if (q.m >= 0) { left = q.m * s; wd = width - 2 * q.m * s; }
+    else if (q.w > 0) { wd = q.w * s; left = px - wd / 2; }
+    else if (q.align == 'left') { wd = (q.wrap > 0 ? q.wrap * s : width) .clamp(0, width - px - 2).toDouble(); left = px; }
+    else if (q.align == 'right') { wd = (q.wrap > 0 ? q.wrap * s : width).clamp(0, px - 2).toDouble(); left = px - wd; }
+    else { final half = (px < width - px ? px : width - px) - 2; wd = q.wrap > 0 && q.wrap * s < 2 * half ? q.wrap * s : 2 * half; left = px - wd / 2; }
+    return Positioned(
+      left: left, top: top, width: wd < 0 ? 0 : wd,
+      child: FractionalTranslation(translation: const Offset(0, -0.5), child: q.h > 0 ? SizedBox(height: q.h, child: q.child) : q.child),
+    );
+  }
+}
+
+/// A thing narrower than the page on its own line: left, centred or right, as in the design.
+class Place extends StatelessWidget {
+  const Place({super.key, this.fx = 0.5, required this.width, required this.child});
+  final double fx, width;
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Align(alignment: Alignment(fx * 2 - 1, 0), child: ConstrainedBox(constraints: BoxConstraints(maxWidth: width), child: SizedBox(width: double.infinity, child: child)));
+}
+
+/// Room between things.
+class PSpace extends StatelessWidget {
+  const PSpace(this.h, {super.key});
+  final double h;
+  @override
+  Widget build(BuildContext context) => SizedBox(height: h > 12 ? h - 12 : 0);
+}
+
+/// A bar that fills from a variable (XP, health…).
+class PBar extends StatelessWidget {
+  const PBar(this.variable, {super.key, this.max = 100, this.height = 12, this.fill = '@accent', this.bg = '@line', this.radius = 6});
+  final String variable, fill, bg;
+  final double max, height, radius;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), v = (nv(app.get(variable)) / (max == 0 ? 1 : max)).clamp(0.0, 1.0).toDouble();
+    return ClipRRect(borderRadius: BorderRadius.circular(radius), child: SizedBox(height: height, child: Stack(children: [
+      Positioned.fill(child: ColoredBox(color: p.resolve(bg) ?? p.line)),
+      FractionallySizedBox(widthFactor: v, heightFactor: 1, child: ColoredBox(color: p.resolve(fill) ?? p.accent)),
+    ])));
+  }
+}
+
+/// A slider for a number variable.
+class PSlider extends StatelessWidget {
+  const PSlider(this.variable, {super.key, this.min = 0, this.max = 100, this.step = 1});
+  final String variable;
+  final double min, max, step;
+  @override
+  Widget build(BuildContext context) {
+    final v = nv(app.get(variable)).toDouble().clamp(min, max).toDouble();
+    return Slider(value: v, min: min, max: max, divisions: step > 0 ? ((max - min) / step).round().clamp(1, 1000) : null, onChanged: (x) => app.set(variable, x));
+  }
+}
+
+/// Segmented tabs: pick one (keeps its text, or its position 1, 2, 3…).
+class Segmented extends StatelessWidget {
+  const Segmented(this.variable, this.options, {super.key, this.index = false});
+  final String variable;
+  final List<String> options;
+  final bool index;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), cur = AppState.show(app.get(variable));
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(color: p.field, borderRadius: BorderRadius.circular(12)),
+      child: Row(children: [
+        for (var i = 0; i < options.length; i++)
+          Expanded(child: GestureDetector(
+            onTap: () => app.set(variable, index ? i + 1 : options[i]),
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 9),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: (index ? cur == '${i + 1}' : cur == options[i]) ? p.accent : Colors.transparent, borderRadius: BorderRadius.circular(10)),
+              child: Text(options[i], maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, color: (index ? cur == '${i + 1}' : cur == options[i]) ? p.onAccent : p.sub)),
+            ),
+          )),
+      ]),
+    );
+  }
+}
+
+/// Chips: pick one.
+class Chips extends StatelessWidget {
+  const Chips(this.variable, this.options, {super.key});
+  final String variable;
+  final List<String> options;
+  @override
+  Widget build(BuildContext context) {
+    final cur = AppState.show(app.get(variable));
+    return Wrap(spacing: 8, runSpacing: 8, children: [for (final o in options) ChoiceChip(label: Text(o), selected: cur == o, onSelected: (_) => app.set(variable, o))]);
+  }
+}
+
+/// A drop-down list: label | value lines.
+class PDropdown extends StatelessWidget {
+  const PDropdown(this.variable, this.options, {super.key, this.placeholder = 'Choose…'});
+  final String variable, placeholder;
+  final List<(String, String)> options;
+  @override
+  Widget build(BuildContext context) {
+    final cur = AppState.show(app.get(variable));
+    return DropdownButtonFormField<String>(
+      initialValue: options.any((o) => o.$2 == cur) ? cur : null,
+      hint: Text(placeholder),
+      items: [for (final o in options) DropdownMenuItem(value: o.$2, child: Text(o.$1))],
+      onChanged: (v) => app.set(variable, v),
+    );
+  }
+}
+
+/// − number +
+class PStepper extends StatelessWidget {
+  const PStepper(this.variable, {super.key, this.min = 0, this.max = 10, this.step = 1});
+  final String variable;
+  final num min, max, step;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), v = nv(app.get(variable));
+    Widget b(String t, num d) => IconButton.filled(onPressed: () => app.set(variable, (v + d).clamp(min, max)), style: IconButton.styleFrom(backgroundColor: p.accent, foregroundColor: p.onAccent), icon: Text(t, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)));
+    return Row(mainAxisSize: MainAxisSize.min, children: [b('−', -step), SizedBox(width: 48, child: Text(AppState.show(v), textAlign: TextAlign.center, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800))), b('+', step)]);
+  }
+}
+
+/// Tap a star.
+class PRating extends StatelessWidget {
+  const PRating(this.variable, {super.key, this.max = 5});
+  final String variable;
+  final int max;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), v = nv(app.get(variable));
+    return Row(mainAxisSize: MainAxisSize.min, children: [for (var i = 0; i < max; i++) GestureDetector(onTap: () => app.set(variable, i + 1), child: Text('★', style: TextStyle(fontSize: 30, color: i < v ? const Color(0xFFF5B301) : p.line)))]);
+  }
+}
+
+/// A thin line, with a word in the middle.
+class PDivider extends StatelessWidget {
+  const PDivider({super.key, this.label = ''});
+  final String label;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context);
+    if (label.isEmpty) return Divider(color: p.line, height: 1);
+    return Row(children: [Expanded(child: Divider(color: p.line)), Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text(app.fill(label), style: TextStyle(color: p.sub, fontSize: 13))), Expanded(child: Divider(color: p.line))]);
+  }
+}
+
+/// A notice: info, success, warning or error.
+class PBanner extends StatelessWidget {
+  const PBanner({super.key, this.tone = 'info', this.title = '', this.text = '', this.icon = ''});
+  final String tone, title, text, icon;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context);
+    final (bg, fg) = switch (tone) { 'warning' => (const Color(0xFFFFF4D6), const Color(0xFF7A5200)), 'error' => (const Color(0xFFFFE1E1), const Color(0xFF8A1C1C)), 'success' => (const Color(0xFFDDF6E8), const Color(0xFF145C34)), _ => (p.accent.withValues(alpha: 0.14), p.text) };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(14)),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (icon.isNotEmpty) Padding(padding: const EdgeInsets.only(right: 10), child: Text(icon, style: const TextStyle(fontSize: 18))),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (title.isNotEmpty) Text(app.fill(title), style: TextStyle(fontWeight: FontWeight.w800, color: fg)),
+          if (text.isNotEmpty) Text(app.fill(text), style: TextStyle(color: fg)),
+        ])),
+      ]),
+    );
+  }
+}
+
+/// Level badge, XP bar and xp / needed (each level needs base × growth^(level − 1)).
+class XpBar extends StatelessWidget {
+  const XpBar({super.key, this.xpVar = 'xp', this.levelVar = 'playerLevel', this.base = 100, this.growth = 1.4});
+  final String xpVar, levelVar;
+  final double base, growth;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), lv = nv(app.get(levelVar)) < 1 ? 1 : nv(app.get(levelVar)).toInt(), xp = nv(app.get(xpVar));
+    var need = base;
+    for (var i = 1; i < lv; i++) { need *= growth; }
+    return Row(children: [
+      CircleAvatar(radius: 15, backgroundColor: p.accent, child: Text('$lv', style: TextStyle(color: p.onAccent, fontWeight: FontWeight.w800))),
+      const SizedBox(width: 10),
+      Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(6), child: LinearProgressIndicator(value: (xp / need).clamp(0, 1).toDouble(), minHeight: 12, color: p.accent, backgroundColor: p.line))),
+      const SizedBox(width: 10),
+      Text('${AppState.show(xp)} / ${need.round()}', style: TextStyle(color: p.sub, fontWeight: FontWeight.w700)),
+    ]);
+  }
+}
+
+/// Numbered steps (the one in the variable is lit).
+class PSteps extends StatelessWidget {
+  const PSteps(this.variable, this.steps, {super.key});
+  final String variable;
+  final List<String> steps;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), cur = nv(app.get(variable)) < 1 ? 1 : nv(app.get(variable));
+    return Row(children: [
+      for (var i = 0; i < steps.length; i++)
+        Expanded(child: Column(children: [
+          CircleAvatar(radius: 14, backgroundColor: i + 1 <= cur ? p.accent : p.line, child: Text(i + 1 < cur ? '✓' : '${i + 1}', style: TextStyle(color: i + 1 <= cur ? p.onAccent : p.sub, fontWeight: FontWeight.w800, fontSize: 13))),
+          const SizedBox(height: 4),
+          Text(steps[i], style: TextStyle(color: i + 1 == cur ? p.text : p.sub, fontSize: 12, fontWeight: i + 1 == cur ? FontWeight.w700 : FontWeight.w500)),
+        ])),
+    ]);
+  }
+}
+
+/// Loading.
+class PSpinner extends StatelessWidget {
+  const PSpinner({super.key});
+  @override
+  Widget build(BuildContext context) => const Center(child: CircularProgressIndicator());
+}
+
+/// Your picture: an emoji, or the initials of {playerName}.
+class PAvatar extends StatelessWidget {
+  const PAvatar({super.key, this.emoji = '', this.size = 64});
+  final String emoji;
+  final double size;
+  @override
+  Widget build(BuildContext context) => Center(child: Avatar(meName, me, size: size, label: emoji.isEmpty ? null : emoji));
 }
 
 /// A card with things side by side (a settings row, a summary).
@@ -955,10 +1235,12 @@ class _SocialFeedState extends State<SocialFeed> {
         const SizedBox(width: 10),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           GestureDetector(onTap: open, child: Row(children: [
-            Flexible(child: Text(sv(r, 'author'), maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text))),
-            if (isOn(r['verified'])) Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.verified, size: 17, color: p.accent)),
-            const SizedBox(width: 4),
-            Expanded(child: Text(sub, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.sub, fontSize: 15))),
+            // name ✓ @handle · 9m on one line (the name first, the rest cut short when it doesn't fit), ••• at the right edge
+            Expanded(child: Text.rich(TextSpan(children: [
+              TextSpan(text: sv(r, 'author'), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: p.text)),
+              if (isOn(r['verified'])) WidgetSpan(alignment: PlaceholderAlignment.middle, child: Padding(padding: const EdgeInsets.only(left: 3), child: Icon(Icons.verified, size: 17, color: p.accent))),
+              TextSpan(text: '  $sub', style: TextStyle(color: p.sub, fontSize: 15)),
+            ]), maxLines: 1, overflow: TextOverflow.ellipsis)),
             Icon(Icons.more_horiz, size: 20, color: p.sub),
           ])),
           const SizedBox(height: 4),

@@ -465,11 +465,14 @@ struct PText: View {
     var size: CGFloat = 16
     var weight: Int = 600
     var color: String? = nil
-    init(_ text: String, size: CGFloat = 16, weight: Int = 600, color: String? = nil) { self.text = text; self.size = size; self.weight = weight; self.color = color }
+    var align = "left"
+    init(_ text: String, size: CGFloat = 16, weight: Int = 600, color: String? = nil, align: String = "left") { self.text = text; self.size = size; self.weight = weight; self.color = color; self.align = align }
     var body: some View {
         let p = app.palette(scheme)
         let w: Font.Weight = weight >= 900 ? .black : weight >= 800 ? .heavy : weight >= 700 ? .bold : weight >= 600 ? .semibold : weight >= 500 ? .medium : .regular
-        Text(app.fill(text)).font(.system(size: size, weight: w)).foregroundColor(p.resolve(color) ?? p.text).frame(maxWidth: .infinity, alignment: .leading)
+        Text(app.fill(text)).font(.system(size: size, weight: w)).foregroundColor(p.resolve(color) ?? p.text)
+            .multilineTextAlignment(align == "center" ? .center : align == "right" ? .trailing : .leading)
+            .frame(maxWidth: .infinity, alignment: align == "center" ? .center : align == "right" ? .trailing : .leading)
     }
 }
 
@@ -480,18 +483,314 @@ struct PButton: View {
     @Environment(\.colorScheme) var scheme
     let label: String
     var look: Look = .filled
+    var bg: String? = nil, fg: String? = nil, stroke: String? = nil
+    var height: CGFloat = 52, radius: CGFloat = 16, size: CGFloat = 17
     let action: () -> Void
-    init(_ label: String, look: Look = .filled, action: @escaping () -> Void) { self.label = label; self.look = look; self.action = action }
+    init(_ label: String, look: Look = .filled, bg: String? = nil, fg: String? = nil, stroke: String? = nil, height: CGFloat = 52, radius: CGFloat = 16, size: CGFloat = 17, action: @escaping () -> Void) {
+        self.label = label; self.look = look; self.bg = bg; self.fg = fg; self.stroke = stroke; self.height = height; self.radius = radius; self.size = size; self.action = action
+    }
     var body: some View {
         let p = app.palette(scheme)
+        let f = p.resolve(fg) ?? (look == .filled ? p.onAccent : look == .danger ? p.danger : p.accent)
+        let fill = look == .filled ? (p.resolve(bg) ?? p.accent) : look == .plain ? Color.clear : (p.resolve(bg) ?? (look == .danger ? p.card : Color.clear))
+        let line = look == .danger ? (p.resolve(stroke) ?? p.danger) : look == .outlined ? (p.resolve(stroke) ?? f) : Color.clear
         Button(action: action) {
-            Text(app.fill(label)).font(.system(size: 17, weight: .heavy)).frame(maxWidth: .infinity, minHeight: 52)
-                .foregroundColor(look == .filled ? p.onAccent : look == .danger ? p.danger : p.accent)
-                .background(RoundedRectangle(cornerRadius: 16).fill(look == .filled ? p.accent : look == .plain ? Color.clear : p.card))
-                .overlay(RoundedRectangle(cornerRadius: 16).stroke(look == .danger ? p.danger : look == .outlined ? p.accent : Color.clear, lineWidth: 2))
+            Text(app.fill(label)).font(.system(size: size, weight: .heavy)).lineLimit(1).frame(maxWidth: .infinity, minHeight: height)
+                .foregroundColor(f)
+                .background(RoundedRectangle(cornerRadius: radius).fill(fill))
+                .overlay(RoundedRectangle(cornerRadius: radius).stroke(line, lineWidth: 2))
         }
         .buttonStyle(.plain)
     }
+}
+
+/// Where a thing sits in a card (PBox): the anchor (0, ½ or 1 of the width / height), the offset from it, its size and how its text lines up,
+/// all in the design's sizes (the card scales them to the phone's width).
+struct Pin {
+    var fx: CGFloat = 0.5, fy: CGFloat = 0.5, x: CGFloat = 0, y: CGFloat = 0, w: CGFloat = 0, h: CGFloat = 0
+    var align = "center"
+    var m: CGFloat = -1, wrap: CGFloat = 0
+    var cell = -1, cells = 0
+    let view: AnyView
+    init<V: View>(fx: CGFloat = 0.5, fy: CGFloat = 0.5, x: CGFloat = 0, y: CGFloat = 0, w: CGFloat = 0, h: CGFloat = 0, align: String = "center", m: CGFloat = -1, wrap: CGFloat = 0, cell: Int = -1, cells: Int = 0, @ViewBuilder _ content: () -> V) {
+        self.fx = fx; self.fy = fy; self.x = x; self.y = y; self.w = w; self.h = h; self.align = align; self.m = m; self.wrap = wrap; self.cell = cell; self.cells = cells; self.view = AnyView(content())
+    }
+}
+
+/// A card, badge, picture box or tappable row: its size, colours, corners, its own centred text, and the things in it where the design puts them.
+struct PBox: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var w: CGFloat = 368, h: CGFloat = 48, radius: CGFloat = 0
+    var fill = "", stroke = ""
+    var strokeW: CGFloat = 0
+    var shadow = false
+    var text = ""
+    var textSize: CGFloat = 16
+    var textWeight = 600
+    var textColor = ""
+    var row: CGFloat? = nil
+    var onTap: (() -> Void)? = nil
+    var pins: [Pin] = []
+
+    /// A pin's left edge and width in a card this wide.
+    func frame(_ q: Pin, _ width: CGFloat) -> (CGFloat, CGFloat) {
+        let s = width / (w > 0 ? w : 368), px = q.fx * width + q.x * s
+        if q.cells > 0, let g = row { let cw = (width - g * s * CGFloat(q.cells - 1)) / CGFloat(q.cells); return (CGFloat(q.cell) * (cw + g * s) + q.m * s, cw - 2 * q.m * s) }
+        if q.m >= 0 { return (q.m * s, width - 2 * q.m * s) }
+        if q.w > 0 { return (px - q.w * s / 2, q.w * s) }
+        if q.align == "left" { let wd = min(q.wrap > 0 ? q.wrap * s : width, width - px - 2); return (px, wd) }
+        if q.align == "right" { let wd = min(q.wrap > 0 ? q.wrap * s : width, px - 2); return (px - wd, wd) }
+        let half = min(px, width - px) - 2, wd = q.wrap > 0 && q.wrap * s < 2 * half ? q.wrap * s : 2 * half
+        return (px - wd / 2, wd)
+    }
+
+    var body: some View {
+        let p = app.palette(scheme)
+        let tw: Font.Weight = textWeight >= 800 ? .heavy : textWeight >= 700 ? .bold : textWeight >= 600 ? .semibold : .regular
+        GeometryReader { g in
+            ZStack(alignment: .topLeading) {
+                if !text.isEmpty { Text(app.fill(text)).font(.system(size: textSize, weight: tw)).foregroundColor(p.resolve(textColor) ?? p.text).multilineTextAlignment(.center).frame(width: g.size.width, height: h) }
+                ForEach(pins.indices, id: \.self) { i in
+                    let q = pins[i], f = frame(q, g.size.width)
+                    q.view
+                        .frame(width: max(0, f.1), height: q.h > 0 ? q.h : nil, alignment: q.align == "left" ? .leading : q.align == "right" ? .trailing : .center)
+                        .position(x: f.0 + max(0, f.1) / 2, y: q.fy * h + q.y)
+                }
+            }
+        }
+        .frame(height: h)
+        .background(RoundedRectangle(cornerRadius: radius).fill(p.resolve(fill) ?? Color.clear).shadow(color: shadow ? .black.opacity(0.1) : .clear, radius: 6, y: 3))
+        .overlay(RoundedRectangle(cornerRadius: radius).stroke(stroke.isEmpty ? Color.clear : (p.resolve(stroke) ?? p.line), lineWidth: strokeW > 0 ? strokeW : 1))
+        .clipShape(RoundedRectangle(cornerRadius: radius))
+        .contentShape(Rectangle())
+        .onTapGesture { onTap?() }
+    }
+}
+
+/// A thing narrower than the page on its own line: left, centred or right, as in the design.
+struct Place<Content: View>: View {
+    var fx: CGFloat = 0.5
+    let width: CGFloat
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        HStack(spacing: 0) {
+            if fx > 0.25 { Spacer(minLength: 0) }
+            content().frame(maxWidth: width)
+            if fx < 0.75 { Spacer(minLength: 0) }
+        }
+    }
+}
+
+/// Room between things.
+struct PSpace: View {
+    let h: CGFloat
+    init(_ h: CGFloat) { self.h = h }
+    var body: some View { Color.clear.frame(height: max(0, h - 12)) }
+}
+
+/// A bar that fills from a variable (XP, health…).
+struct PBar: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    var max: Double = 100, height: CGFloat = 12
+    var fill = "@accent", bg = "@line"
+    var radius: CGFloat = 6
+    init(_ variable: String, max: Double = 100, height: CGFloat = 12, fill: String = "@accent", bg: String = "@line", radius: CGFloat = 6) { self.variable = variable; self.max = max; self.height = height; self.fill = fill; self.bg = bg; self.radius = radius }
+    var body: some View {
+        let p = app.palette(scheme), v = Swift.min(1, Swift.max(0, (app.get(variable)?.number ?? 0) / (max == 0 ? 1 : max)))
+        GeometryReader { g in
+            ZStack(alignment: .leading) {
+                Rectangle().fill(p.resolve(bg) ?? p.line)
+                Rectangle().fill(p.resolve(fill) ?? p.accent).frame(width: g.size.width * v)
+            }
+        }
+        .frame(height: height).clipShape(RoundedRectangle(cornerRadius: radius))
+    }
+}
+
+/// A slider for a number variable.
+struct PSlider: View {
+    @EnvironmentObject var app: AppState
+    let variable: String
+    var min: Double = 0, max: Double = 100, step: Double = 1
+    init(_ variable: String, min: Double = 0, max: Double = 100, step: Double = 1) { self.variable = variable; self.min = min; self.max = max; self.step = step }
+    var body: some View {
+        Slider(value: Binding(get: { Swift.min(max, Swift.max(min, app.get(variable)?.number ?? min)) }, set: { app.set(variable, .n($0)) }), in: min...max, step: step > 0 ? step : 1)
+    }
+}
+
+/// Segmented tabs: pick one (keeps its text, or its position 1, 2, 3…).
+struct Segmented: View {
+    @EnvironmentObject var app: AppState
+    let variable: String, options: [String]
+    var index = false
+    init(_ variable: String, _ options: [String], index: Bool = false) { self.variable = variable; self.options = options; self.index = index }
+    var body: some View {
+        Picker("", selection: Binding(get: { app.get(variable)?.text ?? "" }, set: { app.set(variable, index ? .n(Double($0) ?? 1) : .s($0)) })) {
+            ForEach(options.indices, id: \.self) { i in Text(options[i]).tag(index ? String(i + 1) : options[i]) }
+        }
+        .pickerStyle(.segmented)
+    }
+}
+
+/// Chips: pick one.
+struct Chips: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String, options: [String]
+    init(_ variable: String, _ options: [String]) { self.variable = variable; self.options = options }
+    var body: some View {
+        let p = app.palette(scheme), cur = app.get(variable)?.text ?? ""
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(options, id: \.self) { o in
+                    Button(o) { app.set(variable, .s(o)) }
+                        .font(.subheadline.weight(.semibold)).padding(.horizontal, 14).padding(.vertical, 8)
+                        .foregroundColor(cur == o ? p.onAccent : p.text)
+                        .background(Capsule().fill(cur == o ? p.accent : p.card))
+                        .overlay(Capsule().stroke(p.line, lineWidth: cur == o ? 0 : 1))
+                }
+            }
+        }
+    }
+}
+
+/// A drop-down list: label to value.
+struct PDropdown: View {
+    @EnvironmentObject var app: AppState
+    let variable: String
+    let options: [(String, String)]
+    var placeholder = "Choose…"
+    init(_ variable: String, _ options: [(String, String)], placeholder: String = "Choose…") { self.variable = variable; self.options = options; self.placeholder = placeholder }
+    var body: some View {
+        Picker(placeholder, selection: Binding(get: { app.get(variable)?.text ?? "" }, set: { app.set(variable, .s($0)) })) {
+            Text(placeholder).tag("")
+            ForEach(options.indices, id: \.self) { i in Text(options[i].0).tag(options[i].1) }
+        }
+        .pickerStyle(.menu)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// − number +
+struct PStepper: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    var min: Double = 0, max: Double = 10, step: Double = 1
+    init(_ variable: String, min: Double = 0, max: Double = 10, step: Double = 1) { self.variable = variable; self.min = min; self.max = max; self.step = step }
+    var body: some View {
+        let p = app.palette(scheme), v = app.get(variable)?.number ?? min
+        HStack(spacing: 16) {
+            Button { app.set(variable, .n(Swift.max(min, v - step))) } label: { Text("−").font(.title2.bold()).frame(width: 40, height: 40).foregroundColor(p.onAccent).background(Circle().fill(p.accent)) }.buttonStyle(.plain)
+            Text(Val.n(v).text).font(.title3.bold()).frame(minWidth: 30)
+            Button { app.set(variable, .n(Swift.min(max, v + step))) } label: { Text("+").font(.title2.bold()).frame(width: 40, height: 40).foregroundColor(p.onAccent).background(Circle().fill(p.accent)) }.buttonStyle(.plain)
+        }
+    }
+}
+
+/// Tap a star.
+struct PRating: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    var max = 5
+    init(_ variable: String, max: Int = 5) { self.variable = variable; self.max = max }
+    var body: some View {
+        let p = app.palette(scheme), v = app.get(variable)?.number ?? 0
+        HStack(spacing: 4) {
+            ForEach(0..<max, id: \.self) { i in
+                Button { app.set(variable, .n(Double(i + 1))) } label: { Text("★").font(.system(size: 30)).foregroundColor(Double(i) < v ? Color(hex: 0xF5B301) : p.line) }.buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// A thin line, with a word in the middle.
+struct PDivider: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var label = ""
+    init(_ label: String = "") { self.label = label }
+    var body: some View {
+        let p = app.palette(scheme)
+        HStack(spacing: 10) {
+            Rectangle().fill(p.line).frame(height: 1)
+            if !label.isEmpty { Text(app.fill(label)).font(.footnote).foregroundColor(p.sub); Rectangle().fill(p.line).frame(height: 1) }
+        }
+    }
+}
+
+/// A notice: info, success, warning or error.
+struct PBanner: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var tone = "info", title = "", text = "", icon = ""
+    var body: some View {
+        let p = app.palette(scheme)
+        let bg: Color = tone == "warning" ? Color(hex: 0xFFF4D6) : tone == "error" ? Color(hex: 0xFFE1E1) : tone == "success" ? Color(hex: 0xDDF6E8) : p.accent.opacity(0.14)
+        let fg: Color = tone == "warning" ? Color(hex: 0x7A5200) : tone == "error" ? Color(hex: 0x8A1C1C) : tone == "success" ? Color(hex: 0x145C34) : p.text
+        HStack(alignment: .top, spacing: 10) {
+            if !icon.isEmpty { Text(icon) }
+            VStack(alignment: .leading, spacing: 2) {
+                if !title.isEmpty { Text(app.fill(title)).bold() }
+                if !text.isEmpty { Text(app.fill(text)) }
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundColor(fg).padding(.horizontal, 14).padding(.vertical, 12)
+        .background(RoundedRectangle(cornerRadius: 14).fill(bg))
+    }
+}
+
+/// Level badge, XP bar and xp / needed (each level needs base × growth^(level − 1)).
+struct XpBar: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var xpVar = "xp", levelVar = "playerLevel"
+    var base: Double = 100, growth: Double = 1.4
+    var body: some View {
+        let p = app.palette(scheme), lv = Swift.max(1, Int(app.get(levelVar)?.number ?? 1)), xp = app.get(xpVar)?.number ?? 0
+        let need = base * pow(growth, Double(lv - 1))
+        HStack(spacing: 10) {
+            Text("\(lv)").bold().foregroundColor(p.onAccent).frame(width: 30, height: 30).background(Circle().fill(p.accent))
+            ProgressView(value: Swift.min(1, xp / need)).tint(p.accent)
+            Text("\(Val.n(xp).text) / \(Int(need.rounded()))").font(.subheadline.bold()).foregroundColor(p.sub)
+        }
+    }
+}
+
+/// Numbered steps (the one in the variable is lit).
+struct PSteps: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String, steps: [String]
+    init(_ variable: String, _ steps: [String]) { self.variable = variable; self.steps = steps }
+    var body: some View {
+        let p = app.palette(scheme), cur = Swift.max(1, Int(app.get(variable)?.number ?? 1))
+        HStack {
+            ForEach(steps.indices, id: \.self) { i in
+                VStack(spacing: 4) {
+                    Text(i + 1 < cur ? "✓" : "\(i + 1)").font(.footnote.bold()).foregroundColor(i + 1 <= cur ? p.onAccent : p.sub).frame(width: 28, height: 28).background(Circle().fill(i + 1 <= cur ? p.accent : p.line))
+                    Text(steps[i]).font(.caption).foregroundColor(i + 1 == cur ? p.text : p.sub)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+    }
+}
+
+/// Loading.
+struct PSpinner: View { var body: some View { ProgressView().frame(maxWidth: .infinity) } }
+
+/// Your picture: an emoji, or the initials of {playerName}.
+struct PAvatar: View {
+    @EnvironmentObject var app: AppState
+    var emoji = ""
+    var size: CGFloat = 64
+    var body: some View { Avatar(name: app.meName, seed: app.me, size: size, label: emoji.isEmpty ? nil : emoji).frame(maxWidth: .infinity) }
 }
 
 /// A card with things side by side (a settings row, a summary).

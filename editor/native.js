@@ -260,7 +260,8 @@ final class Bridge: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
 function pbxproj(o, name) {
   const id = (n) => 'A1B2C3D4E5F6' + String(n).padStart(12, '0');
   const I = { project: id(1), mainGroup: id(2), products: id(3), app: id(4), appFolder: id(5), target: id(6), sources: id(7), frameworks: id(8), resources: id(9),
-    projList: id(10), projDebug: id(11), projRelease: id(12), tgtList: id(13), tgtDebug: id(14), tgtRelease: id(15) };
+    projList: id(10), projDebug: id(11), projRelease: id(12), tgtList: id(13), tgtDebug: id(14), tgtRelease: id(15), script: id(16) };
+  const folder = o.xcFolder || 'App'; // (o.xcScript: a build step that runs first, like compiling a Kotlin framework; o.xcExtra: more target settings)
   const common = (debug) => `
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
@@ -270,7 +271,7 @@ function pbxproj(o, name) {
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = ${debug ? 'dwarf' : '"dwarf-with-dsym"'};
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = ${o.xcScript ? 'NO' : 'YES'};
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				${debug ? 'ENABLE_TESTABILITY = YES;\n				GCC_OPTIMIZATION_LEVEL = 0;\n				GCC_PREPROCESSOR_DEFINITIONS = (\n					"DEBUG=1",\n					"$(inherited)",\n				);\n				ONLY_ACTIVE_ARCH = YES;\n				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";\n				SWIFT_OPTIMIZATION_LEVEL = "-Onone";' : 'ENABLE_NS_ASSERTIONS = NO;\n				SWIFT_COMPILATION_MODE = wholemodule;\n				VALIDATE_PRODUCT = YES;'}
 				IPHONEOS_DEPLOYMENT_TARGET = ${o.iosTarget || '15.0'};
@@ -294,7 +295,7 @@ function pbxproj(o, name) {
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = ${o.iosDevices === 'universal' ? '"1,2"' : '1'};`;
+				TARGETED_DEVICE_FAMILY = ${o.iosDevices === 'universal' ? '"1,2"' : '1'};${o.xcExtra || ''}`;
   return `// !$*UTF8*$!
 {
 	archiveVersion = 1;
@@ -308,9 +309,9 @@ function pbxproj(o, name) {
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		${I.appFolder} /* App */ = {
+		${I.appFolder} /* ${folder} */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			path = App;
+			path = ${folder};
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -348,7 +349,8 @@ function pbxproj(o, name) {
 		${I.target} /* ${name} */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = ${I.tgtList} /* Build configuration list for PBXNativeTarget "${name}" */;
-			buildPhases = (
+			buildPhases = (${o.xcScript ? `
+				${I.script} /* ${o.xcScript.name} */,` : ''}
 				${I.sources} /* Sources */,
 				${I.frameworks} /* Frameworks */,
 				${I.resources} /* Resources */,
@@ -411,7 +413,29 @@ function pbxproj(o, name) {
 		};
 /* End PBXResourcesBuildPhase section */
 
-/* Begin PBXSourcesBuildPhase section */
+${o.xcScript ? `/* Begin PBXShellScriptBuildPhase section */
+		${I.script} /* ${o.xcScript.name} */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = ${JSON.stringify(o.xcScript.name)};
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = ${JSON.stringify(o.xcScript.script)};
+		};
+/* End PBXShellScriptBuildPhase section */
+
+` : ''}/* Begin PBXSourcesBuildPhase section */
 		${I.sources} /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -1100,3 +1124,4 @@ export function androidFiles(o, { html, icons }) {
     { name: dir + 'app/src/main/res/drawable-xxxhdpi/ic_stat_notify.png', data: icons.notif },
   ];
 }
+export { pbxproj, plist };

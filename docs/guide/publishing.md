@@ -192,6 +192,7 @@ The Flutter, Xcode and Android Studio projects all run your project in a web vie
 
 - **Native Flutter code**: a Flutter app (Dart widgets) for iOS and Android. Run `dart run tool/setup.dart`, then `flutter run`.
 - **Native SwiftUI code**: an Xcode project with a SwiftUI app (iOS 16 or newer). Open the `.xcodeproj` and press Run.
+- **Native Kotlin code**: a Kotlin Multiplatform app with Compose Multiplatform: one Kotlin codebase, the screens too, for **Android and iOS**. Open the folder in Android Studio (with the Kotlin Multiplatform plugin) and press Run, or `sh gradlew :composeApp:installDebug`; for iOS open `iosApp/iosApp.xcodeproj` on a Mac (Xcode builds the Kotlin part with Gradle for you). Data is saved with SharedPreferences on Android and NSUserDefaults on iOS.
 
 What becomes native code:
 
@@ -199,7 +200,7 @@ What becomes native code:
 | --- | --- |
 | Pages (Show If on `page`) | one widget / view per page, with Back |
 | App Bar titles | the page title in the navigation bar |
-| Bottom Nav | Flutter `NavigationBar` / SwiftUI `TabView` (badges too) |
+| Bottom Nav | Flutter and Compose `NavigationBar` / SwiftUI `TabView` (badges too) |
 | Text with `{variables}` and `{record_field}` | text that fills them in |
 | Buttons: go to page, go back, new record, edit / delete the opened record, set / add to a variable | the same, through `app.run(...)` |
 | Data List (search, filter, sort, checkbox, open a page, swipe to delete) | `RecordList` |
@@ -207,7 +208,7 @@ What becomes native code:
 | Text inputs, switches (Dark mode too), cards, plain lists, web pictures | native controls |
 | Data collections and their sample records, Data Stats | `AppState`, saved on the phone |
 
-Anything else (a Social Feed, Chat, a game…) becomes a placeholder marked **TODO**, and the README lists them. Build Settings shows how many pages convert and which parts will be placeholders before you download. The pages are generated from your project; the runtime (`lib/pocket.dart` or `App/Pocket.swift`) is a fixed, readable file with the state and the building blocks. Change both as you like: from then on the code is yours.
+Anything else (a Social Feed, Chat, a game…) becomes a placeholder marked **TODO**, and the README lists them. Build Settings shows how many pages convert and which parts will be placeholders before you download. The pages are generated from your project; the runtime (`lib/pocket.dart`, `App/Pocket.swift` or `Pocket.kt`) is a fixed, readable file with the state and the building blocks. Change both as you like: from then on the code is yours.
 
 ## In-app purchases
 

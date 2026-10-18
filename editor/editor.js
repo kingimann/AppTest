@@ -31,6 +31,7 @@ import { expoFiles } from './expo.js';
 import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
 import { flutterNativeFiles, swiftNativeFiles, nativeReadme } from './nativecode.js';
 import { appModel } from './appmodel.js';
+import { kotlinNativeFiles } from './kotlincode.js';
 import { flutterFiles } from './flutter.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
@@ -7435,12 +7436,17 @@ async function exportNative(kind) {
   if (!root.settings?.app) return toast('Native code is made from apps. For a game, use the Flutter or Xcode project.');
   if (!validAppId(so.appId)) return toast('The App ID needs to look like com.yourname.app (letters, numbers, dots)');
   try {
-    toast(kind === 'flutter' ? 'Writing the Flutter code…' : 'Writing the SwiftUI code…');
+    toast(`Writing the ${{ flutter: 'Flutter', swift: 'SwiftUI', kotlin: 'Kotlin' }[kind]} code…`);
     const o = buildOpts(), { game } = buildGameJSON(), kit = await storeKitFiles(o);
     const icon = kit.find((f) => f.name.endsWith('app-store-icon-1024.png')).data;
-    const runtime = await (await fetch(new URL(kind === 'flutter' ? './native/flutter/pocket.dart' : './native/swift/Pocket.swift', import.meta.url))).text();
+    const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });
+    const runtime = await (await get({ flutter: './native/flutter/pocket.dart', swift: './native/swift/Pocket.swift', kotlin: './native/kotlin/Pocket.kt' }[kind])).text();
     let files, model, zipName;
-    if (kind === 'flutter') {
+    if (kind === 'kotlin') {
+      const wrapper = { jar: new Uint8Array(await (await get('./native/kotlin/wrapper/gradle-wrapper.jar')).arrayBuffer()), gradlew: await (await get('./native/kotlin/wrapper/gradlew')).text(), gradlewBat: await (await get('./native/kotlin/wrapper/gradlew.bat')).text() };
+      ({ files, model } = kotlinNativeFiles(game, { ...so, slug: slug(so.name) }, { runtime, wrapper, icon }));
+      zipName = slug(so.name) + '-kotlin.zip';
+    } else if (kind === 'flutter') {
       ({ files, model } = flutterNativeFiles(game, so, { runtime, icon }));
       zipName = slug(so.name) + '-flutter-native.zip';
     } else {
@@ -7452,7 +7458,7 @@ async function exportNative(kind) {
     const zip = downloadZip([...files, ...kit.map((f) => ({ ...f, name: dir + f.name }))], zipName);
     noteBuild('native', zip.size);
     const todo = new Set(model.todo.map((t) => t.name)).size;
-    toast(`${kind === 'flutter' ? 'Flutter' : 'SwiftUI'} code ready (${kb(zip.size)}): ${model.pages.length} pages${todo ? `, ${todo} placeholder${todo > 1 ? 's' : ''} to build (see README.md)` : ''}.`);
+    toast(`${{ flutter: 'Flutter', swift: 'SwiftUI', kotlin: 'Kotlin' }[kind]} code ready (${kb(zip.size)}): ${model.pages.length} pages${todo ? `, ${todo} placeholder${todo > 1 ? 's' : ''} to build (see README.md)` : ''}.`);
   } catch (err) { toast('Could not write the native code: ' + err.message); }
 }
 function buildFileName() { const o = buildOpts(); return slug(o.file || o.title || root.name) + '.html'; }
@@ -7904,13 +7910,14 @@ function openBuildSettings() {
       if (target === 'native') {
         const isApp = !!root.settings?.app, m = isApp ? appModel(buildGameJSON().game) : null, todo = m ? [...new Set(m.todo.map((t) => t.name))] : [];
         return [
-          h('p', { class: 'desc' }, 'Your app written out as code: a Flutter app (Dart widgets, iOS and Android) or a SwiftUI app (Xcode, iOS 16+). No web view: pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and your data collections (saved on the phone) become native code that you keep building on. Games and things with no native version yet stay as placeholders marked TODO.'),
+          h('p', { class: 'desc' }, 'Your app written out as code: a Flutter app (Dart widgets, iOS and Android), a SwiftUI app (Xcode, iOS 16+) or a Kotlin Multiplatform app (Compose, one Kotlin codebase for Android and iOS). No web view: pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and your data collections (saved on the phone) become native code that you keep building on. Games and things with no native version yet stay as placeholders marked TODO.'),
           !isApp && h('p', { class: 'desc warn' }, 'Native code is made from apps (pages, lists, forms). For a game, use the Flutter project or the Xcode / Android Studio projects: they run it in a web view.'),
           m && h('p', { class: 'desc' }, `${m.pages.length} page${m.pages.length === 1 ? '' : 's'}${m.tabs.length ? `, ${m.tabs.length} tabs` : ''}, ${m.collections.length} data collection${m.collections.length === 1 ? '' : 's'}.` + (todo.length ? ` Placeholders for: ${todo.slice(0, 8).join(', ')}${todo.length > 8 ? '…' : ''}.` : ' Everything has a native version.')),
           Cr('appId', { label: 'App ID (bundle ID / applicationId)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.app. It can never change after the first store release.' }),
           !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.app (each part starts with a letter).'),
           h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !idOk || !isApp, onclick: () => exportNative('flutter') }, icon('download'), 'Native Flutter code (.zip)')),
           h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk || !isApp, onclick: () => exportNative('swift') }, icon('download'), 'Native SwiftUI code (.zip)')),
+          h('div', { class: 'btns' }, h('button', { class: 'btn', disabled: !idOk || !isApp, onclick: () => exportNative('kotlin') }, icon('download'), 'Native Kotlin code: Android + iOS (.zip)')),
         ];
       }
       if (target === 'flutter') return [

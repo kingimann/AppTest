@@ -452,7 +452,7 @@ On the phone, each collection is kept under the app's name, so two apps never sh
 
 ## Native code
 
-**Build Settings › Native code (apps)** writes your app out as a real **Flutter** app or a **SwiftUI** app, with no web view: the pages, the App Bar titles, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches, your collections and Data Stats. It's a starting point to keep building in code; parts with no native version yet (Social Feed, Chat…) become placeholders marked TODO. See *Publishing › Native code (apps)*.
+**Build Settings › Native code (apps)** writes your app out as a real **Flutter** app, a **SwiftUI** app or a **Kotlin Multiplatform** app (Compose, Android and iOS), with no web view: the pages, the App Bar titles, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches, your collections and Data Stats. It's a starting point to keep building in code; parts with no native version yet (Social Feed, Chat…) become placeholders marked TODO. See *Publishing › Native code (apps)*.
 
 ## Tips
 

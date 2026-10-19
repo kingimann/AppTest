@@ -48,9 +48,10 @@ class BarAction {
 
 /// The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours.
 class BarStyle {
-  const BarStyle({this.look = 'standard', this.brandPages = const ['home'], this.center = false, this.avatar = false, this.circles = 'plain', this.actions = const [], this.bg = '@bar', this.text = '@text', this.icon = '@text', this.border = true, this.size = 19});
+  const BarStyle({this.look = 'standard', this.brandPages = const ['home'], this.center = false, this.avatar = false, this.left = 'back, else menu', this.circles = 'plain', this.actions = const [], this.bg = '@bar', this.text = '@text', this.icon = '@text', this.border = true, this.size = 19});
   /// circles: the buttons sit in a filled circle ("circles"), a ring ("outlined circles") or nothing ("plain").
-  final String look, circles, bg, text, icon;
+  /// left: the left button (back, else menu · menu · back · none); ☰ or your avatar opens the Side Menu.
+  final String look, left, circles, bg, text, icon;
   final List<String> brandPages;
   final bool center, avatar, border;
   final List<BarAction> actions;
@@ -67,6 +68,21 @@ class NavStyle {
   /// The highlight behind the selected icon: a soft pill, a solid one, or none.
   bool get pill => const ['pill', 'floating', 'glass', 'bubble', 'classic'].contains(style);
   bool get solid => const ['segmented', 'chips'].contains(style);
+}
+
+/// A row of the Side Menu: a page, a message, a switch for a variable (toggle), a section title or a line.
+class MenuItem {
+  const MenuItem(this.kind, this.label, {this.icon = '', this.to = '', this.badge = ''});
+  final String kind, label, icon, to, badge;
+}
+
+/// The Side Menu: its header (the signed-in person, or a title, subtitle and picture), rows, footer and colours.
+class SideMenuStyle {
+  const SideMenuStyle({this.side = 'left', this.title = '', this.subtitle = '', this.avatar = '', this.header = 'simple', this.social = false, this.profilePage = 'profile', this.items = const [], this.footer = const [], this.footerText = '', this.bg = '#151826', this.text = '#e8eaf2', this.accent = '#4fa3ff', this.badge = '#ff3b5c', this.width = 290});
+  final String side, title, subtitle, avatar, header, profilePage, footerText, bg, text, accent, badge;
+  final bool social;
+  final List<MenuItem> items, footer;
+  final double width;
 }
 
 /// The editor's own line icons (64 × 64 SVG path data: [stroked, filled]), for the App Bar and Bottom Nav. Set in main.dart.
@@ -176,7 +192,7 @@ Palette pal(BuildContext context) => Theme.of(context).brightness == Brightness.
 late AppState app;
 
 class AppState extends ChangeNotifier {
-  AppState({required this.name, required this.collections, required this.stats, required Map<String, Object?> vars, required this.tabs, required this.home, required this.light, required this.dark, this.themeSetting = 'follow the phone', this.bar = const BarStyle(), this.nav = const NavStyle()}) {
+  AppState({required this.name, required this.collections, required this.stats, required Map<String, Object?> vars, required this.tabs, required this.home, required this.light, required this.dark, this.themeSetting = 'follow the phone', this.bar = const BarStyle(), this.nav = const NavStyle(), this.menu}) {
     this.vars.addAll(vars);
   }
 
@@ -186,6 +202,9 @@ class AppState extends ChangeNotifier {
   final List<NavTab> tabs;
   final Palette light, dark;
   final BarStyle bar;
+  /// The Side Menu (null: the app has none).
+  final SideMenuStyle? menu;
+  bool get menuOn => menu != null && bar.left != 'none' && bar.left != 'back';
   final NavStyle nav;
   final Map<String, Object?> vars = {};
   final Map<String, List<Map<String, Object?>>> data = {};
@@ -452,6 +471,60 @@ class _Tabs extends StatelessWidget {
       );
 }
 
+/// The Side Menu: a header, rows that open pages, send messages or switch a variable, and a footer.
+class PocketDrawer extends StatelessWidget {
+  const PocketDrawer({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final m = app.menu!, p = pal(context), bg = p.resolve(m.bg) ?? p.card, fg = p.resolve(m.text) ?? p.text, acc = p.resolve(m.accent) ?? p.accent;
+    final page = (ModalRoute.of(context)?.settings.name) ?? (app.tabs.isEmpty ? app.home : app.tabs[app.tab].page);
+    Widget row(MenuItem it) {
+      if (it.kind == 'line') return Divider(color: fg.withValues(alpha: 0.2), indent: 8, endIndent: 8);
+      if (it.kind == 'section') return Padding(padding: const EdgeInsets.fromLTRB(16, 14, 16, 4), child: Text(it.label.toUpperCase(), style: TextStyle(color: fg.withValues(alpha: 0.55), fontSize: 12, fontWeight: FontWeight.w800, letterSpacing: 0.6)));
+      final n = it.badge.isEmpty ? 0 : (num.tryParse(AppState.show(app.get(it.badge))) ?? 0).toInt(), on = it.kind == 'page' && it.to == page;
+      return ListTile(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        selected: on, selectedTileColor: acc.withValues(alpha: 0.18), selectedColor: acc, iconColor: fg, textColor: fg,
+        leading: it.icon.isEmpty ? null : barIcon(it.icon, color: on ? acc : fg, size: 22),
+        title: Text(app.fill(it.label), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+        trailing: it.kind == 'toggle'
+            ? Switch(value: isOn(app.get(it.to)), activeTrackColor: acc, onChanged: (v) => app.set(it.to, v))
+            : n > 0 ? Badge(label: Text(n > 99 ? '99+' : '$n'), backgroundColor: p.resolve(m.badge)) : null,
+        onTap: () {
+          if (it.kind == 'toggle') { app.set(it.to, !isOn(app.get(it.to))); return; }
+          Navigator.of(context).pop(); // (closes the menu)
+          if (it.kind == 'page') { app.go(it.to); } else { debugPrint('TODO: the Side Menu sends "${it.to}"'); }
+        },
+      );
+    }
+    final header = m.header == 'none' ? null : m.social
+        ? InkWell(onTap: () { Navigator.of(context).pop(); app.go(m.profilePage); }, child: Padding(padding: const EdgeInsets.fromLTRB(16, 8, 16, 16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Avatar(meName, me, size: 52), const SizedBox(height: 8), Text(meName, style: TextStyle(color: fg, fontSize: 18, fontWeight: FontWeight.w800)), Text('@$me', style: TextStyle(color: fg.withValues(alpha: 0.65))),
+          ])))
+        : Container(
+            margin: const EdgeInsets.fromLTRB(8, 0, 8, 8), padding: const EdgeInsets.all(14),
+            decoration: m.header == 'banner' ? BoxDecoration(color: acc, borderRadius: BorderRadius.circular(16)) : null,
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if (m.avatar.isNotEmpty) artIcons[m.avatar] != null ? barIcon(m.avatar, color: fg, size: 34) : Text(m.avatar, style: const TextStyle(fontSize: 34)),
+              Text(app.fill(m.title), style: TextStyle(color: m.header == 'banner' ? Colors.white : fg, fontSize: 18, fontWeight: FontWeight.w800)),
+              if (m.subtitle.isNotEmpty) Text(app.fill(m.subtitle), style: TextStyle(color: (m.header == 'banner' ? Colors.white : fg).withValues(alpha: 0.65))),
+            ]),
+          );
+    return Drawer(
+      backgroundColor: bg, width: m.width,
+      child: SafeArea(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Align(alignment: Alignment.centerRight, child: IconButton(icon: Icon(Icons.close, color: fg.withValues(alpha: 0.7)), onPressed: () => Navigator.of(context).pop())),
+          ?header,
+          Expanded(child: ListView(padding: const EdgeInsets.symmetric(horizontal: 8), children: [for (final it in m.items) row(it)])),
+          if (m.footer.isNotEmpty) ...[Divider(color: fg.withValues(alpha: 0.2)), for (final it in m.footer) Padding(padding: const EdgeInsets.symmetric(horizontal: 8), child: row(it))],
+          if (m.footerText.isNotEmpty) Padding(padding: const EdgeInsets.fromLTRB(16, 4, 16, 8), child: Text(app.fill(m.footerText), style: TextStyle(color: fg.withValues(alpha: 0.5), fontSize: 12))),
+        ]),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Building blocks
 // ---------------------------------------------------------------------------------------------------------------
@@ -473,6 +546,8 @@ class PocketPage extends StatelessWidget {
           final kids = body(context);
           return Scaffold(
             appBar: appBar ? _bar(context) : null,
+            drawer: app.menuOn && app.menu!.side != 'right' ? const PocketDrawer() : null,
+            endDrawer: app.menuOn && app.menu!.side == 'right' ? const PocketDrawer() : null,
             floatingActionButton: fab,
             body: SafeArea(
               child: scroll
@@ -494,7 +569,12 @@ class PocketPage extends StatelessWidget {
       iconTheme: IconThemeData(color: ic),
       centerTitle: b.center,
       shape: b.border ? Border(bottom: BorderSide(color: p.line)) : null,
-      leading: back ? null : b.avatar ? Padding(padding: const EdgeInsets.all(10), child: Avatar(barName.isEmpty ? '?' : barName, '?', size: 34)) : null,
+      leading: back ? null : b.avatar || app.menuOn ? Builder(builder: (context) { // your avatar or ☰: opens the Side Menu
+        void open() { if (!app.menuOn) return; final s = Scaffold.of(context); app.menu!.side == 'right' ? s.openEndDrawer() : s.openDrawer(); }
+        return b.avatar
+            ? GestureDetector(onTap: open, child: Padding(padding: const EdgeInsets.all(10), child: Avatar(barName.isEmpty ? '?' : barName, '?', size: 34)))
+            : IconButton(tooltip: 'Menu', onPressed: open, icon: barIcon('menu', color: ic));
+      }) : null,
       automaticallyImplyLeading: back,
       title: Text(brand ? app.name : app.fill(title), style: TextStyle(fontWeight: brand ? FontWeight.w900 : FontWeight.w800, fontSize: brand ? 22 : b.size)),
       actions: [

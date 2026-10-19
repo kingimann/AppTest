@@ -8,6 +8,7 @@ package __PACKAGE__
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -82,7 +83,7 @@ typealias Row = Map<String, Any?>
  *  ("dark mode toggle", "page:friends", or a message), a badge variable, and the pages it shows on (empty = all). */
 data class BarAction(val icon: String, val does: String, val badge: String = "", val only: List<String> = emptyList())
 /** The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours. */
-data class BarStyle(val look: String = "standard", val brandPages: List<String> = listOf("home"), val center: Boolean = false, val avatar: Boolean = false, val circles: String = "plain", val actions: List<BarAction> = emptyList(), val bg: String = "@bar", val text: String = "@text", val icon: String = "@text", val border: Boolean = true, val size: Int = 19)
+data class BarStyle(val look: String = "standard", val brandPages: List<String> = listOf("home"), val center: Boolean = false, val avatar: Boolean = false, val left: String = "back, else menu", val circles: String = "plain", val actions: List<BarAction> = emptyList(), val bg: String = "@bar", val text: String = "@text", val icon: String = "@text", val border: Boolean = true, val size: Int = 19)
 /** The Bottom Nav's style (pill, floating, glass, segmented, dock, minimal…), when names show (always, selected only, never),
  *  the gap around a floating bar, and colours (on: the icon on a solid highlight). */
 data class NavStyle(val style: String = "pill", val bar: String = "@bar", val active: String = "@accent", val idle: String = "@sub", val labels: String = "always", val margin: Int = 14, val on: String = "#ffffff") {
@@ -90,6 +91,15 @@ data class NavStyle(val style: String = "pill", val bar: String = "@bar", val ac
     val pill get() = style in listOf("pill", "floating", "glass", "bubble", "classic")
     val solid get() = style in listOf("segmented", "chips")
 }
+
+/** A row of the Side Menu: a page, a message, a switch for a variable (toggle), a section title or a line. */
+data class MenuItem(val kind: String, val label: String, val icon: String = "", val to: String = "", val badge: String = "")
+/** The Side Menu: its header (the signed-in person, or a title, subtitle and picture), rows, footer and colours. */
+data class SideMenuStyle(
+    val side: String = "left", val title: String = "", val subtitle: String = "", val avatar: String = "", val header: String = "simple", val social: Boolean = false, val profilePage: String = "profile",
+    val items: List<MenuItem> = emptyList(), val footer: List<MenuItem> = emptyList(), val footerText: String = "",
+    val bg: String = "#151826", val text: String = "#e8eaf2", val accent: String = "#4fa3ff", val badge: String = "#ff3b5c", val width: Int = 290,
+)
 
 /** The app's colours (@tokens) for light or dark. */
 class Palette(val c: Map<String, Color>) {
@@ -162,8 +172,11 @@ fun appReady(): Boolean = ::app.isInitialized
 class AppState(
     val name: String, val home: String, val light: Palette, val dark: Palette, vars: Map<String, Any?>,
     val tabs: List<NavTab>, val collections: List<Collection>, val stats: List<Stat>, val themeSetting: String = "follow the phone",
-    val bar: BarStyle = BarStyle(), val nav: NavStyle = NavStyle(),
+    val bar: BarStyle = BarStyle(), val nav: NavStyle = NavStyle(), val menu: SideMenuStyle? = null,
 ) {
+    /** Is the Side Menu open? (☰ or your avatar on the App Bar opens it.) */
+    var menuOpen by mutableStateOf(false)
+    val menuOn get() = menu != null && bar.left != "none" && bar.left != "back"
     val vars = mutableStateMapOf<String, Any?>()
     val data = mutableStateMapOf<String, List<Row>>()
     var tab by mutableStateOf(0)
@@ -377,6 +390,7 @@ fun PocketApp(pages: Map<String, @Composable () -> Unit>) {
             val stack = app.stack
             PlatformBack(enabled = stack.isNotEmpty()) { app.back() }
             val page = stack.lastOrNull() ?: if (app.tabs.isEmpty()) app.home else app.tabs[app.tab].page
+            Box(Modifier.fillMaxSize()) {
             Scaffold(
                 containerColor = p.bg,
                 bottomBar = {
@@ -404,6 +418,8 @@ fun PocketApp(pages: Map<String, @Composable () -> Unit>) {
                     }
                 },
             ) { pad -> Box(Modifier.padding(pad)) { (pages[page] ?: { Text("No page $page") })() } }
+            if (app.menuOpen && app.menu != null) PocketDrawer(page)
+            }
         }
     }
 }
@@ -442,7 +458,8 @@ fun PocketBar(title: String, page: String) {
     val titleText: @Composable () -> Unit = { Text(if (brand) app.name else app.fill(title), fontWeight = if (brand) FontWeight.Black else FontWeight.ExtraBold, fontSize = (if (brand) 22 else b.size).sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     val nav: @Composable () -> Unit = {
         if (back) IconButton(onClick = { app.back() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-        else if (b.avatar) Box(Modifier.padding(start = 12.dp)) { Avatar(barName.ifEmpty { "?" }, "?", 34) }
+        else if (b.avatar) Box(Modifier.padding(start = 12.dp).clickable { if (app.menuOn) app.menuOpen = true }) { Avatar(barName.ifEmpty { "?" }, "?", 34) } // (opens the Side Menu)
+        else if (app.menuOn) IconButton(onClick = { app.menuOpen = true }) { Icon(PocketIcons.nav("menu"), contentDescription = "Menu", tint = ic) }
     }
     val actions: @Composable RowScope.() -> Unit = {
         for (a in b.actions.reversed()) { // (the first sits at the right edge)
@@ -465,6 +482,66 @@ fun PocketBar(title: String, page: String) {
         if (b.center) CenterAlignedTopAppBar(title = titleText, navigationIcon = nav, actions = actions, colors = colors)
         else TopAppBar(title = titleText, navigationIcon = nav, actions = actions, colors = colors)
         if (b.border) HorizontalDivider(color = p.line)
+    }
+}
+
+/** The Side Menu over the app: a header, rows that open pages, send messages or switch a variable, and a footer. Tap outside to close. */
+@Composable
+fun PocketDrawer(page: String) {
+    val m = app.menu ?: return
+    val p = LocalPalette.current
+    val bg = p.resolve(m.bg) ?: p.card
+    val fg = p.resolve(m.text) ?: p.text
+    val acc = p.resolve(m.accent) ?: p.accent
+    val close = { app.menuOpen = false }
+    @Composable
+    fun row(it: MenuItem) {
+        when (it.kind) {
+            "line" -> HorizontalDivider(Modifier.padding(horizontal = 8.dp, vertical = 6.dp), color = fg.copy(alpha = 0.2f))
+            "section" -> Text(it.label.uppercase(), Modifier.padding(start = 12.dp, top = 14.dp, bottom = 4.dp), color = fg.copy(alpha = 0.55f), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold)
+            else -> {
+                val n = if (it.badge.isEmpty()) 0 else (num(app.get(it.badge)) ?: 0.0).toInt()
+                val on = it.kind == "page" && it.to == page
+                Row(
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(14.dp)).background(if (on) acc.copy(alpha = 0.18f) else Color.Transparent)
+                        .clickable {
+                            when (it.kind) {
+                                "toggle" -> app.set(it.to, !isOn(app.get(it.to)))
+                                "page" -> { close(); app.go(it.to) }
+                                else -> { close(); println("TODO: the Side Menu sends \"${it.to}\"") }
+                            }
+                        }.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (it.icon.isNotEmpty()) Icon(PocketIcons.nav(it.icon), contentDescription = null, tint = if (on) acc else fg, modifier = Modifier.size(22.dp))
+                    Text(app.fill(it.label), Modifier.weight(1f), color = if (on) acc else fg, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (it.kind == "toggle") Switch(checked = isOn(app.get(it.to)), onCheckedChange = { v -> app.set(it.to, v) }, colors = SwitchDefaults.colors(checkedTrackColor = acc))
+                    else if (n > 0) Badge(containerColor = p.resolve(m.badge) ?: p.danger) { Text(if (n > 99) "99+" else n.toString()) }
+                }
+            }
+        }
+    }
+    Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.45f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { close() }, contentAlignment = if (m.side == "right") Alignment.CenterEnd else Alignment.CenterStart) {
+        Column(
+            Modifier.fillMaxHeight().widthIn(max = m.width.dp).fillMaxWidth(0.82f).background(bg).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .statusBarsPadding().navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp).verticalScroll(rememberScrollState()),
+        ) {
+            Box(Modifier.fillMaxWidth()) { IconButton(onClick = close, modifier = Modifier.align(Alignment.CenterEnd)) { Icon(Icons.Filled.Close, contentDescription = "Close menu", tint = fg.copy(alpha = 0.7f)) } }
+            if (m.header != "none") {
+                if (m.social) Column(Modifier.fillMaxWidth().clickable { close(); app.go(m.profilePage) }.padding(start = 10.dp, bottom = 14.dp)) {
+                    Avatar(meName, me, 52); Spacer(Modifier.height(8.dp))
+                    Text(meName, color = fg, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold); Text("@$me", color = fg.copy(alpha = 0.65f))
+                } else Column(Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(16.dp)).background(if (m.header == "banner") acc else Color.Transparent).padding(12.dp)) {
+                    val tc = if (m.header == "banner") Color.White else fg
+                    if (m.avatar.isNotEmpty()) { if (PocketIcons.art.containsKey(m.avatar)) Icon(PocketIcons.nav(m.avatar), contentDescription = null, tint = tc, modifier = Modifier.size(34.dp)) else Text(m.avatar, fontSize = 34.sp) }
+                    Text(app.fill(m.title), color = tc, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold)
+                    if (m.subtitle.isNotEmpty()) Text(app.fill(m.subtitle), color = tc.copy(alpha = 0.65f))
+                }
+            }
+            for (it in m.items) row(it)
+            if (m.footer.isNotEmpty()) { HorizontalDivider(Modifier.padding(vertical = 6.dp), color = fg.copy(alpha = 0.2f)); for (it in m.footer) row(it) }
+            if (m.footerText.isNotEmpty()) Text(app.fill(m.footerText), Modifier.padding(start = 12.dp, top = 8.dp), color = fg.copy(alpha = 0.5f), fontSize = 12.sp)
+        }
     }
 }
 

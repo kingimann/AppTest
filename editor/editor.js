@@ -21,9 +21,9 @@ import { openSprite2D, newDrawing } from './sprite2d.js';
 import { LOADING_DEFAULTS, LOADING_PRESETS, BAR_STYLES, loadingParts } from './loading.js';
 import { openTimeline } from './timeline.js';
 import { openLogic } from './logic.js';
-import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems, productsEditor } from './items.js';
-import { initStory, questsEditor, dialoguesEditor, ensureStarterStory } from './story.js';
-import { initData, dataEditor, ensureCollection, connectSupabase, STARTER_COLLECTIONS } from './data.js';
+import { initItems, itemsEditor, recipesEditor, inventorySettings, ensureStarterItems, productsEditor, openItemEditor } from './items.js';
+import { initStory, questsEditor, dialoguesEditor, ensureStarterStory, openQuestEditor, openDialogueEditor } from './story.js';
+import { initData, dataEditor, ensureCollection, connectSupabase, STARTER_COLLECTIONS, openCollectionEditor } from './data.js';
 import { makeCube } from './meshops.js';
 import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import * as CM from './codemagic.js';
@@ -203,7 +203,7 @@ function storageFull() {
 }
 let saveTimer;
 /** The action bar for Select mode, pinned to the bottom of the Hierarchy. */
-let multiKey = '';
+let multiKey = '', swipedId = null; // swipedId: the Hierarchy row swiped open (quick Hide / Copy / Delete)
 function renderMultiBar() {
   { const k = multi && multi.size > 1 ? [...multi].sort().join(',') : ''; if (k !== multiKey) { multiKey = k; setTimeout(renderInspector); } } // the Inspector follows what's ticked
   const box = $('#hierarchy');
@@ -224,6 +224,21 @@ function renderMultiBar() {
       act('folder', 'Folder', () => moveToFolder(list)),
       list.filter((e) => e.ui).length >= 2 ? h('button', { onclick: (ev) => popMenu(ev.currentTarget, alignMenuItems(list)) }, icon('alignl'), 'Align') : null,
       act('trash', 'Delete', () => multiDelete(list), 'danger'))));
+}
+/** Select mode (several objects): tap objects in the Scene or the Hierarchy, or drag a box in the Scene. */
+function startMulti(ids) { multi = new Set(ids.filter((id) => ent(id))); renderHierarchy(); toast('Select mode: tap objects, or drag a box in the Scene. Done ends it.'); }
+/** The objects whose middle is inside the box dragged in the Scene (Select mode): UI in the UI view, the world otherwise. */
+function inMarquee(g) {
+  const s = engine.scene, x0 = Math.min(g.sx, g.x), x1 = Math.max(g.sx, g.x), y0 = Math.min(g.sy, g.y), y1 = Math.max(g.sy, g.y), S = UIS(), out = [];
+  for (const live of s.entities) {
+    const j = ent(live.id); if (!j || j.locked || live.dead || live.visible === false || live._parentHidden || !!live.ui !== !!uiMode || j.id === SCENE_ID) continue;
+    if (j.ui && EP.hideUI && !uiMode) continue;
+    let p;
+    if (live.ui) { const r = uiBox(live, S.w, S.h, S.safe); p = uiv(r.x, r.y); }
+    else p = is3D() ? engine.renderer.worldToScreen(s, live.x, live.y, live.z) : engine.renderer.worldToScreen(s, live.x, live.y);
+    if (p && p.x >= x0 && p.x <= x1 && p.y >= y0 && p.y <= y1) out.push(j.id);
+  }
+  return topPicks(out.map(ent)).map((j) => j.id);
 }
 /** Top-most picks only: a ticked child is already covered by its ticked parent. */
 const topPicks = (list) => list.filter((e) => !list.some((q) => q !== e && isInside(e.id, q.id)));
@@ -851,7 +866,17 @@ engine.onRenderUI = (ctx, s) => {
     ctx.strokeStyle = ORANGE; ctx.lineWidth = 2;
     ctx.strokeRect(b.x - b.hx - 3, b.y - b.hy - 3, b.hx * 2 + 6, b.hy * 2 + 6);
   }
-  if (sel && tool !== 'hand') drawGizmo(ctx, sel);
+  if (multi && uiMode) for (const id of multi) { // ticked UI (Select mode): a dashed outline each
+    const q = engine.scene.byId(id); if (!q?.ui || q.dead || q._parentHidden) continue;
+    const b = uiBounds(q); ctx.save(); ctx.setLineDash([6, 4]); ctx.strokeStyle = ORANGE; ctx.lineWidth = 2; ctx.strokeRect(b.x - b.hx - 3, b.y - b.hy - 3, b.hx * 2 + 6, b.hy * 2 + 6); ctx.restore();
+  }
+  if (gesture?.type === 'marquee' && gesture.moved) { // the box being dragged in Select mode
+    const g = gesture, x0 = Math.min(g.sx, g.x), y0 = Math.min(g.sy, g.y), w = Math.abs(g.x - g.sx), hgt = Math.abs(g.y - g.sy);
+    ctx.save(); ctx.fillStyle = 'rgba(76,139,214,0.14)'; ctx.fillRect(x0, y0, w, hgt); ctx.strokeStyle = '#4c8bd6'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.strokeRect(x0, y0, w, hgt);
+    const t = `${multi?.size || 0} selected`; ctx.setLineDash([]); ctx.font = '700 12px system-ui, sans-serif'; const tw = ctx.measureText(t).width + 14;
+    ctx.fillStyle = 'rgba(20,20,26,0.9)'; ctx.fillRect(g.x - tw / 2, g.y - 34, tw, 22); ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, g.x, g.y - 23); ctx.restore();
+  }
+  if (sel && tool !== 'hand' && !multi?.size) drawGizmo(ctx, sel);
   if (dnd?.started && dnd.payload.kind === 'prefab' && dnd.overScene) {
     ctx.strokeStyle = '#4c8bd6'; ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.arc(dnd.lx, dnd.ly, 14, 0, Math.PI * 2); ctx.moveTo(dnd.lx - 20, dnd.ly); ctx.lineTo(dnd.lx + 20, dnd.ly); ctx.moveTo(dnd.lx, dnd.ly - 20); ctx.lineTo(dnd.lx, dnd.ly + 20); ctx.stroke();
@@ -1188,6 +1213,13 @@ surface.addEventListener('pointerdown', (ev) => {
     gesture = { type: 'pan', lx: x, ly: y, sx: x, sy: y, moved: true };
     return;
   }
+  if (ptrs.size === 1 && multi && tool !== 'hand' && !(ev.button === 1 || ev.button === 2 || ev.altKey)) { // Select mode: tap objects to tick them, drag a ticked one to move them all, drag empty space for a box
+    const hit = pick(x, y);
+    if (hit && multi.has(hit.id)) gesture = { type: 'multimove', id: hit.id, sx: x, sy: y, moved: false, starts: topPicks([...multi].map(ent).filter((j) => j && !j.locked)).map((j) => ({ id: j.id, x: j.x || 0, y: j.y || 0, z: j.z || 0, ui: !!j.ui })) };
+    else if (hit) gesture = { type: 'multitap', id: hit.id, sx: x, sy: y, moved: false };
+    else gesture = { type: 'marquee', sx: x, sy: y, x, y, moved: false, base: new Set(multi), add: !!(ev.shiftKey || ev.metaKey || ev.ctrlKey) || multi.size > 0 };
+    return;
+  }
   if (ptrs.size === 1) {
     const panBtn = ev.button === 1 || ev.button === 2 || ev.altKey;
     let giz = !panBtn && hitGizmo(x, y);
@@ -1280,6 +1312,22 @@ surface.addEventListener('pointermove', (ev) => {
     else { const d = g.part === 'b' ? ly : -ly; B.h = Math.max(2, r1(o.h + d / scy)); const real = (B.h - o.h) * scy; shift(0, (g.part === 'b' ? 1 : -1) * real / 2); }
     for (const k of ['w', 'h', 'r', 'ox', 'oy']) if (B[k] !== undefined) live.body[k] = B[k];
     return;
+  }
+  if (g.type === 'multitap') { if (Math.hypot(dx, dy) > 8) { gesture = { type: 'marquee', sx: g.sx, sy: g.sy, x, y, moved: true, base: new Set(multi), add: true }; } return; }
+  if (g.type === 'marquee') { g.x = x; g.y = y; if (Math.hypot(dx, dy) > 6) g.moved = true; if (g.moved) multi = new Set([...(g.add ? g.base : []), ...inMarquee(g)]); return; }
+  if (g.type === 'multimove') {
+    if (!g.moved && Math.hypot(dx, dy) < 5) return;
+    if (!g.moved) $('#app').classList.add('dragging');
+    g.moved = true;
+    const z2 = is3D() ? 0 : engine.renderer.zoomFor(s), zu = UIS().v.z, k3 = is3D() ? orbit.dist / engine.height : 0;
+    for (const o of g.starts) {
+      const j = ent(o.id); if (!j) continue;
+      if (o.ui) { j.x = Math.round(o.x + dx / zu); j.y = Math.round(o.y + dy / zu); }
+      else if (!is3D()) { j.x = snapV(o.x + dx / z2, 10); j.y = snapV(o.y + dy / z2, 10); }
+      else { const c = Math.cos(orbit.yaw), sn = Math.sin(orbit.yaw); j.x = round(o.x + (c * dx + sn * dy) * k3, 2); j.z = round(o.z + (-sn * dx + c * dy) * k3, 2); }
+    }
+    g.label = `${g.starts.length} moved`;
+    requestRebuild(); return;
   }
   if (['free', 'axis', 'rotate', 'scale', 'tap', 'rect'].includes(g.type)) {
     if (!g.moved && Math.hypot(dx, dy) < 5) return;
@@ -1653,6 +1701,10 @@ const endPointer = (ev) => {
   const g = gesture;
   if (!g) return;
   if (['free', 'axis', 'rotate', 'scale', 'rect'].includes(g.type) && g.moved) { pushHistory(); saveSoon(); if (g.type === 'rect') renderInspector(); }
+  if (g.type === 'multimove' && g.moved) { pushHistory(); saveSoon(); }
+  if ((g.type === 'multitap' || (g.type === 'multimove' && !g.moved)) && multi) { multi.has(g.id) ? multi.delete(g.id) : multi.add(g.id); buzz(6); } // a tap ticks / unticks it
+  if (g.type === 'marquee' && !g.moved && !g.add) multi = new Set(); // tapping empty space with nothing ticked: still nothing
+  if (['multitap', 'multimove', 'marquee'].includes(g.type) && multi) renderHierarchy();
   if (g.type === 'collider' && g.moved) { pushHistory(); saveSoon(); renderInspector(); }
   uiGuide = null; sceneGuide = null;
   if (['free', 'axis', 'tap', 'rotate', 'scale', 'rect'].includes(g.type) && g.id && !g.moved && ptrs.size === 0 && (!tapTrack || tapTrack.max === 1)) { // double-tap an object: edit its text, or open the Inspector
@@ -1690,6 +1742,7 @@ function openObjectMenu(id, sx, sy, anchor) {
     { icon: 'info', label: 'Inspect', fn: () => ctxAction('inspect') },
     { icon: 'edit', label: 'Rename', fn: () => { if (!document.querySelector(`#hierarchy .h-row[data-id="${id}"]`)) setDock('hierarchy'); setTimeout(() => inlineRename(id), 60); } },
     { icon: 'copy', label: 'Duplicate', fn: () => duplicateEntity(id) },
+    { icon: 'check', label: 'Select Several…', k: 'tap more, or drag a box', fn: () => startMulti([id]) },
     { icon: 'paste', label: 'Copy', fn: () => { objClipboard = clone(j); toast(`Copied ${j.name}. Long-press empty space to paste.`); } },
     !j.ui && { icon: 'brush', label: 'Paint Copies', fn: () => setTool('paint') },
     { icon: 'frame', label: 'Focus', fn: frameSelected },
@@ -1715,6 +1768,7 @@ function openSpaceMenu(sx, sy) {
     objClipboard && { icon: 'paste', label: `Paste ${objClipboard.name || 'object'} here`, fn: () => { const c = clone(objClipboard); delete c.id; addEntity(c, objClipboard.ui ? undefined : at); toast('Pasted'); } },
     { icon: 'plus', label: 'Add Object Here…', fn: () => popMenu(pointRect(sx, sy), [{ cap: 'Objects' }, ...objs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o, at) })),
       '-', { cap: 'Prefabs' }, ...prefabs.map((o) => ({ icon: o.icon, label: o.label, fn: () => addPrefab(o, at) }))]) },
+    { icon: 'check', label: 'Select Several…', k: 'tap objects, or drag a box', fn: () => startMulti([]) },
     { icon: 'frame', label: 'Reset View', fn: () => { resetCamera(); applyCamera(); } },
     { icon: 'gear', label: 'Game Settings', fn: () => { select(SCENE_ID); setDock('inspector'); } },
     { icon: 'scene', label: 'Project Settings…', fn: openProjectSettings },
@@ -2352,6 +2406,7 @@ function renderHierarchy() {
         '-', { icon: 'gear', label: 'Tags & Layers…', fn: openTagsLayers }].filter(Boolean)); } },
     icon('list'), hKind === 'all' ? '' : kindLabel);
   const selBtn = h('button', { class: 'h-sel-btn' + (multi ? ' on' : ''), title: 'Select several objects', onclick: () => { multi = multi ? null : new Set(selectedId && ent(selectedId) ? [selectedId] : []); renderHierarchy(); } }, icon('check'));
+  const uiBtn = project.entities.some((q) => q.ui) && !uiMode ? h('button', { class: 'h-chip h-ui-btn' + (EP.hideUI ? ' on' : ''), title: EP.hideUI ? 'Show the UI in the Scene' : 'Hide the UI in the Scene (only while editing: the game still has it)', onclick: () => { $('#hideUiBtn')?.click(); renderHierarchy(); } }, icon(EP.hideUI ? 'eyeoff' : 'eye'), EP.hideUI ? 'UI hidden' : 'Hide UI') : null;
   const tools = h('div', { class: 'h-tools' }, h('button', { onclick: () => openCreate() }, icon('plus'), 'Create'), search, filterBtn, selBtn);
   // quick filters: only the kinds this level has, with how many
   const kindCount = (k) => { const keep = hKind; hKind = k; const f = hFilter; hFilter = ''; const n = project.entities.filter(hMatch).length; hKind = keep; hFilter = f; return n; };
@@ -2359,6 +2414,7 @@ function renderHierarchy() {
   const chips = h('div', { class: 'h-chips' },
     ...H_FILTERS.map(([k, l]) => [k, l, k === 'all' ? project.entities.length : kindCount(k)]).filter(([k, , n]) => k === 'all' || n || hKind === k).map(([k, l, n]) =>
       h('button', { class: 'h-chip' + (hKind === k ? ' on' : ''), onclick: () => { hKind = hKind === k && k !== 'all' ? 'all' : k; renderHierarchy(); } }, l, h('b', {}, n))),
+    uiBtn,
     parents.length ? h('button', { class: 'h-chip h-fold', title: anyOpen ? 'Fold everything' : 'Unfold everything', onclick: () => { if (anyOpen) for (const q of parents) closedKids.add(q.id); else closedKids.clear(); renderHierarchy(); } }, icon(anyOpen ? 'collapse' : 'chevron'), anyOpen ? 'Fold all' : 'Unfold all') : null);
   // where the selected object sits: tap a step to go there
   const path = []; for (let q = selectedId && selectedId !== SCENE_ID ? ent(selectedId) : null, n = 0; q && n < 40; q = q.parent ? ent(q.parent) : null, n++) path.unshift(q);
@@ -2402,9 +2458,18 @@ function renderHierarchy() {
         else { select(e.id); if (pg && !live) setUIPage(pageKey); } // a page: show it too
       },
       oncontextmenu: (ev) => { if (multi) return; ev.preventDefault(); openObjectMenu(e.id, 0, 0, ev.currentTarget.querySelector('.nm') || ev.currentTarget); },
-      onpointerdown: (ev) => { if (multi || ev.pointerType === 'mouse' || ev.button > 0 || ev.target.closest('button')) return; const row = ev.currentTarget, x0 = ev.clientX, y0 = ev.clientY; clearTimeout(row._hold); row._held = false; // hold for the object menu
+      onpointerdown: (ev) => { if (multi || ev.pointerType === 'mouse' || ev.button > 0 || ev.target.closest('button')) return; const row = ev.currentTarget, x0 = ev.clientX, y0 = ev.clientY; clearTimeout(row._hold); row._held = false; // hold for the object menu; swipe left for quick actions
         const stop = () => { clearTimeout(row._hold); row.removeEventListener('pointerup', stop); row.removeEventListener('pointercancel', stop); row.removeEventListener('pointermove', mv); };
-        const mv = (m) => { if (Math.hypot(m.clientX - x0, m.clientY - y0) > 8) stop(); };
+        let sw = 0;
+        const mv = (m) => {
+          const dx = m.clientX - x0, dy = m.clientY - y0;
+          if (Math.hypot(dx, dy) > 8) clearTimeout(row._hold);
+          if (!sw && Math.abs(dx) > 12 && Math.abs(dx) > Math.abs(dy) * 1.5) sw = 1; // a sideways swipe, not a scroll
+          if (sw) { row.style.transform = `translateX(${Math.min(0, Math.max(-150, dx))}px)`; if (dx < -70 && sw === 1) { sw = 2; buzz(6); } else if (dx > -70 && sw === 2) sw = 1; }
+          else if (Math.hypot(dx, dy) > 8) stop();
+        };
+        const up = () => { row.removeEventListener('pointerup', up); row.removeEventListener('pointercancel', up); row.style.transform = ''; if (sw === 2) { row._held = true; swipedId = e.id; renderRows(); } else if (sw) row._held = true; };
+        row.addEventListener('pointerup', up); row.addEventListener('pointercancel', up);
         row.addEventListener('pointerup', stop); row.addEventListener('pointercancel', stop); row.addEventListener('pointermove', mv);
         row._hold = setTimeout(() => { stop(); row._held = true; buzz(10); openObjectMenu(e.id, 0, 0, row.querySelector('.nm') || row); }, 520); },
     },
@@ -2418,7 +2483,12 @@ function renderHierarchy() {
     e.locked && h('button', { class: 'eye', title: 'Unlock', onclick: (ev) => { ev.stopPropagation(); e.locked = false; changed({ structure: true }); } }, icon('key')),
     h('button', { class: 'eye', title: 'Toggle visibility', onclick: (ev) => { ev.stopPropagation(); e.visible = e.visible === false; changed({ structure: true }); } }, icon(e.visible === false ? 'eyeoff' : 'eye')),
     e.id === selectedId && h('button', { class: 'eye', title: 'More actions', onclick: (ev) => { ev.stopPropagation(); openObjectMenu(e.id, 0, 0, ev.currentTarget); } }, icon('more')),
-    h('button', { class: 'eye h-grip', title: 'Drag: drop on an object to put it inside, or on its top or bottom edge to move it above or below', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')));
+    h('button', { class: 'eye h-grip', title: 'Drag: drop on an object to put it inside, or on its top or bottom edge to move it above or below', onpointerdown: (ev) => startRowDrag(ev, e.id), onclick: (ev) => ev.stopPropagation() }, icon('move')),
+    swipedId === e.id && h('div', { class: 'h-swipe', onclick: (ev) => ev.stopPropagation() }, // swiped left: quick actions
+      h('button', { onclick: () => { swipedId = null; e.visible = e.visible === false; changed({ structure: true }); pushHistory(); } }, icon(e.visible === false ? 'eye' : 'eyeoff'), e.visible === false ? 'Show' : 'Hide'),
+      h('button', { onclick: () => { swipedId = null; duplicateEntity(e.id); } }, icon('copy'), 'Copy'),
+      h('button', { class: 'danger', onclick: () => { swipedId = null; deleteEntity(e.id); } }, icon('trash'), 'Delete'),
+      h('button', { class: 'h-swipe-x', 'aria-label': 'Close', onclick: () => { swipedId = null; renderRows(); } }, icon('close'))));
   };
   const tree = (list) => { // parents with their children folded underneath; 3+ top-level copies of one name fold into a group
     const inList = new Set(list.map((e) => e.id)), out = [];
@@ -4859,6 +4929,16 @@ function renderSceneSettings(box) {
     ], ['joystickMode', 'joystickZone', 'joystickDirections', 'joystickResponse', 'joystickDeadZone', 'joystickSize', 'joystickStyle', 'joystickColor', 'joystickVisible'].some((k) => project.settings?.[k] != null && project.settings[k] !== '')),
     h('p', { class: 'desc' }, 'On a keyboard: arrows/WASD move, Space jumps, E fires.'),
   ], { icon: 'gamepad', key: 's-touch' }));
+  box.append(comp('Keyboard & Controller', [
+    h('p', { class: 'desc' }, 'Keys and game-controller buttons for the player, separated by commas. Controller buttons are pad:a, pad:b, pad:x, pad:y, pad:lb, pad:rb, pad:lt, pad:rt, pad:start, pad:select and pad:up / down / left / right; the left stick and D-pad steer. Arrow keys and WASD always move.'),
+    C('settings.keyJump', { label: 'Jump', type: 'text', def: '', placeholder: 'space, pad:a' }),
+    C('settings.keyFire', { label: 'Fire / action', type: 'text', def: '', placeholder: 'j, enter, pad:b' }),
+    C('settings.keyDash', { label: 'Dash', type: 'text', def: '', placeholder: 'x, k, pad:x' }),
+    C('settings.keyRun', { label: 'Run (hold)', type: 'text', def: '', placeholder: 'shift, pad:rb' }),
+    C('settings.gamepad', { label: 'Game controllers', type: 'bool', def: true, infoText: 'Bluetooth or USB controllers (Xbox, PlayStation, Switch Pro…) on phones, tablets and computers.' }),
+    C('settings.gamepadDeadZone', { label: 'Stick dead zone', type: 'number', def: 0.2, step: 0.05, range: [0, 0.9] }),
+    h('p', { class: 'desc' }, 'Triggers and scripts can use any of these names in Key pressed / Key held (pad:start to pause, for example). The game hears a gamepad event when a controller connects.'),
+  ], { icon: 'gamepad', key: 's-keys' }));
   box.append(comp('Notifications', [
     h('p', { class: 'desc' }, 'Pop-ups for achievements, rewards and messages. Each type has its own look. Show one with the message notify:TYPE Title|text|icon (e.g. notify:reward Coins!|+50), the Notify node, a trigger\'s "Show notification", or a Button set to "show notification".'),
     h('div', { class: 'nt-list' }, allNotifyTypes().map((t) => h('div', { class: 'nt-row' },
@@ -5349,13 +5429,13 @@ function openAddComponent(startCat) {
 // ---- Project panel: prefabs, objects, components (tap to add, drag into the scene) ----
 for (const o of OBJECTS_3D) { const m = o.props.mesh; if (m && !o.props.body) o.props.collider = { shape: m.geometry === 'sphere' ? 'sphere' : 'box' }; } // Unity's 3D primitives come with colliders
 
-let projectTab = store.get('pocket.editor.ptab', 'prefabs'), projectQuery = '', projectView = store.get('pocket.editor.pview', 'grid');
+let projectTab = store.get('pocket.editor.ptab', 'game'), projectQuery = '', projectView = store.get('pocket.editor.pview', 'grid');
 const projectScroll = {}; // tab → scroll position, so switching tabs returns where you were
-const PROJECT_TABS = () => [['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['sounds', 'Sounds', 'bolt'], ['components', 'Components', 'folder']];
+const PROJECT_TABS = () => [['game', 'This game', 'home'], ['prefabs', 'Prefabs', 'folder'], ['objects', 'Objects', 'folder'], is3D() ? ['models', 'Models', 'cube'] : ['sprites', 'Sprites', 'star'], ['ui', 'UI', 'hud'], ['sounds', 'Sounds', 'bolt'], ['components', 'Components', 'folder']];
 /** The tiles a Project tab shows. */
 function projectItems(tab) {
   if (tab === 'components') return componentsFor(null).filter((c) => c.ok({})).map((c) => ({ icon: c.icon, label: c.label, payload: { kind: 'component', key: c.key, label: c.label, icon: c.icon }, comp: true }));
-  if (tab === 'sounds') return [];
+  if (tab === 'sounds' || tab === 'game') return [];
   const src = tab === 'prefabs' ? (is3D() ? PREFABS_3D : PREFABS_2D)
     : tab === 'models' ? MODELS_3D.map((m) => ({ icon: m.icon, label: m.label, props: { name: m.label, y: 0, model: { parts: clone(m.parts) } } }))
       : tab === 'sprites' ? Object.entries(SPRITE_GROUPS).flatMap(([cat, list]) => list.map((k) => { const nm = k.replace(/^ui-/, '').replace(/([A-Z])/g, ' $1').replace(/^./, (c) => c.toUpperCase()); return { art: 'art:' + k, label: nm, group: cat, props: { name: nm, ...(k.startsWith('ui-') || frameSlice('art:' + k) ? { ui: true, anchor: 'center', x: 0, y: 0 } : {}), sprite: frameSlice('art:' + k) ? { src: 'art:' + k, w: k.startsWith('btn') ? 180 : 260, h: k.startsWith('btn') ? 64 : 180, slice: frameSlice('art:' + k) } : { src: 'art:' + k, w: k.startsWith('ui-') ? 40 : 56, h: k.startsWith('ui-') ? 40 : 56 } } }; }))
@@ -5382,8 +5462,15 @@ function fillProject() {
   if (!tabs.some((t) => t[0] === projectTab)) projectTab = 'prefabs';
   const q = projectQuery.trim().toLowerCase(), match = (it) => !q || `${it.label} ${it.group || ''}`.toLowerCase().includes(q);
   const mineAll = userPrefabs().filter((p) => !!p.entities[0].ui === !!uiMode || !uiMode);
-  const hitsIn = (k) => q ? projectItems(k).filter(match).length + (k === 'prefabs' ? mineAll.filter((p) => p.name.toLowerCase().includes(q)).length : 0) : 0;
-  const tile = (it) => { const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.art ? h('div', { class: 'th art' + (it.art.startsWith('art:ui-') ? ' uiic' : '') }, h('img', { src: artURL(it.art), alt: '' })) : it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label)); draggable(t, it.payload); return t; };
+  const hitsIn = (k) => !q ? 0 : k === 'game' ? gameHits(q).length : projectItems(k).filter(match).length + (k === 'prefabs' ? mineAll.filter((p) => p.name.toLowerCase().includes(q)).length : 0);
+  const tile = (it, k) => {
+    if (typeof k !== 'string') k = projectTab; // (list.map(tile) passes the index)
+    const key = `${k}|${it.label}`, fav = pFavs().includes(key); it.payload.tab = k; it.payload.item = it.label; // (placing it records it under Recent)
+    const t = h('div', { class: 'tile' + (it.comp ? ' comp-tile' : '') }, it.art ? h('div', { class: 'th art' + (it.art.startsWith('art:ui-') ? ' uiic' : '') }, h('img', { src: artURL(it.art), alt: '' })) : it.emoji ? h('div', { class: 'th emo' }, it.emoji) : h('div', { class: 'th' }, icon(it.icon)), h('div', { class: 'lb' }, it.label),
+      h('button', { class: 'tile-fav' + (fav ? ' on' : ''), title: fav ? 'Remove from Favorites' : 'Add to Favorites', 'aria-label': fav ? 'Remove from Favorites' : 'Add to Favorites', onpointerdown: (e) => e.stopPropagation(),
+        onclick: (e) => { e.stopPropagation(); const L = pFavs().filter((x) => x !== key); if (!fav) L.unshift(key); store.set('pocket.editor.pfav', JSON.stringify(L.slice(0, 60))); toast(fav ? `Removed ${it.label} from Favorites` : `Added ${it.label} to Favorites`); fillProject(); } }, icon('star')));
+    draggable(t, it.payload); return t;
+  };
   const mineTile = (pf) => {
     const t = h('div', { class: 'tile mine' }, h('div', { class: 'th' }, icon(iconFor(pf.entities[0]))), h('div', { class: 'lb' }, pf.name),
       h('button', { class: 'tile-more', title: 'Prefab options', onpointerdown: (e) => e.stopPropagation(), onclick: (e) => { e.stopPropagation(); prefabAssetMenu(pf, e.currentTarget); } }, icon('more')));
@@ -5396,23 +5483,33 @@ function fillProject() {
   top.querySelector('.p-tabs').replaceChildren(...tabs.map(([k, l, ic]) => { const n = hitsIn(k); return h('button', { class: (projectTab === k && !q ? 'active' : '') + (q && !n ? ' none' : ''), onclick: () => { if (!q) projectScroll[projectTab] = box.scrollTop; projectTab = k; projectQuery = ''; store.set('pocket.editor.ptab', k); renderProject(); } }, icon(ic), l, q && n ? h('span', { class: 'p-n' }, n) : null); }));
   jump.replaceChildren(); box.onscroll = null;
 
-  if (q) { // search every tab at once
+  if (q) { // search every tab at once, your game's own things first
     let any = false;
+    const own = gameHits(q);
+    if (own.length) { any = true; box.append(sec('In this game', own.length), h('div', { class: 'p-rows' }, own.slice(0, 40).map(gameRow))); }
     for (const [k, l] of tabs) {
+      if (k === 'game') continue;
       const mine = k === 'prefabs' ? mineAll.filter((p) => p.name.toLowerCase().includes(q)) : [];
       const list = projectItems(k).filter(match);
       if (!list.length && !mine.length) continue;
       any = true;
-      box.append(sec(l, list.length + mine.length), grid([...mine.map(mineTile), ...list.slice(0, 60).map(tile)]));
+      box.append(sec(l, list.length + mine.length), grid([...mine.map(mineTile), ...list.slice(0, 60).map((it) => tile(it, k))]));
     }
     if (!any) box.append(h('p', { class: 'p-note' }, `Nothing called “${projectQuery.trim()}”. Try a shorter word, or open the Create screen.`));
     top.querySelector('.p-create').hidden = false; box.scrollTop = 0;
     return;
   }
+  if (projectTab === 'game') { box.append(...gameTab({ tile, mineTile, grid, sec, mineAll })); box.scrollTop = projectScroll.game || 0; return; }
   if (projectTab === 'sounds') { box.append(...soundsTab()); box.scrollTop = projectScroll.sounds || 0; return; }
   if (projectTab === 'components') top.querySelector('.p-create').hidden = true;
   const items = projectItems(projectTab);
   const mine = projectTab === 'prefabs' ? mineAll : [];
+  { // Favorites and Recent from this tab, on top
+    const pickFrom = (keys) => keys.map((key) => { const [k, ...rest] = key.split('|'), l = rest.join('|'); return k === projectTab ? items.find((it) => it.label === l) : null; }).filter(Boolean);
+    const favs = pickFrom(pFavs()), rec = pickFrom(pRecent()).filter((it) => !favs.includes(it)).slice(0, 8);
+    if (favs.length) box.append(sec('Favorites', favs.length), grid(favs.map((it) => tile(it))));
+    if (rec.length) box.append(sec('Recent', rec.length), grid(rec.map((it) => tile(it))));
+  }
   const groups = [...new Set(items.map((it) => it.group).filter(Boolean))].sort((a, b) => (UI_GROUPS.indexOf(a) + 99) % 99 - (UI_GROUPS.indexOf(b) + 99) % 99);
   const secs = [...(mine.length ? ['My Prefabs'] : []), ...(groups.length > 1 ? groups : [])];
   if (secs.length > 2) { // jump chips: one per section, the current one lit as you scroll
@@ -5428,7 +5525,7 @@ function fillProject() {
       [...jump.children].forEach((b, i) => b.classList.toggle('on', i === cur));
     };
   }
-  if (mine.length) box.append(sec('My Prefabs', mine.length), grid(mine.map(mineTile)), sec('Built-in'));
+  if (mine.length) box.append(...mineSections(mine, { mineTile, grid, sec }), sec('Built-in'));
   if (groups.length > 1) for (const g of groups) { const list = items.filter((it) => it.group === g); box.append(sec(g, list.length), grid(list.map(tile))); }
   else box.append(grid(items.map(tile)));
   box.append(h('p', { class: 'p-note' }, projectTab === 'components'
@@ -5436,6 +5533,78 @@ function fillProject() {
     : 'Drag into the Scene to place, or tap to add at the center of the view.' + (projectTab === 'prefabs' && !mine.length ? ' Make your own prefabs: long-press an object (or its ⋯ menu) and pick Make Prefab.' : '')));
   box.scrollTop = projectScroll[projectTab] || 0;
   jump.firstChild?.classList.add('on'); box.onscroll?.();
+}
+
+// ---- Project panel: favorites, recent, This game, prefab folders ----
+const pList = (k) => { try { const v = JSON.parse(store.get(k, '[]')); return Array.isArray(v) ? v : []; } catch { return []; } };
+const pFavs = () => pList('pocket.editor.pfav'), pRecent = () => pList('pocket.editor.precent'); // 'tab|label'
+/** A tile placed from the Project panel goes to the front of Recent. */
+function noteRecent(p) { if (!p?.tab || !p.item) return; const key = `${p.tab}|${p.item}`; store.set('pocket.editor.precent', JSON.stringify([key, ...pRecent().filter((x) => x !== key)].slice(0, 12))); }
+const pfClosed = new Set(); // prefab folders folded in the Project panel
+const goObj = (li, id) => { if (li !== levelIdx && !setLevel(li)) return; select(id); reveal(id); setDock('hierarchy'); renderHierarchy(); };
+/** Your game's own things whose name matches: objects (every level), levels, scripts, prefabs, data, items, quests, dialogues, sounds. */
+function gameHits(q) {
+  const out = [], has = (...t) => t.some((x) => String(x || '').toLowerCase().includes(q));
+  levelList().forEach((lv, li) => {
+    if (has(levelName(lv, li))) out.push({ icon: 'layers', label: levelName(lv, li), sub: 'Level', fn: () => { setLevel(li); renderProject(); } });
+    for (const e of lv.entities || []) if (has(e.name, ...(e.tags || []))) out.push({ icon: iconFor(e), label: e.name || 'Object', sub: lv === project ? (e.ui ? 'UI object' : 'Object') : `Object · ${levelName(lv, li)}`, fn: () => goObj(li, e.id) });
+  });
+  for (const x of allGraphs()) if (has(x.e.name, x.name)) out.push({ icon: 'nodes', label: x.name ? `${x.e.name} · ${x.name}` : x.e.name || 'Script', sub: 'Visual Script', fn: () => openGraphAt(x.li, x.e.id, x.path || x.bi) });
+  for (const pf of userPrefabs()) if (has(pf.name, pf.folder)) out.push({ icon: iconFor(pf.entities[0]), label: pf.name, sub: 'My prefab · tap to add a copy', fn: () => instantiatePrefab(pf.id) });
+  (root.collections || []).forEach((c, i) => { if (has(c.name)) out.push({ icon: 'list', label: c.name, sub: 'Data', fn: () => openCollectionEditor(i) }); });
+  (root.items || []).forEach((d, i) => { if (has(d.name)) out.push({ icon: 'gem', label: d.name, sub: 'Item', fn: () => openItemEditor(i) }); });
+  (root.quests || []).forEach((d, i) => { if (has(d.name)) out.push({ icon: 'flag', label: d.name, sub: 'Quest', fn: () => openQuestEditor(i) }); });
+  (root.dialogues || []).forEach((d, i) => { if (has(d.name)) out.push({ icon: 'chat', label: d.name, sub: 'Dialogue', fn: () => openDialogueEditor(i) }); });
+  for (const n of Object.keys(root.sounds || {})) if (has(n)) out.push({ icon: 'bolt', label: n, sub: 'Sound', fn: () => { projectTab = 'sounds'; projectQuery = ''; renderProject(); } });
+  return out;
+}
+const gameRow = (r) => h('button', { class: 'p-row', onclick: r.fn }, r.thumb ? h('img', { class: 'p-rth', src: r.thumb, alt: '' }) : h('span', { class: 'p-ric' }, icon(r.icon)),
+  h('span', { class: 'p-rt' }, h('b', {}, r.label), r.sub ? h('small', {}, r.sub) : null), r.chip ? h('span', { class: 'tagchip' }, r.chip) : null, icon('chevron'));
+/** My Prefabs: sorted (A–Z or newest), in folders you can fold. */
+function mineSections(mine, { mineTile, grid, sec }) {
+  const az = store.get('pocket.editor.pfsort', 'newest') === 'az', list = az ? [...mine].sort((a, b) => a.name.localeCompare(b.name)) : [...mine].reverse();
+  const head = sec('My Prefabs', mine.length);
+  head.append(h('button', { class: 'p-sort', title: 'Sort', onclick: () => { store.set('pocket.editor.pfsort', az ? 'newest' : 'az'); fillProject(); } }, az ? 'A–Z' : 'Newest'));
+  const folders = [...new Set(list.map((p) => p.folder || '').filter(Boolean))].sort((a, b) => a.localeCompare(b)), loose = list.filter((p) => !p.folder), out = [head];
+  if (loose.length) out.push(grid(loose.map(mineTile)));
+  for (const f of folders) {
+    const inF = list.filter((p) => p.folder === f), shut = pfClosed.has(f);
+    out.push(h('button', { class: 'p-folder' + (shut ? ' shut' : ''), 'data-folder': f, onclick: () => { shut ? pfClosed.delete(f) : pfClosed.add(f); fillProject(); } }, icon('chevron'), icon('folder'), h('b', {}, f), h('span', { class: 'p-n' }, inF.length)));
+    if (!shut) out.push(grid(inF.map(mineTile)));
+  }
+  return out;
+}
+/** The This game tab: what your game is made of, each row jumps there. */
+function gameTab({ tile, mineTile, grid, sec, mineAll }) {
+  const out = [], rows = (list) => h('div', { class: 'p-rows' }, list.map(gameRow));
+  const LV = levelList();
+  out.push(sec('Levels', LV.length), rows([...LV.map((lv, i) => ({ icon: (lv.mode || root.mode) === '3d' ? 'cube' : 'grid', label: levelName(lv, i), sub: `${(lv.entities || []).filter((e) => !e.ui).length} objects · ${(lv.entities || []).filter((e) => e.ui).length} UI`, chip: i === levelIdx ? 'editing' : '', fn: () => { if (i !== levelIdx) { setLevel(i); renderProject(); } else setDock('hierarchy'); } })),
+    { icon: 'plus', label: 'Levels…', sub: 'Add, rename, reorder or duplicate levels', fn: () => openLevelMenu() }]));
+  // objects in this level by kind: tap filters the Hierarchy
+  const count = (k) => { const keep = hKind, f = hFilter; hKind = k; hFilter = ''; const n = project.entities.filter(hMatch).length; hKind = keep; hFilter = f; return n; };
+  const kinds = H_FILTERS.map(([k, l]) => [k, l, count(k)]).filter(([k, , n]) => k === 'all' || n);
+  out.push(sec('Objects in this level', project.entities.length), h('div', { class: 'p-kinds' }, kinds.map(([k, l, n]) => h('button', { class: 'h-chip', onclick: () => { hKind = k; hFilter = ''; setDock('hierarchy'); renderHierarchy(); } }, l, h('b', {}, n)))));
+  const G = allGraphs();
+  if (G.length) out.push(sec('Scripts', G.length), rows([...G.slice(0, 8).map((x) => ({ icon: 'nodes', label: x.name ? `${x.e.name} · ${x.name}` : x.e.name || 'Script', sub: x.li === levelIdx ? 'Visual Script' : `Visual Script · ${levelName(LV[x.li], x.li)}`, fn: () => openGraphAt(x.li, x.e.id, x.path || x.bi) })),
+    { icon: 'list', label: G.length > 8 ? `All ${G.length} scripts…` : 'Scripts panel', sub: 'Search and open every script', fn: () => setDock('scripts') }]));
+  // favorites and recent from every tab
+  const resolve = (keys) => keys.map((key) => { const [k, ...rest] = key.split('|'), l = rest.join('|'), it = PROJECT_TABS().some((t) => t[0] === k) ? projectItems(k).find((x) => x.label === l) : null; return it ? tile(it, k) : null; }).filter(Boolean);
+  const fav = resolve(pFavs()), rec = resolve(pRecent().filter((k) => !pFavs().includes(k)).slice(0, 8));
+  if (fav.length) out.push(sec('Favorites', fav.length), grid(fav));
+  if (rec.length) out.push(sec('Recent', rec.length), grid(rec));
+  if (mineAll.length) out.push(...mineSections(mineAll, { mineTile, grid, sec }));
+  // pictures you imported or drew
+  const pics = []; LV.forEach((lv, li) => { for (const e of lv.entities || []) if (e.sprite && (String(e.sprite.src || '').startsWith('data:') || e.sprite.drawing)) pics.push({ thumb: e.sprite.src ? artURL(e.sprite.src) : '', icon: 'image', label: e.name || 'Picture', sub: (e.sprite.drawing ? 'Drawing' : 'Imported picture') + (li !== levelIdx ? ` · ${levelName(lv, li)}` : ''), fn: () => { goObj(li, e.id); setDock('inspector'); } }); });
+  if (pics.length) out.push(sec('Pictures', pics.length), rows(pics.slice(0, 20)));
+  const snd = Object.keys(root.sounds || {});
+  if (snd.length) out.push(sec('Sounds', snd.length), rows(snd.map((n) => ({ icon: 'bolt', label: n, sub: 'Imported sound', fn: () => { projectTab = 'sounds'; renderProject(); } }))));
+  const data = [...(root.collections || []).map((c, i) => ({ icon: 'list', label: c.name, sub: `Data · ${(c.rows || []).length} records`, fn: () => openCollectionEditor(i) })),
+    ...(root.items || []).map((d, i) => ({ icon: 'gem', label: d.name, sub: 'Item', fn: () => openItemEditor(i) })),
+    ...(root.quests || []).map((d, i) => ({ icon: 'flag', label: d.name, sub: 'Quest', fn: () => openQuestEditor(i) })),
+    ...(root.dialogues || []).map((d, i) => ({ icon: 'chat', label: d.name, sub: 'Dialogue', fn: () => openDialogueEditor(i) }))];
+  if (data.length) out.push(sec('Data, items & story', data.length), rows(data));
+  out.push(h('p', { class: 'p-note' }, 'Tap a row to jump there. Star tiles in the other tabs to keep them under Favorites; what you place shows under Recent. Long-press a prefab’s ⋯ to put it in a folder.'));
+  return out;
 }
 
 // ---- drag & drop ----
@@ -5499,7 +5668,7 @@ function endDrag(e, cancelled) {
     if (id && id !== SCENE_ID) addComponentTo(id, d.payload.key);
     else toast('Drop components onto an object');
   } else if (d.overScene) {
-    placePrefab(d.payload.def, d.lx, d.ly);
+    placePrefab(d.payload.def, d.lx, d.ly); noteRecent(d.payload);
   }
 }
 window.addEventListener('pointerup', (e) => endDrag(e, false));
@@ -5509,7 +5678,7 @@ function tapPayload(p) {
   if (p.kind === 'component') {
     if (!ent(selectedId)) { toast('Select an object first, or drag the component onto one'); return; }
     addComponentTo(selectedId, p.key);
-  } else addPrefab(p.def);
+  } else { addPrefab(p.def); noteRecent(p); }
 }
 
 // ============================================================================
@@ -5727,6 +5896,12 @@ function prefabAssetMenu(pf, anchor) {
     { cap: `${pf.name} · ${count} cop${count === 1 ? 'y' : 'ies'}` },
     { icon: 'plus', label: 'Add a Copy', fn: () => instantiatePrefab(pf.id) },
     { icon: 'edit', label: 'Rename…', fn: () => { const n = prompt('Prefab name', pf.name); if (!n?.trim()) return; pf.name = n.trim(); changed(); renderProject(); } },
+    { icon: 'folder', label: pf.folder ? `Folder: ${pf.folder}…` : 'Move to Folder…', fn: () => {
+      const have = [...new Set(userPrefabs().map((p) => p.folder).filter(Boolean))];
+      const n = prompt(`Folder for “${pf.name}”${have.length ? ` (you have: ${have.join(', ')})` : ''}. Blank = no folder`, pf.folder || ''); if (n === null) return;
+      if (n.trim()) pf.folder = n.trim(); else delete pf.folder; pfClosed.delete(pf.folder); changed(); renderProject(); toast(n.trim() ? `Moved ${pf.name} to ${n.trim()}` : `${pf.name} is out of its folder`);
+    } },
+    pf.folder && { icon: 'edit', label: `Rename Folder “${pf.folder}”…`, fn: () => { const old = pf.folder, n = prompt('Folder name', old); if (!n?.trim() || n.trim() === old) return; for (const p of userPrefabs()) if (p.folder === old) p.folder = n.trim(); changed(); renderProject(); } },
     { icon: 'trash', label: 'Delete Prefab', fn: () => {
       if (!confirm(`Delete the prefab “${pf.name}”? Its ${count} cop${count === 1 ? 'y stays' : 'ies stay'} as plain objects.`)) return;
       eachInstance(pf.id, (e) => delete e.prefab); root.prefabs = userPrefabs().filter((p) => p !== pf);
@@ -8130,7 +8305,7 @@ for (const [name, ic, label] of [['scene', 'scene', 'Scene'], ['hierarchy', 'lis
   let st = null;
   $('#sheet').addEventListener('touchstart', (e) => {
     const t = e.touches[0];
-    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .ap-grid, .lm-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
+    st = e.touches.length === 1 && !e.target.closest('input, textarea, select, .p-tabs, .tiles, .num, .slider, .csws, .tl, #dockTabs, .ac-cat, .rule, .h-grip, .h-row, .h-swipe, .ap-grid, .lm-grid') ? { x: t.clientX, y: t.clientY, t: performance.now() } : null;
   }, { passive: true });
   $('#sheet').addEventListener('touchend', (e) => {
     if (!st) return;

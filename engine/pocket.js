@@ -1971,7 +1971,7 @@ export class Physics {
       if (b.lockX) b.vel.x = 0; if (b.lockY) b.vel.y = 0; if (b.lockZ) b.vel.z = 0;
       b.lx = e.x; b.ly = e.y; b.lz = e.z;
       e.x += b.vel.x * dt; e.y += b.vel.y * dt; e.z += b.vel.z * dt;
-      b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.wall = 0; b.ceiling = false;
+      b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.ceiling = false; // (wall is cleared once a frame, before the sub-steps: the first one stops it at the wall, the rest don't touch)
     }
     this.envPass(scene, list, gd, land);
     // broad phase: sort by left edge on x and only test bodies whose x ranges overlap (sweep and prune)
@@ -1999,7 +1999,7 @@ export class Physics {
         // one-way platforms: only solid for something landing on top while falling
         if (ba.oneWay || bb.oneWay) {
           const [dyn, plat, n] = ma && !mb ? [a, b, m.ny] : mb && !ma ? [b, a, -m.ny] : [null];
-          if (!dyn || !(gd && n * gd > 0.5) || dyn.body.vel.y * gd < -0.01) continue;
+          if (!dyn || !(gd && n * gd > 0.5) || dyn.body.vel.y * gd < -0.01 || dyn.body.dropUntil > performance.now()) continue;
           const dex = dyn.extents(), hh = dex.sphere ? dex.r : dex.hy;
           if (m.depth > Math.max(hh * 0.5, 0.0001)) continue;
         }
@@ -2013,7 +2013,7 @@ export class Physics {
             ba.grounded = true; ba.groundedOn = b; land(ba, vn);
             if (!mb && bb.dx !== undefined) { a.x += bb.dx; a.z += bb.dz; if (bb.dy * gd < 0) a.y += bb.dy; } // ride moving platforms
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); ba.vel.x *= k; if (gd && b.mesh) ba.vel.z *= k; }
-          }
+          } else if (gd && m.ny * gd < -0.5) ba.ceiling = true; else if (!mb && Math.abs(m.nx) > 0.5) ba.wall = Math.sign(m.nx); // a wall (not another moving thing) on that side
           A.ex = a.extents();
         }
         if (mb) {
@@ -2024,7 +2024,7 @@ export class Physics {
             bb.grounded = true; bb.groundedOn = a; land(bb, -vn);
             if (!ma && ba.dx !== undefined) { b.x += ba.dx; b.z += ba.dz; if (ba.dy * gd < 0) b.y += ba.dy; }
             if (fr) { const k = Math.max(0, 1 - fr * dt * 10); bb.vel.x *= k; if (b.mesh) bb.vel.z *= k; }
-          }
+          } else if (gd && m.ny * gd > 0.5) bb.ceiling = true; else if (!ma && Math.abs(m.nx) > 0.5) bb.wall = -Math.sign(m.nx);
           B.ex = b.extents();
         }
       }
@@ -2127,7 +2127,7 @@ export class Physics {
     if ((ba.ignore || bb.ignore) && passes(a, b)) return false;
     if (solid && (ba.oneWay || bb.oneWay)) {
       const [dyn, plat] = ba.oneWay && !bb.oneWay ? [b, a] : bb.oneWay && !ba.oneWay ? [a, b] : [null, null]; if (!dyn || !gd) return true;
-      if ((dyn.body.preVel?.y ?? dyn.body.vel.y) * gd < -0.01) return false; // going up: pass through
+      if ((dyn.body.preVel?.y ?? dyn.body.vel.y) * gd < -0.01 || dyn.body.dropUntil > performance.now()) return false; // going up (or dropping down through it): pass through
       const de = dyn.extents(), pe = plat.extents(), dh = de.sphere ? de.r : de.by ?? de.hy, ph = pe.sphere ? pe.r : pe.by ?? pe.hy;
       const feet = (dyn.body.ly ?? dyn.y) + (de.oy || 0) + dh * gd, top = plat.y + (pe.oy || 0) - ph * gd;
       return (feet - top) * gd <= Math.max(2, ph); // only if it was on or above the top
@@ -2246,6 +2246,9 @@ function collide(e, other, m) {
 // Input: touch — virtual joystick, buttons, taps, drags, swipes and tilt
 // ============================================================================
 /** A key's name for scripts: 'space', 'arrowup', 'a', 'enter'… (also accepts Space, Up, ArrowUp, A). */
+/** Default keys and controller buttons for the player's actions (Game Settings › Keyboard & controller changes them). */
+const KEY_DEFAULTS = { jump: 'space, pad:a', fire: 'j, enter, pad:b', dash: 'x, k, pad:x', run: 'shift, pad:rb' };
+const PAD_BUTTONS = ['pad:a', 'pad:b', 'pad:x', 'pad:y', 'pad:lb', 'pad:rb', 'pad:lt', 'pad:rt', 'pad:select', 'pad:start', 'pad:ls', 'pad:rs', 'pad:up', 'pad:down', 'pad:left', 'pad:right']; // the standard layout
 export function keyName(k) {
   const q = String(k ?? '').toLowerCase();
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
@@ -2870,6 +2873,7 @@ export class Input {
     this.stick = null; // { id, bx, by, x, y }
     this.buttons = []; // [{ action, x, y, r, label, id }]
     this.downs = []; // pointers pressed this frame: { id, x, y }
+    this.extra = { x: 0, y: 0 }; this.virtHeld = new Set(); this.noTapJump = false; // a player's control scheme (touch sides, hold toward the finger, swipe) steers through these each frame
     this.ups = []; // fingers lifted this frame: { id, x, y, sx, sy, time }
     this.useTilt = false; this.tiltOn = false; this.tiltAxis = null; this.tiltBase = null; this.tiltRaw = null;
     this.tiltCfg = { max: 20, dead: 3, smooth: 0.3, invertX: false, invertY: false, calibrate: 'start' }; // Move's tilt settings
@@ -3057,6 +3061,32 @@ export class Input {
   }
   get stickRadius() { const st = this.engine.scene?.settings || {}; return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[st.controlSize] || 1) * clamp(+st.joystickSize || 1, 0.5, 2) * (this.engine.prefs?.controlScale || 1); }
 
+  /** A game controller (Bluetooth or USB, on phones and computers): its buttons act as keys named pad:a, pad:b, pad:x, pad:y, pad:lb, pad:rb, pad:lt, pad:rt, pad:select, pad:start, pad:up… and the left stick steers. Polled once a frame. */
+  pollPad() {
+    const st = this.engine.scene?.settings || {};
+    let pad = null;
+    if (st.gamepad !== false && typeof navigator !== 'undefined' && navigator.getGamepads) { try { pad = [...navigator.getGamepads()].find((q) => q && q.connected !== false) || null; } catch { pad = null; } }
+    this.padKeys ||= new Set(); this.padAxis = null;
+    const now = new Set();
+    if (pad) {
+      if (!this.padSeen) { this.padSeen = true; this.engine.scene?.emit?.('gamepad', pad.id || 'controller'); }
+      PAD_BUTTONS.forEach((n, i) => { const b = pad.buttons?.[i]; if (n && b && (b.pressed || b.value > 0.5)) now.add(n); });
+      const dz = clamp(+(st.gamepadDeadZone ?? 0.2), 0, 0.9); let x = +pad.axes?.[0] || 0, y = +pad.axes?.[1] || 0; const l = Math.hypot(x, y);
+      if (l < dz) { x = 0; y = 0; } else { const m = Math.min(1, (l - dz) / (1 - dz)); x = x / l * m; y = y / l * m; }
+      this.padAxis = { x, y };
+    }
+    for (const k of now) if (!this.padKeys.has(k)) { this.keysDown.push(k); this.keys.add(k); }
+    for (const k of this.padKeys) if (!now.has(k)) { this.keys.delete(k); this.keysUp.push(k); }
+    this.padKeys = now;
+  }
+  /** The keys (and controller buttons) for an action: Game Settings › Keyboard & controller (keyJump, keyFire, keyDash, keyRun), or the defaults. */
+  binds(action) {
+    const st = this.engine.scene?.settings || {}, raw = st['key' + action[0].toUpperCase() + action.slice(1)];
+    return String(raw != null && String(raw).trim() !== '' ? raw : KEY_DEFAULTS[action] || '').split(',').map((q) => keyName(q)).filter(Boolean);
+  }
+  keyHit(action) { return this.binds(action).some((k) => this.keysDown.includes(k)); }
+  keyHeld(action) { return this.binds(action).some((k) => this.keys.has(k)); }
+
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
@@ -3080,7 +3110,9 @@ export class Input {
       if (b.action === 'dleft') x -= 1; else if (b.action === 'dright') x += 1; else if (b.action === 'dup') y -= 1; else if (b.action === 'ddown') y += 1;
     }
     if (this.useTilt && this.tiltAxis) { x += this.tiltAxis.x; y += this.tiltAxis.y; } // dead zone, range and smoothing were applied as it arrived
-    if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); y += (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0); } // arrow keys / WASD on a computer
+    x += this.extra.x; y += this.extra.y;
+    if (this.padAxis) { x += this.padAxis.x; y += this.padAxis.y; }
+    if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd', 'pad:right') ? 1 : 0) - (has('arrowleft', 'a', 'pad:left') ? 1 : 0); y += (has('arrowdown', 's', 'pad:down') ? 1 : 0) - (has('arrowup', 'w', 'pad:up') ? 1 : 0); } // arrow keys / WASD on a computer
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     return { x, y };
@@ -3088,7 +3120,7 @@ export class Input {
 
   /** Is a touch button held? Actions: 'jump', 'action' */
   isDown(action) {
-    if (action === 'jump' || action === 'action') return this.buttons.some((b) => b.action === action && b.id != null);
+    if (action === 'jump' || action === 'action') return this.buttons.some((b) => b.action === action && b.id != null) || this.virtHeld.has(action) || this.keyHeld(action === 'jump' ? 'jump' : 'fire');
     return false;
   }
   /** Was an action pressed this frame? */
@@ -3096,9 +3128,9 @@ export class Input {
     const j = this.justPressed;
     if (action === 'jump') {
       const hasBtn = this.buttons.some((b) => b.action === 'jump');
-      return j.has('btn:jump') || (!hasBtn && (j.has('tap') || j.has('swipe:up')));
+      return j.has('btn:jump') || j.has('virt:jump') || this.keyHit('jump') || (!hasBtn && !this.noTapJump && (j.has('tap') || j.has('swipe:up')));
     }
-    if (action === 'action') return j.has('btn:action');
+    if (action === 'action') return j.has('btn:action') || j.has('virt:action') || this.keyHit('fire');
     return j.has(action);
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
@@ -3108,7 +3140,7 @@ export class Input {
   endFrame() {
     if ((this.useTilt || this.wantMotion) && !this.tiltOn && !this.tiltMissing && this.enabled) this.enableTilt(); // Android / computers listen right away
     if (this.useTilt || this.wantMotion || this.motionPrompt) this.updateMotionPrompt();
-    this.justPressed.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.wheel.dx = 0; this.wheel.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
+    this.justPressed.clear(); this.extra.x = 0; this.extra.y = 0; this.virtHeld.clear(); this.taps.length = 0; this.downs.length = 0; this.ups.length = 0; this.drag.dx = 0; this.drag.dy = 0; this.wheel.dx = 0; this.wheel.dy = 0; this.keysDown.length = 0; this.keysUp.length = 0; this.shook = false; }
   /** Forget fingers and presses. `full` (a new level) also turns tilt off until a component asks again. */
   reset(full = false) { this.pointers.clear(); this.stick = null; if (full) { this.useTilt = false; this.tiltBase = null; } this.endFrame(); }
 }
@@ -5500,7 +5532,7 @@ registerBehavior('move', {
         }
         if (ax || ay) { const l = Math.hypot(ax, ay); lastDir = { x: ax / l, y: ay / l }; }
         // run
-        const keys = inp.keys || new Set(), shift = keys.has('shift');
+        const shift = inp.keyHeld('run');
         const rw = p.runWith || 'off', pushEdge = Math.hypot(a.x, a.y) > 0.95 && !!inp.stick;
         running = rw !== 'off' && !M.locked && (rw === 'always' ? !shift : shift || (rw === 'edge' && pushEdge) || (rw === 'action' && inp.isDown('action')) || (rw === 'jump' && inp.isDown('jump')));
         const sv = p.speedVar ? +s.vars[p.speedVar] : NaN, speed = p.speed * (Number.isFinite(sv) ? sv : 1) * (M.speedMul ?? 1) * (running ? +p.runSpeed || 1.7 : 1);
@@ -5513,7 +5545,7 @@ registerBehavior('move', {
           else if (dw === 'jump' && inp.justPressed.has('btn:jump')) go = [0, 0];
           else if (dw === 'doubletap' && inp.taps.length) { if (s.time - lastTap < 0.3) { go = [0, 0]; lastTap = -1; } else lastTap = s.time; }
           else if (dw === 'swipe') { for (const [k, v] of [['left', [-1, 0]], ['right', [1, 0]], ['up', [0, -1]], ['down', [0, 1]]]) if (inp.justPressed.has('swipe:' + k)) go = three && p.relative !== 'camera' ? v : v; }
-          if (inp.keysDown?.includes('space') && (dw === 'action' || dw === 'doubletap' || dw === 'swipe')) go = [0, 0];
+          if (inp.keyHit('dash')) go = [0, 0];
           if (go) e.move.dash(go[0] || lastDir.x, go[1] || lastDir.y);
         }
         // which finger drags: any free finger, or one that started on the object
@@ -5597,7 +5629,7 @@ function hitsEntity(s, e, sx, sy, padPx = 0) {
 }
 
 registerBehavior('platformer', {
-  label: 'Platformer', description: 'Run & jump. Uses gravity; tap or the jump button to jump.',
+  label: 'Platformer', description: 'Run & jump. Uses gravity; tap or the jump button to jump. More moves: air jumps, wall slide and wall jump, run, dash, dropping through platforms and ground pound.',
   params: [
     { key: 'speed', label: 'Run speed', type: 'number', default: 240, default3d: 7 },
     { key: 'jump', label: 'Jump power', type: 'number', default: 620, default3d: 10 },
@@ -5607,33 +5639,124 @@ registerBehavior('platformer', {
     { key: 'airControl', label: 'Air control (0–1)', type: 'number', default: 1, advanced: true },
     { key: 'variableJump', label: 'Short hop when tapping jump', type: 'bool', default: true, advanced: true },
     { key: 'faceDirection', label: 'Flip to face movement (2D)', type: 'bool', default: true, advanced: true },
+    // jumping feel
+    { key: 'airJumps', label: 'Jumps in the air', type: 'number', default: 0, range: [0, 5], step: 1, group: 'Jumping', infoText: '1 = double jump, 2 = triple jump. (Double jump on counts as 1.)' },
+    { key: 'coyoteTime', label: 'Jump just after leaving a ledge (s)', type: 'number', default: 0.12, range: [0, 0.5], step: 0.02, group: 'Jumping', infoText: '"Coyote time": a jump pressed a moment after running off an edge still works.' },
+    { key: 'jumpBuffer', label: 'Jump pressed just before landing (s)', type: 'number', default: 0.12, range: [0, 0.5], step: 0.02, group: 'Jumping', infoText: 'A jump pressed a moment too early happens as it lands.' },
+    { key: 'maxFall', label: 'Max fall speed (0 = no limit)', type: 'number', default: 0, step: 50, group: 'Jumping' },
+    // walls (2D)
+    { key: 'wallSlide', label: 'Slide down walls', type: 'bool', default: false, group: 'Walls' },
+    { key: 'wallSlideSpeed', label: 'Wall slide speed', type: 'number', default: 120, step: 10, group: 'Walls', showIf: (b) => !!b.wallSlide },
+    { key: 'wallJump', label: 'Wall jump', type: 'bool', default: false, group: 'Walls', infoText: 'Jump while touching a wall in the air: it springs off the wall (and the air jumps come back).' },
+    { key: 'wallJumpPush', label: 'Push away from the wall', type: 'number', default: 320, step: 20, group: 'Walls', showIf: (b) => !!b.wallJump },
+    // run & dash
+    { key: 'runWith', label: 'Run with', type: 'select', options: [['off', 'Off'], ['edge', 'Pushing the joystick to the edge'], ['action', 'Holding the Fire button'], ['always', 'Always (Shift walks on a keyboard)']], default: 'off', group: 'Run & dash', infoText: 'On a keyboard, hold Shift to run.' },
+    { key: 'runSpeed', label: 'Run speed ×', type: 'number', default: 1.6, range: [1, 5], step: 0.1, group: 'Run & dash', showIf: (b) => (b.runWith || 'off') !== 'off' },
+    { key: 'dashWith', label: 'Dash with', type: 'select', options: [['off', 'Off'], ['action', 'Fire button'], ['doubletap', 'Double tap (or a direction key twice)'], ['swipe', 'Swipe left / right']], default: 'off', group: 'Run & dash', infoText: 'A quick burst sideways that ignores gravity. X or K on a keyboard.' },
+    { key: 'dashSpeed', label: 'Dash speed', type: 'number', default: 800, step: 50, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashTime', label: 'Dash length (s)', type: 'number', default: 0.15, range: [0.05, 1], step: 0.05, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashCooldown', label: 'Dash cooldown (s)', type: 'number', default: 0.5, range: [0, 5], step: 0.1, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'airDashes', label: 'Dashes in the air', type: 'number', default: 1, range: [0, 5], step: 1, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashTrail', label: 'Dash effect', type: 'bool', default: true, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    // down
+    { key: 'dropThrough', label: 'Down drops through platforms', type: 'bool', default: true, group: 'Down', infoText: 'Down on the joystick (or a swipe down, S / ↓) on a one-way platform drops through it.' },
+    { key: 'groundPound', label: 'Ground pound', type: 'bool', default: false, group: 'Down', infoText: 'Down in the air slams straight down (shakes the camera when it lands).' },
+    { key: 'poundSpeed', label: 'Ground pound speed', type: 'number', default: 1400, step: 50, group: 'Down', showIf: (b) => !!b.groundPound },
   ],
   create(p) {
-    let coyote = 0, jumps = 0, rising = false;
+    let coyote = 0, airUsed = 0, rising = false, buffer = 0, facing = 1, dashT = 0, dashCd = 0, dashDir = 1, airDash = 0, gs0 = 1, wallLock = 0, pounding = false, wasDown = false, lastTap = -9, lastKey = { k: '', t: -9 }, running = false, lastWall = 0, wallMem = 0, bodyMax = 0;
+    const airJumps = () => Math.max(Math.round(+p.airJumps || 0), p.doubleJump ? 1 : 0);
+    const dashing = () => dashT > 0;
+    function dash(e, s, dir) {
+      const b = e.body; if (!b || dashCd > 0 || dashing() || is3D(e)) return false;
+      if (!b.grounded && airDash >= Math.round(+(p.airDashes ?? 1))) return false;
+      if (!b.grounded) airDash++;
+      dashDir = dir || facing; dashT = +p.dashTime || 0.15; dashCd = (+p.dashCooldown || 0) + dashT; gs0 = b.gravityScale ?? 1; b.gravityScale = 0; b.vel.y = 0; pounding = false;
+      s.emit('dash', e); if (p.dashTrail !== false) s.burst?.(e.x, e.y, e.z, '#ffffff', 10); s.engine.vibrate(10);
+      return true;
+    }
+    const endDash = (e) => { if (!dashing()) return; dashT = 0; if (e.body) { e.body.gravityScale = gs0; e.body.vel.x *= 0.5; } };
     return {
       start(e, s) {
-        e.ensureBody({ type: 'dynamic' });
+        e.ensureBody({ type: 'dynamic' }); bodyMax = +e.body.maxFall || 0; // (a Rigidbody's own max fall speed)
         if (!s.gravity) s.gravity = is3D(e) ? -25 : 1600;
+        for (const [use, word] of [[p.runWith, 'RUN'], [p.dashWith, 'DASH']]) // run / dash on the Fire button: make sure it's on screen
+          if (use === 'action' && !s.settings.actionButton) { s.settings.actionButton = true; if (!s.settings.actionLabel || s.settings.actionLabel === 'FIRE') s.settings.actionLabel = word; s.engine.layoutButtons?.(); }
+        e.move = Object.assign(e.move || { locked: false, speedMul: 1 }, { dash: (dx) => dash(e, s, Math.sign(dx || 0) || facing) }); // scripts: Dash, Lock Movement, Set Move Speed
+        Object.defineProperties(e.move, { running: { get: () => running, configurable: true }, dashing: { get: () => dashing(), configurable: true }, onWall: { get: () => !!(e.body && !e.body.grounded && e.body.wall), configurable: true } });
       },
       update(e, dt, s) { scaleSpeed(p, e);
-        const inp = s.engine.input, a = inp.axis(), b = e.body, up = is3D(e) ? 1 : -1;
-        const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
-        const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
-        b.vel.x = steer(b.vel.x, a.x * p.speed);
-        if (is3D(e)) b.vel.z = steer(b.vel.z, a.y * p.speed);
-        if (b.grounded) { coyote = 0.12; jumps = 0; } else coyote -= dt;
-        if (inp.pressed('jump') && (coyote > 0 || (p.doubleJump && jumps < 2))) {
-          b.vel.y = p.jump * up; coyote = 0; jumps = jumps ? jumps + 1 : 1; rising = true;
-          s.engine.audio.sfx('jump');
+        const inp = s.engine.input, b = e.body, three = is3D(e), up = three ? 1 : -1, M = e.move || { speedMul: 1 };
+        const a = M.locked ? { x: 0, y: 0 } : inp.axis(), keys = inp.keys || new Set(), kd = inp.keysDown || [];
+        if (a.x) facing = Math.sign(a.x);
+        // run
+        const shift = inp.keyHeld('run');
+        running = p.runWith === 'edge' ? Math.abs(a.x) > 0.9 || shift : p.runWith === 'action' ? inp.isDown('action') || shift : p.runWith === 'always' ? !shift : shift && (p.runWith || 'off') !== 'off';
+        const speed = p.speed * (running ? +p.runSpeed || 1.6 : 1) * (M.speedMul ?? 1);
+        // dash
+        dashCd -= dt;
+        if (!three && (p.dashWith || 'off') !== 'off' && !M.locked) {
+          let go = 0;
+          if (inp.keyHit('dash')) go = facing;
+          if (p.dashWith === 'action' && inp.pressed('action')) go = facing;
+          if (p.dashWith === 'swipe') { if (inp.pressed('swipe:left')) go = -1; else if (inp.pressed('swipe:right')) go = 1; }
+          if (p.dashWith === 'doubletap') {
+            if (inp.taps.length) { if (s.time - lastTap < 0.3) { go = facing; lastTap = -9; } else lastTap = s.time; }
+            for (const [k, d] of [['arrowleft', -1], ['a', -1], ['arrowright', 1], ['d', 1]]) if (kd.includes(k)) { if (lastKey.k === k && s.time - lastKey.t < 0.3) { go = d; lastKey = { k: '', t: -9 }; } else lastKey = { k, t: s.time }; }
+          }
+          if (go) dash(e, s, go);
         }
+        if (dashing()) {
+          dashT -= dt; b.vel.x = dashDir * (+p.dashSpeed || 800); b.vel.y = 0;
+          if (dashT <= 0) { dashT = 0.0001; endDash(e); }
+        } else if (wallLock > 0) wallLock -= dt; // just sprang off a wall: the push holds for a moment
+        else {
+          const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
+          const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
+          if (!pounding) b.vel.x = steer(b.vel.x, a.x * speed);
+          if (three) b.vel.z = steer(b.vel.z, a.y * speed);
+        }
+        if (b.grounded) {
+          coyote = +(p.coyoteTime ?? 0.12); airUsed = 0; airDash = 0;
+          if (pounding) { pounding = false; if (s.camera) s.camera.shake = Math.max(s.camera.shake || 0, 10); s.burst?.(e.x, e.y + (e.extents().hy || 16), e.z, '#ffffff', 14); s.engine.vibrate(40); s.emit('groundPound', e); }
+        } else coyote -= dt;
+        // down: drop through a one-way platform, or a ground pound in the air
+        const downNow = !M.locked && (a.y > 0.6 || keys.has('s') || keys.has('arrowdown')), downHit = (downNow && !wasDown) || inp.pressed('swipe:down') || (!M.locked && (kd.includes('s') || kd.includes('arrowdown'))); wasDown = downNow;
+        if (!three && downHit) {
+          if (b.grounded && p.dropThrough !== false && b.groundedOn?.body?.oneWay) { b.dropUntil = performance.now() + 250; b.grounded = false; coyote = 0; e.y += 2; }
+          else if (!b.grounded && p.groundPound && !dashing()) { pounding = true; b.vel.x = 0; }
+        }
+        if (pounding) b.vel.y = +p.poundSpeed || 1400;
+        // jump (with a buffer: pressed a little early still counts)
+        if (inp.pressed('jump') && !M.locked) buffer = Math.max(+(p.jumpBuffer ?? 0.12), dt * 1.5);
+        if (b.wall) { lastWall = b.wall; wallMem = 0.1; } else wallMem -= dt; // (it only touches while pressing in: remember the wall for a moment)
+        const wall = !three && !b.grounded && wallMem > 0 ? lastWall : 0;
+        if (buffer > 0) {
+          let did = '';
+          if (coyote > 0) did = 'ground';
+          else if (wall && p.wallJump) { did = 'wall'; b.vel.x = -wall * (+p.wallJumpPush || 320); facing = -wall; wallLock = 0.18; airUsed = 0; }
+          else if (airUsed < airJumps()) { did = 'air'; airUsed++; }
+          if (did) {
+            endDash(e); pounding = false;
+            b.vel.y = p.jump * up; coyote = 0; buffer = 0; rising = true;
+            s.engine.audio.sfx('jump'); if (did !== 'ground') s.emit(did === 'wall' ? 'wallJump' : 'airJump', e);
+          }
+        }
+        buffer -= dt;
         // let go of the jump button early for a shorter hop
-        const hasBtn = inp.buttons.some((q) => q.action === 'jump'); // tap-to-jump fires on release, so only with a button
+        const hasBtn = inp.buttons.some((q) => q.action === 'jump') || inp.noTapJump || keys.size > 0; // tap-to-jump fires on release, so only with a button (or a key / held zone)
         if (rising && p.variableJump && hasBtn && !inp.isDown('jump') && b.vel.y * up > 0) { b.vel.y *= 0.5; rising = false; }
         if (b.vel.y * up <= 0) rising = false;
-        if (!is3D(e) && a.x && p.faceDirection !== false) {
-          if (e.shape?.type === 'emoji') e.data.flipX = a.x > 0; else if (e.sprite) e.sx = Math.abs(e.sx) * (a.x < 0 ? -1 : 1);
+        // wall slide: falling while touching a wall goes slowly
+        if (wall && p.wallSlide && b.vel.y > 0 && !pounding && !dashing() && wallLock <= 0 && a.x * wall >= 0) { // falling against a wall: slide down it slowly (held on until you push away)
+          const sl = +p.wallSlideSpeed || 120; if (b.vel.y > sl) b.vel.y = sl; b.maxFall = sl; // (the physics keeps it there after gravity)
+          if (b.vel.x * wall < 40) b.vel.x = wall * 40; facing = -wall; if (e.move) e.move.sliding = true;
+        } else { if (e.move) e.move.sliding = false; if (!three) b.maxFall = pounding ? 0 : +p.maxFall > 0 ? +p.maxFall : bodyMax; }
+        if (!three && +p.maxFall > 0 && b.vel.y > +p.maxFall && !pounding) b.vel.y = +p.maxFall;
+        if (!three && p.faceDirection !== false && (a.x || dashing() || wallLock > 0)) {
+          if (e.shape?.type === 'emoji') e.data.flipX = facing > 0; else if (e.sprite) e.sx = Math.abs(e.sx) * (facing < 0 ? -1 : 1);
         }
-        const fell = is3D(e) ? e.y < -25 : e.y > s.view.height + 600;
+        const fell = three ? e.y < -25 : e.y > s.view.height + 600;
         if (fell) respawnOrEnd(e, s, p.onFall);
       },
     };
@@ -20347,17 +20470,88 @@ registerBehavior('gridMove', {
 
 // ---- Character Controller 2D: one component, many kinds of 2D movement ----
 const withParamDefaults = (type, extra) => { const d = Behaviors[type]; const o = {}; for (const q of d.params || []) o[q.key] = paramDefault(q, false); return { ...o, ...extra }; };
+// The platformer's extra moves (and run & dash, which top-down movement has too), offered in the Character Controller for those movement types
+const onlyFor = (modes, q) => ({ ...q, showIf: (b) => modes.includes(b.mode || 'topdown8') && (typeof q.showIf === 'function' ? q.showIf(b) : true) });
+const CONTROLLER_EXTRAS = Behaviors.platformer.params.filter((q) => q.key === 'doubleJump' || ['Jumping', 'Walls', 'Run & dash', 'Down'].includes(q.group))
+  .map((q) => onlyFor(q.group === 'Run & dash' && q.key !== 'airDashes' ? ['topdown8', 'sideToSide', 'platformer'] : ['platformer'], q));
+const JUMPY = ['platformer', 'jetpack'], TURNY = ['car', 'spaceship', 'tank'];
+/** Set up the screen for a control scheme: which joystick, D-pad, arrows or buttons show (for this play). */
+function controlScheme(s, sch, mode) {
+  const st = s.settings, inp = s.engine.input, jumpy = JUMPY.includes(mode);
+  st.joystick = false; st.controls = 'none'; inp.noTapJump = false;
+  if (sch === 'joystick' || sch === 'fixedStick') { st.joystick = true; st.controls = 'joystick'; st.joystickMode = sch === 'fixedStick' ? 'fixed' : st.joystickMode === 'fixed' ? 'floating' : st.joystickMode || 'floating'; }
+  else if (sch === 'dpad' || sch === 'arrows') st.controls = sch;
+  else if (sch === 'tilt') {
+    inp.useTilt = true; inp.enableTilt?.();
+    const fallback = () => { st.joystick = true; st.controls = 'joystick'; s.engine.layoutButtons?.(); }; // no tilt sensor (a computer): a joystick instead
+    if (inp.tiltMissing) fallback(); else s.on('tiltMissing', fallback);
+  } else if (sch === 'sides' || sch === 'toward') inp.noTapJump = true; // the fingers steer: a tap isn't a jump
+  st.jumpButton = jumpy && ['joystick', 'fixedStick', 'dpad', 'arrows', 'tilt'].includes(sch);
+  if (mode === 'jetpack' && st.jumpButton && (!st.jumpLabel || st.jumpLabel === 'JUMP')) st.jumpLabel = 'FLY';
+  s.engine.layoutButtons?.();
+}
+/** Each frame: turn the fingers into the same joystick push and jump the movement already understands (touch sides, hold where to go, swipe). */
+function steerScheme(e, s, sch, mode) {
+  const inp = s.engine.input, W = s.engine.width, H = s.engine.height, jumpy = JUMPY.includes(mode), turny = TURNY.includes(mode);
+  const free = [...inp.pointers.values()].filter((q) => q.role === 'free'), m = (e.data._scheme ||= { dx: 0, dy: 0, head: null, go: false });
+  const at = () => s.engine.renderer.worldToScreen(s, e.x, e.y);
+  const steerTo = (ang, dist) => { let d = ang - (e.rz || 0) * DEG; d = Math.atan2(Math.sin(d), Math.cos(d)); inp.extra.x += clamp(d * 2, -1, 1); if (dist > 30) inp.extra.y -= Math.abs(d) < 1.2 ? 1 : 0.35; };
+  if (sch === 'sides') {
+    let l = false, r = false, u = false, dn = false;
+    for (const q of free) {
+      if (jumpy) { if (q.x > W / 2) inp.virtHeld.add('jump'); else if (q.x < W / 4) l = true; else r = true; }
+      else if (turny || mode === 'sideToSide') { if (q.x < W / 2) l = true; else r = true; }
+      else { if (q.x < W / 3) l = true; else if (q.x > W * 2 / 3) r = true; if (q.y < H / 3) u = true; else if (q.y > H * 2 / 3) dn = true; } // top-down: nine zones, like a big D-pad (corners go diagonally)
+    }
+    if (turny) { if (l && r) inp.extra.y -= 1; else if (l || r) { inp.extra.x += r ? 1 : -1; if (mode !== 'tank') inp.extra.y -= 1; } }
+    else {
+      inp.extra.x += (r ? 1 : 0) - (l ? 1 : 0);
+      if (!jumpy && mode !== 'sideToSide') inp.extra.y += (dn ? 1 : 0) - (u ? 1 : 0);
+    }
+    if (jumpy) for (const d of inp.downs) if (d.x > W / 2) inp.justPressed.add('virt:jump');
+  } else if (sch === 'toward') {
+    const q = free[0], o = q || inp.downs.length ? at() : null;
+    if (q) {
+      const dx = q.x - o.x, dy = q.y - o.y, l = Math.hypot(dx, dy);
+      if (jumpy) { if (Math.abs(dx) > 18) inp.extra.x += clamp(dx / 60, -1, 1); if (dy < -50) inp.virtHeld.add('jump'); }
+      else if (turny) steerTo(Math.atan2(dy, dx), l);
+      else if (l > 12) { const k = Math.min(1, l / 70); inp.extra.x += dx / l * k; inp.extra.y += mode === 'sideToSide' ? 0 : dy / l * k; }
+    }
+    if (mode === 'platformer') for (const d of inp.downs) if (d.y < o.y - 50) inp.justPressed.add('virt:jump'); // touch above it: jump
+  } else if (sch === 'swipe') {
+    for (const [k, v] of [['left', [-1, 0]], ['right', [1, 0]], ['up', [0, -1]], ['down', [0, 1]]]) {
+      if (!inp.pressed('swipe:' + k)) continue;
+      if (jumpy || mode === 'sideToSide') { if (v[0]) m.dx = v[0]; else if (k === 'down') m.dx = 0; } // (a swipe up jumps)
+      else if (turny) { m.head = Math.atan2(v[1], v[0]); m.go = true; }
+      else { m.dx = v[0]; m.dy = v[1]; }
+    }
+    if (inp.taps.length && !jumpy) { m.dx = 0; m.dy = 0; m.go = false; } // a tap stops it
+    if (turny) { if (m.go && m.head != null) steerTo(m.head, 100); }
+    else { inp.extra.x += m.dx; inp.extra.y += m.dy; }
+  }
+}
+
 registerBehavior('controller2d', {
-  label: 'Character Controller 2D', description: 'Pick how the player moves: top-down, platformer, runner, flappy, car, spaceship, tank, tap to move, follow finger, paddle or grid steps.',
+  label: 'Character Controller 2D', description: 'Pick how the player moves (top-down, platformer, runner, flappy, car, spaceship, tank, tap to move, follow finger, paddle, grid steps, jetpack, lanes, slingshot) and how you control it (joystick, D-pad, buttons, touching the sides, holding where to go, swipes, tilt or keys).',
   params: [
     { key: 'mode', label: 'Movement type', type: 'select', default: 'topdown8', options: [
       ['topdown8', 'Top-down (8 directions)'], ['topdown4', 'Top-down (4 directions)'], ['platformer', 'Platformer (run & jump)'], ['runner', 'Auto-runner (tap to jump)'],
       ['flappy', 'Flappy (tap to fly up)'], ['car', 'Car (steer & drive)'], ['spaceship', 'Spaceship (turn & thrust)'], ['tank', 'Tank (turn & roll)'],
-      ['tapToMove', 'Tap to move (point & click)'], ['followFinger', 'Follow finger'], ['sideToSide', 'Side to side (paddle)'], ['grid', 'Grid steps (one tile per swipe)']],
+      ['tapToMove', 'Tap to move (point & click)'], ['followFinger', 'Follow finger'], ['sideToSide', 'Side to side (paddle)'], ['grid', 'Grid steps (one tile per swipe)'],
+      ['jetpack', 'Jetpack (hold to fly up)'], ['lanes', 'Lanes (swipe between lanes)'], ['slingshot', 'Slingshot (pull back & let go)']],
       info: { topdown8: 'Joystick or drag moves it in any direction.', topdown4: 'Up, down, left or right only (classic RPG).', platformer: 'Needs gravity. Joystick to run, jump button or tap to jump.',
         runner: 'Runs forward on its own; tap to jump. Needs gravity and ground.', flappy: 'Each tap pushes it up; gravity pulls it down.', car: 'Joystick left/right steers, up drives (or always drives).',
         spaceship: 'Turn with the joystick, push forward to thrust. Drifts in space.', tank: 'Joystick left/right turns, up/down drives forward and back.', tapToMove: 'Tap anywhere and it walks there.',
-        followFinger: 'Sticks to your finger while you touch the screen.', sideToSide: 'Left and right only, like a paddle or shooter ship.', grid: 'One tile per swipe or joystick push.' } },
+        followFinger: 'Sticks to your finger while you touch the screen.', sideToSide: 'Left and right only, like a paddle or shooter ship.', grid: 'One tile per swipe or joystick push.',
+        jetpack: 'Hold to fly up (the jump button, the right side of the screen or Space); gravity pulls it down. Left / right steers.', lanes: 'Swipe left or right to jump between lanes (endless runners).',
+        slingshot: 'Pull back from it and let go to launch it the other way: golf, pool, angry birds. A line shows the aim.' } },
+    { key: 'input', label: 'Controls', type: 'select', default: 'auto', showIf: { mode: ['topdown8', 'topdown4', 'platformer', 'car', 'spaceship', 'tank', 'sideToSide', 'jetpack'] }, options: [
+      ['auto', 'Best for this movement'], ['joystick', 'Joystick (appears where you touch)'], ['fixedStick', 'Joystick (fixed in the corner)'], ['dpad', 'D-pad'], ['arrows', '◀ ▶ buttons'],
+      ['sides', 'Touch the sides of the screen'], ['toward', 'Hold where it should go'], ['swipe', 'Swipe to change direction'], ['tilt', 'Tilt the phone'], ['keys', 'Keyboard only']],
+      info: { auto: 'The usual controls for the movement type (a joystick, plus a jump button for jumping).', joystick: 'A joystick appears wherever your thumb touches the left side.', fixedStick: 'A joystick that stays in the corner.',
+        dpad: 'Four arrow buttons.', arrows: 'Left and right buttons (with Jump for jumping).', sides: 'Hold the left or right side of the screen to move. Jumping games: the left half moves (far left / near middle), the right half jumps. Cars and ships: both sides at once go forward.',
+        toward: 'Hold a finger where it should go and it heads there. Jumping games: touch above it to jump.', swipe: 'Swipe to set the direction; it keeps going until you swipe again (tap stops it, or jumps in jumping games).',
+        tilt: 'Tilt the phone to steer (the joystick appears on a computer).', keys: 'Arrow keys / WASD and Space, nothing on screen.' } },
     { key: 'speed', label: 'Speed', type: 'number', default: 240, step: 10 },
     { key: 'jump', label: 'Jump / flap power', type: 'number', default: 620, step: 20, showIf: { mode: ['platformer', 'runner', 'flappy'] } },
     { key: 'turn', label: 'Turn speed (°/s)', type: 'number', default: 200, step: 10, showIf: { mode: ['car', 'spaceship', 'tank'] } },
@@ -20367,19 +20561,38 @@ registerBehavior('controller2d', {
     { key: 'faceMove', label: 'Turn to face movement', type: 'bool', default: false, showIf: { mode: ['topdown8', 'topdown4', 'tapToMove'] } },
     { key: 'tile', label: 'Tile size', type: 'number', default: 40, showIf: { mode: ['grid'] } },
     { key: 'keepInView', label: 'Keep on screen', type: 'bool', default: true, showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'followFinger', 'spaceship', 'flappy'] } },
-    { key: 'onFall', label: 'When falling off', type: 'select', options: ['gameover', 'respawn', 'damage'], default: 'respawn', showIf: { mode: ['platformer', 'runner', 'flappy'] } },
+    { key: 'onFall', label: 'When falling off', type: 'select', options: ['gameover', 'respawn', 'damage'], default: 'respawn', showIf: { mode: ['platformer', 'runner', 'flappy', 'jetpack'] } },
+    { key: 'fuel', label: 'Fuel (seconds of thrust, 0 = endless)', type: 'number', default: 0, step: 0.5, showIf: { mode: ['jetpack'] }, infoText: 'Refills on the ground. The fuel variable shows what is left (0–100).' },
+    { key: 'laneWidth', label: 'Lane width', type: 'number', default: 110, showIf: { mode: ['lanes'] } },
+    { key: 'lanes', label: 'Lanes', type: 'number', default: 3, range: [2, 7], step: 1, showIf: { mode: ['lanes'] } },
+    { key: 'launch', label: 'Launch speed (full pull)', type: 'number', default: 1000, step: 50, showIf: { mode: ['slingshot'] } },
+    { key: 'pull', label: 'Pull for full power (px)', type: 'number', default: 160, step: 10, showIf: { mode: ['slingshot'] } },
+    { key: 'slingGravity', label: 'Gravity (off = top-down, like golf)', type: 'bool', default: true, showIf: { mode: ['slingshot'] } },
+    { key: 'waitStop', label: 'Only when it has stopped', type: 'bool', default: true, showIf: { mode: ['slingshot'] } },
+    { key: 'grab', label: 'Start a pull', type: 'select', options: [['anywhere', 'Anywhere on screen'], ['object', 'On the object']], default: 'anywhere', showIf: { mode: ['slingshot'] } },
+    ...CONTROLLER_EXTRAS,
   ],
   create(p) {
     // movements the engine already does well
-    const delegate = { topdown8: () => Behaviors.move.create(withParamDefaults('move', { speed: p.speed, control: 'both', axes: 'all', keepInView: p.keepInView })),
-      sideToSide: () => Behaviors.move.create(withParamDefaults('move', { speed: p.speed, control: 'both', axes: 'horizontal', keepInView: p.keepInView })),
-      platformer: () => Behaviors.platformer.create(withParamDefaults('platformer', { speed: p.speed, jump: p.jump, onFall: p.onFall })),
+    const sch = p.input || 'auto', custom = sch !== 'auto' && !['runner', 'flappy', 'tapToMove', 'followFinger', 'grid', 'lanes', 'slingshot'].includes(p.mode);
+    const extras = {}; for (const q of CONTROLLER_EXTRAS) if (p[q.key] !== undefined) extras[q.key] = p[q.key];
+    const moveCtl = custom ? 'joystick' : 'both'; // a chosen control scheme steers on its own (no dragging the player as well)
+    const delegate = { topdown8: () => Behaviors.move.create(withParamDefaults('move', { ...extras, speed: p.speed, control: moveCtl, axes: 'all', keepInView: p.keepInView, face2D: p.faceMove ? 'rotate' : 'none' })),
+      sideToSide: () => Behaviors.move.create(withParamDefaults('move', { ...extras, speed: p.speed, control: moveCtl, axes: 'horizontal', keepInView: p.keepInView })),
+      platformer: () => Behaviors.platformer.create(withParamDefaults('platformer', { ...extras, speed: p.speed, jump: p.jump, onFall: p.onFall })),
+      lanes: () => Behaviors.swipeMove.create(withParamDefaults('swipeMove', { distance: +p.laneWidth || 110, lanes: +p.lanes || 3, jump: 0 })),
       grid: () => Behaviors.gridMove.create(withParamDefaults('gridMove', { tile: p.tile })) }[p.mode];
     if (delegate) {
       const inner = delegate();
-      return { ...inner, start(e, s) { if (['topdown8', 'sideToSide', 'platformer'].includes(p.mode)) { s.settings.joystick = true; if (p.mode === 'platformer') s.settings.jumpButton = true; s.engine.layoutButtons?.(); } inner.start?.(e, s); } };
+      return { ...inner,
+        start(e, s) {
+          if (custom) controlScheme(s, sch, p.mode);
+          else if (['topdown8', 'sideToSide', 'platformer'].includes(p.mode)) { s.settings.joystick = true; if (p.mode === 'platformer') s.settings.jumpButton = true; s.engine.layoutButtons?.(); }
+          inner.start?.(e, s);
+        },
+        update(e, dt, s) { if (custom && s.state === 'play') steerScheme(e, s, sch, p.mode); inner.update?.(e, dt, s); } };
     }
-    let heading = 0, target = null, speed = 0;
+    let heading = 0, target = null, speed = 0, fuel = 1, pull = null, aimRef = null, me = null, sc = null;
     const keep = (e, s) => { if (!p.keepInView) return; const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy; e.x = clamp(e.x, v.left + hx, v.right - hx); e.y = clamp(e.y, v.top + hy, v.bottom - hy); };
     const fell = (e, s) => { const v = s.viewBounds(); if (e.y > v.bottom + 300) respawnOrEnd(e, s, p.onFall); };
     const face = (e, vx, vy) => { if (p.faceMove && Math.hypot(vx, vy) > 5) e.rz = Math.atan2(vy, vx) / DEG; };
@@ -20388,13 +20601,30 @@ registerBehavior('controller2d', {
         const gravity = ['runner', 'flappy'].includes(p.mode);
         e.ensureBody({ type: 'dynamic', gravityScale: gravity ? 1 : 0 });
         if (!gravity) e.body.gravityScale = 0;
-        heading = (e.rz || 0) * DEG; e.data.respawn ||= { x: e.x, y: e.y, z: e.z };
-        if (['topdown4', 'car', 'spaceship', 'tank'].includes(p.mode)) { s.settings.joystick = true; s.engine.layoutButtons?.(); }
-        if (p.mode === 'runner') { s.settings.jumpButton = true; s.engine.layoutButtons?.(); }
+        heading = (e.rz || 0) * DEG; e.data.respawn ||= { x: e.x, y: e.y, z: e.z }; me = e; sc = s;
+        if (p.mode === 'jetpack') { e.body.gravityScale = 1; if (!s.gravity) s.gravity = 1600; }
+        if (p.mode === 'slingshot') {
+          e.body.gravityScale = p.slingGravity === false ? 0 : 1; if (p.slingGravity !== false && !s.gravity) s.gravity = 1600;
+          (s.overlays ||= []).push(aimRef = (ctx) => { // the aim: a dotted line the way it will fly, longer for a harder pull
+            if (!pull || e.dead || s.engine.editing) return;
+            const v = aimVec(), o = s.engine.renderer.worldToScreen(s, e.x, e.y), k = Math.hypot(v.x, v.y) / (+p.launch || 1000); if (k < 0.05) return;
+            ctx.save(); ctx.fillStyle = '#ffffff'; const g = p.slingGravity === false ? 0 : (s.gravity || 1600), z = s.engine.renderer.zoomFor(s);
+            for (let i = 1; i <= 14; i++) { const t = i * 0.045, x = o.x + v.x * t * z, y = o.y + (v.y * t + 0.5 * g * t * t * (e.body.gravityScale ?? 1)) * z; ctx.globalAlpha = (1 - i / 16) * 0.9; ctx.beginPath(); ctx.arc(x, y, 3.2 - i * 0.12, 0, Math.PI * 2); ctx.fill(); }
+            ctx.globalAlpha = 0.5; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(o.x, o.y); ctx.lineTo(pull.x, pull.y); ctx.stroke();
+            ctx.restore();
+          });
+        }
+        if (custom) controlScheme(s, sch, p.mode);
+        else {
+          if (['topdown4', 'car', 'spaceship', 'tank', 'jetpack'].includes(p.mode)) { s.settings.joystick = true; s.engine.layoutButtons?.(); }
+          if (p.mode === 'runner' || p.mode === 'jetpack') { s.settings.jumpButton = true; if (p.mode === 'jetpack' && (!s.settings.jumpLabel || s.settings.jumpLabel === 'JUMP')) s.settings.jumpLabel = 'FLY'; s.engine.layoutButtons?.(); }
+        }
       },
+      destroy(e, s) { if (aimRef) s.overlays = (s.overlays || []).filter((f) => f !== aimRef); },
       update(e, dt, s) {
         if (s.state !== 'play') return;
         scaleSpeed(p, e);
+        if (custom) steerScheme(e, s, sch, p.mode);
         const inp = s.engine.input, a = inp.axis(), b = e.body, damp = Math.max(0, 1 - (+p.friction || 0) * dt);
         switch (p.mode) {
           case 'topdown4': {
@@ -20448,10 +20678,44 @@ registerBehavior('controller2d', {
             else { b.vel.x = 0; b.vel.y = 0; }
             keep(e, s); break;
           }
+          case 'jetpack': {
+            b.vel.x += (a.x * p.speed - b.vel.x) * Math.min(1, dt * 10);
+            const hold = inp.isDown('jump') || inp.virtHeld.has('jump') || (!inp.buttons.some((q) => q.action === 'jump') && !custom && inp.pointerDown) || inp.keyHeld('jump') || inp.keys?.has('arrowup') || inp.keys?.has('w') || inp.keys?.has('pad:up');
+            const tank = +p.fuel || 0;
+            if (b.grounded) fuel = Math.min(1, fuel + dt / Math.max(0.5, tank * 0.5));
+            if (hold && (tank <= 0 || fuel > 0)) { b.vel.y = Math.max(b.vel.y - (s.gravity || 1600) * 2.1 * dt, -p.jump * 0.75); if (tank > 0) fuel = Math.max(0, fuel - dt / tank); if (Math.random() < dt * 30) s.burst?.(e.x, e.y + (e.extents().hy || 16), e.z, '#ffb347', 2, 0.4); }
+            if (tank > 0) s.setVar?.('fuel', Math.round(fuel * 100));
+            if (p.keepInView) { const v = s.viewBounds(); if (e.y < v.top) { e.y = v.top; b.vel.y = Math.max(0, b.vel.y); } }
+            if (a.x && e.shape?.type === 'emoji') e.data.flipX = a.x > 0;
+            fell(e, s); break;
+          }
+          case 'slingshot': {
+            const still = Math.hypot(b.vel.x, b.vel.y) < 25 && (p.slingGravity === false || b.grounded || (b.gravityScale ?? 1) === 0);
+            if (p.slingGravity === false) { const k = Math.max(0, 1 - (+p.friction || 1.2) * dt); b.vel.x *= k; b.vel.y *= k; } // rolling to a stop (golf)
+            if (!pull) {
+              const d = inp.downs[0];
+              if (d && (!p.waitStop || still)) {
+                const o = s.engine.renderer.worldToScreen(s, e.x, e.y), ex = e.extents(), r = Math.max(30, (ex.sphere ? ex.r : Math.max(ex.hx, ex.hy)) * s.engine.renderer.zoomFor(s) * 1.6);
+                if (p.grab !== 'object' || Math.hypot(d.x - o.x, d.y - o.y) < r) pull = { id: d.id, x: d.x, y: d.y };
+              }
+            } else {
+              const q = inp.pointers.get(pull.id);
+              if (q) { pull.x = q.x; pull.y = q.y; if (p.slingGravity !== false && still) { b.vel.x = 0; b.vel.y = 0; } }
+              else { const v = aimVec(); pull = null; if (Math.hypot(v.x, v.y) > (+p.launch || 1000) * 0.05) { b.vel.x = v.x; b.vel.y = v.y; s.engine.audio.sfx('jump'); s.engine.vibrate(12); s.emit('launch', e); } }
+            }
+            break;
+          }
           default: break;
         }
       },
     };
+    /** The launch velocity for the pull so far: away from the finger, stronger the further you pull (up to "Pull for full power"). */
+    function aimVec() {
+      if (!pull || !me) return { x: 0, y: 0 };
+      const o = sc.engine.renderer.worldToScreen(sc, me.x, me.y), dx = o.x - pull.x, dy = o.y - pull.y, l = Math.hypot(dx, dy); if (l < 1) return { x: 0, y: 0 };
+      const k = Math.min(1, l / Math.max(20, +p.pull || 160)) * (+p.launch || 1000);
+      return { x: dx / l * k, y: dy / l * k };
+    }
   },
 });
 
@@ -25806,7 +26070,7 @@ export class Engine {
     }
     if (this.scene) {
       try { // a bug in one frame shows in the Console instead of freezing the game
-        if (!this.editing) this.update(dt * this.timeScale);
+        if (!this.editing) { this.input.pollPad(); this.update(dt * this.timeScale); }
         // editing (lazyEdit): draw while something is happening (wake), when a picture loads, and twice a second otherwise
         if (!this.editing || !this.lazyEdit || now < (this.awakeUntil || 0) || Redraw.tick !== this._redrawTick || now - (this._editDrawn || 0) > 500) { this._redrawTick = Redraw.tick; this._editDrawn = now; this.render(); }
         this.updateSettingsUI();
@@ -25893,6 +26157,7 @@ export class Engine {
     } else if (s.turnSide === 'enemyBusy' && s.state === 'play' && (s.turnDelay -= dt) <= 0) s.playerTurn(); // enemies that walk several tiles hold the turn until they're done
     const steps = this.physics.substeps(s, dt); // more steps when something moves fast (no tunnelling)
     for (const e of s.entities) if (e.body) e.body.landed = 0; // landings this frame (any substep)
+    for (const e of s.entities) if (e.body) e.body.wall = 0;
     for (let i = 0; i < steps; i++) this.physics.step(s, dt / steps);
     s.time += dt;
     if (s.settings.winScore && s.vars.score >= s.settings.winScore) s.win();

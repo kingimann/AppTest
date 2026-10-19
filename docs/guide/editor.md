@@ -88,7 +88,10 @@ Every object in the current level, in drawing order.
 - The eye and the drag grip are faint until a row is selected; the selected row has an accent edge.
 - **Folders:** long-press → *Put in Folder…*.
 - **Filter:** player, logic, physics, UI, templates, a tag or a layer. Search matches names, tags and components.
-- **Select** (tick button, or Shift-click a second row): tick several objects, then Duplicate, Group, Hide / Show, put in a Folder or Delete them together. The Inspector then edits all of them (below).
+- **Select** (tick button, Shift-click a second row, or *Select Several…* in an object's or empty space's long-press menu): tick several objects, then Duplicate, Group, Hide / Show, put in a Folder, Align or Delete them together. The Inspector then edits all of them (below).
+  - **In the Scene while selecting:** tap objects to tick or untick them, drag across empty space to draw a box that ticks everything inside it, and drag any ticked object to move them all together. Ticked objects have a dashed outline (UI too, in the UI view).
+- **Swipe a row left** for quick **Hide**, **Copy** and **Delete** buttons.
+- **Hide UI:** the *Hide UI* chip (or the eye in the Scene toolbar) hides the game's UI in the Scene while you work on the world. Only the editor hides it: the game still shows it, and the UI button still edits it.
 - **Keyboard** (a tablet or computer keyboard): Ctrl/⌘ Z undo, Ctrl/⌘ Shift Z or Y redo, Delete removes, Ctrl/⌘ D duplicates, Ctrl/⌘ C / V copy and paste, F2 renames, F focuses the Scene on it, ↑ ↓ move through the Hierarchy, ← → fold and unfold children, Esc deselects. Not while you're typing in a field.
 
 ## Duplicates
@@ -188,13 +191,15 @@ More settings live in *☰ → Build Settings* (app name, icon, loading screen, 
 
 ## Project
 
-- **Tabs:** all six (Prefabs, Objects, Sprites or Models, UI, Sounds, Components) fit on screen in two rows. The panel opens on the tab you used last and keeps each tab's scroll position.
-- **Search all assets:** type to search every tab at once. Results are grouped by tab, and each tab shows how many matches it has.
+- **Tabs:** This game, Prefabs, Objects, Sprites or Models, UI, Sounds and Components, in one row you can slide. The panel opens on the tab you used last and keeps each tab's scroll position.
+- **This game** lists what your game is made of: its **levels** (tap to switch, with object counts), objects by kind (tap to filter the Hierarchy), **scripts**, your **favorites** and **recently placed** assets, **My Prefabs**, imported **pictures** and **sounds**, and its **data, items, quests and dialogues** (tap to open their editors).
+- **Favorites and Recent:** the star on any tile makes it a favorite. Favorites, and the last things you placed, show at the top of their tab and in This game.
+- **Search all assets:** type to search every tab at once. Results are grouped by tab, and each tab shows how many matches it has. **In this game** comes first: matching objects in any level (tap to select it), levels, scripts, prefabs, data, items, quests, dialogues and sounds.
 - **Section chips:** tabs with several sections (Survival, Crafting, Buttons, Charts…) get a row of chips under the search. Tap one to jump to that section; the chip of the section you're in lights up.
 - **Tiles or list:** the button next to search switches between compact tiles and a one-line-per-item list.
 - **Create** opens the Create screen on the matching category.
 
-- **Prefabs:** ready-made objects, and **My Prefabs** (your own). Tap or drag into the Scene.
+- **Prefabs:** ready-made objects, and **My Prefabs** (your own). Tap or drag into the Scene. Organize My Prefabs in **folders** (a prefab's ⋯ › *Move to Folder…*, *Rename Folder…*) and sort them A–Z or newest first.
 - **Objects:** plain shapes, text, images, tilemaps, 3D primitives, cameras and lights.
 - **Sprites:** about 100 drawn sprites (characters, enemies, items, nature, vehicles, blocks, UI icons and frames).
 - **UI:** widgets grouped as Buttons, Inputs, Lists, Controls, Charts, HUD, Game Systems, Navigation, Loading, Animated.

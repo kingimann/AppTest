@@ -7,13 +7,53 @@ The components on this page are complete game systems. Combine them, tune their 
 | Component | For |
 |---|---|
 | **Move** | Top-down and free movement with the joystick, a finger drag, both, or tilting the phone. Speeds, acceleration, 4 / 8 directions, run and dash |
-| **Platformer** | Run and jump with gravity: coyote time, short hops, double jump |
-| **Character Controller 2D** | One component with a movement type: top-down, platformer, auto-runner, flappy, car, spaceship, tank, tap to move, follow finger, paddle, grid steps |
+| **Platformer** | Run and jump with gravity: short hops, air jumps, wall slide and wall jump, run, dash, dropping through platforms, ground pound |
+| **Character Controller 2D** | One component with a movement type (top-down, platformer, auto-runner, flappy, car, spaceship, tank, tap to move, follow finger, paddle, grid steps, jetpack, lanes, slingshot) and a choice of controls |
 | **First Person**, **Third Person** | 3D: joystick to walk, drag to look |
 | **Car** | Drive with the joystick (3D gets a chase camera) |
 | **Swipe Move** | Endless-runner lanes and jumps |
 | **Grid Move** | One tile at a time; tap a tile to walk there |
 | **Draggable**, **Drag to Launch** | Pick up objects; slingshot |
+
+### Ways to control the player
+
+The Character Controller's **Controls** setting picks how the player steers it. **Best for this movement** gives the usual controls (a joystick, plus a jump button for jumping).
+
+| Controls | How it works |
+|---|---|
+| **Joystick** | Appears wherever your thumb touches the left side |
+| **Fixed joystick** | Stays in the corner |
+| **D-pad** / **◀ ▶ buttons** | Arrow buttons on screen (with Jump for jumping) |
+| **Touch the sides** | Hold the left or right side to move. Jumping games: the far left runs left, near the middle runs right, the right half jumps. Top-down: the screen is a big 3 × 3 pad. Cars and ships: hold both sides to go forward |
+| **Hold where it should go** | It heads to your finger. Jumping games: touch above it to jump |
+| **Swipe** | A swipe sets the direction and it keeps going; a tap stops it (or jumps) |
+| **Tilt** | Tilt the phone (a joystick on a computer) |
+| **Keyboard only** | Arrow keys / WASD, Space to jump, nothing on screen |
+
+Space always jumps on a keyboard. Shift runs, X or K dashes, and J or Enter is Fire.
+
+### Keyboard and game controllers
+
+**Game controllers** (Bluetooth or USB: Xbox, PlayStation, Switch Pro…) work on phones, tablets and computers. The left stick and D-pad steer, **A** jumps, **B** is Fire, **X** dashes and **RB** runs.
+
+*Game Settings › Keyboard & Controller* changes the keys and buttons for Jump, Fire, Dash and Run (for example `w, pad:y` for Jump), turns controllers off, and sets the stick's dead zone. Controller buttons are named `pad:a`, `pad:b`, `pad:x`, `pad:y`, `pad:lb`, `pad:rb`, `pad:lt`, `pad:rt`, `pad:start`, `pad:select` and `pad:up` / `down` / `left` / `right`. Triggers and scripts can use those names in *Key pressed* and *Key held*, and the game hears a `gamepad` event when a controller connects.
+
+### Platformer moves
+
+Platformer (and the Character Controller's platformer type) has these settings:
+
+- **Jumping:** jumps in the air (1 = double jump), a jump just after leaving a ledge (coyote time), a jump pressed just before landing (jump buffer), and a max fall speed.
+- **Walls:** slide down walls slowly, and wall jump (it springs off and the air jumps come back).
+- **Run & dash:** run with the joystick at the edge, the Fire button, always or Shift. Dash with the Fire button, a double tap or a swipe, with speed, length, cooldown and dashes in the air.
+- **Down:** down drops through one-way platforms; ground pound slams down in the air and shakes the camera.
+
+The *dash*, *wallJump*, *airJump* and *groundPound* events fire for Triggers and scripts.
+
+### More movement types
+
+- **Jetpack:** hold to fly up (the FLY button, the right side or Space). It can have fuel that refills on the ground; the `fuel` variable shows what's left.
+- **Lanes:** swipe left or right between lanes.
+- **Slingshot:** pull back from it and let go to launch it the other way, with a dotted aim line. Turn gravity off for top-down golf or pool.
 
 Nodes such as **Set Move Speed**, **Lock Movement**, **Dash** and **Is Running** change movement while playing. Slow and freeze effects, hunger and equipment speed bonuses all scale movement speed automatically.
 

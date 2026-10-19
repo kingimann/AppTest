@@ -8566,8 +8566,9 @@ class GraphRun(graph: Map<*, *>) {
         var i = 0
         var held = false
         lateinit var next: () -> Unit
+        val out = { ctx.ret?.done == true } // (a Return Value inside the loop ends the whole Function: no more passes, no "done")
         next = next@{
-            while (i < count && !loop.stop && !e.dead) {
+            while (i < count && !loop.stop && !e.dead && !out()) {
                 val extra = pass(i++) ?: break
                 val f = GFlow()
                 val c = ctx.clone().also { it.loop = loop; it.flow = f }
@@ -8582,7 +8583,7 @@ class GraphRun(graph: Map<*, *>) {
                     return@next
                 }
             }
-            if (!e.dead) { if (after != null) after() else follow(n, "done", ctx) }
+            if (!e.dead && !out()) { if (after != null) after() else follow(n, "done", ctx) }
             if (held && outer != null) { held = false; outer.n--; outer.check?.invoke() }
         }
         next()
@@ -9288,7 +9289,7 @@ private fun GraphRun.exec(n: Map<*, *>, t: String, ctx: GCtx): Boolean {
             val later = ctx.fresh()
             lateinit var tick: () -> Unit
             tick = tick@{
-                if (e.dead || repeats[rid]?.contains(token) != true) return@tick
+                if (e.dead || repeats[rid]?.contains(token) != true || later.ret?.done == true) return@tick // (the Function it's in has returned)
                 follow(n, "each", later.fresh().also { it.index = k.toDouble() })
                 k++
                 if (times > 0 && k >= times) { repeats[rid]?.remove(token); follow(n, "done", later.fresh()); return@tick }

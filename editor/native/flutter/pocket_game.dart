@@ -9561,8 +9561,9 @@ class GraphRun {
     var i = 0;
     var held = false;
     late void Function() next;
+    bool out() => ctx.ret?.done == true; // (a Return Value inside the loop ends the whole Function: no more passes, no "done")
     next = () {
-      while (i < count && !loop.stop && !e.dead) {
+      while (i < count && !loop.stop && !e.dead && !out()) {
         final extra = pass(i++);
         if (extra == null) break;
         final f = GFlow();
@@ -9578,7 +9579,7 @@ class GraphRun {
           return;
         }
       }
-      if (!e.dead) { if (after != null) { after(); } else { follow(n, 'done', ctx); } }
+      if (!e.dead && !out()) { if (after != null) { after(); } else { follow(n, 'done', ctx); } }
       if (held && outer != null) { held = false; outer.n--; outer.check?.call(); }
     };
     next();
@@ -10253,7 +10254,7 @@ extension GraphRunExec on GraphRun {
         var k = 0;
         final later = ctx.fresh();
         void tick() {
-          if (e.dead || !(repeats[id]?.contains(token) ?? false)) return;
+          if (e.dead || !(repeats[id]?.contains(token) ?? false) || later.ret?.done == true) return; // (the Function it's in has returned)
           follow(n, 'each', later.fresh()..index = k);
           k++;
           if (times > 0 && k >= times) { repeats[id]?.remove(token); follow(n, 'done', later.fresh()); return; }

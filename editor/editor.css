@@ -2870,3 +2870,8 @@ body.playing #playBar #pbPlay { min-width: 56px; border-radius: 12px; }
 #project .p-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; }
 #project .p-tabs::-webkit-scrollbar { display: none; }
 #project .p-tabs button { flex: none; padding: 0 14px; scroll-snap-align: start; }
+/* colour fields: the swatch always has room (an optional colour nests its tick + swatch in a second row that used to squash it to a sliver) */
+.color-wrap > .pair > .pair { flex: 1 1 auto; min-width: 0; }
+.pair > input[type=color] { flex: 1 1 auto; min-width: 72px; height: 44px; }
+.color-wrap > .pair > input[type=color] { flex: 1 1 auto; }
+.pair > input[type=checkbox] + input[type=color] { min-width: 64px; }

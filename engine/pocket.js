@@ -24055,13 +24055,14 @@ registerBehavior('graph', {
     const seq = (n, ctx, count, pass, after) => {
       const outer = ctx.flow, L = { stop: false }; let i = 0, held = false;
       const next = () => {
-        while (i < count && !L.stop && !ctx.e.dead) {
+        const out = () => ctx.ret?.done; // (a Return Value inside the loop ends the whole Function: no more passes, no "done")
+        while (i < count && !L.stop && !ctx.e.dead && !out()) {
           const extra = pass(i++); if (extra === null) break;
           const F = { n: 0, check: null };
           follow(n, 'each', { ...ctx, steps: ctx.steps, loop: L, flow: F, ...extra });
           if (F.n > 0) { if (!held && outer) { outer.n++; held = true; } F.check = () => { if (F.n === 0) { F.check = null; next(); } }; return; }
         }
-        if (!ctx.e.dead) { if (after) after(); else follow(n, 'done', ctx); }
+        if (!ctx.e.dead && !out()) { if (after) after(); else follow(n, 'done', ctx); }
         if (held) { held = false; outer.n--; outer.check?.(); }
       };
       next();
@@ -24395,7 +24396,7 @@ registerBehavior('graph', {
           (repeats.get(id) || repeats.set(id, new Set()).get(id)).add(token);
           let i = 0; const later = { ...ctx, steps: 0 };
           const tick = () => {
-            if (e.dead || !repeats.get(id)?.has(token)) return;
+            if (e.dead || !repeats.get(id)?.has(token) || later.ret?.done) return; // (the Function it's in has returned)
             follow(n, 'each', { ...later, index: i, steps: 0 }); i++;
             if (times > 0 && i >= times) { repeats.get(id)?.delete(token); follow(n, 'done', { ...later, steps: 0 }); return; }
             s.after(sec, tick);

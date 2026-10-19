@@ -2,7 +2,7 @@
 // code, right in the editor. The preview runs the same model and the same rules as the native runtimes (lib/pocket.dart,
 // Pocket.kt, Pocket.swift): pages, tabs, back, Data Lists, Forms, stats, {variables}. Material look for Flutter and Kotlin,
 // iOS look for SwiftUI. Nothing is compiled here: Download gives the real project.
-import { appModel, PALETTES } from './appmodel.js';
+import { appModel, PALETTES, LATER_KINDS } from './appmodel.js';
 import { names, labelW } from './nativecode.js';
 import { SPRITE_ART } from '../engine/pocket.js';
 
@@ -156,10 +156,14 @@ function makeApp(model) {
       case 'new record': A.openId = null; A.go(v); break;
       case 'edit opened record': A.go(v); break;
       case 'delete opened record': if (A.openCollection && A.openId) { A.deleteRecord(A.openCollection, A.openId); A.openId = null; } A.back(); break;
+      case 'message': A.send(v); break;
       default: return `“${action}” has no native version yet (a TODO in the code)`;
     }
     return '';
   };
+  /** Messages (a button's "message" action): what's listening hears them, the same as app.send in the native code. */
+  A.listeners = [];
+  A.send = (m) => { const t = A.fill(m).trim(); if (t) for (const f of [...A.listeners]) f(t); };
   A.work();
   return A;
 }
@@ -243,6 +247,9 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       case 'people': return people(x);
       case 'achievements': return achievements();
       case 'trending': return trending(x);
+      case 'chart': case 'carousel': case 'pager': case 'photogrid': case 'like': case 'ticker': case 'timer': case 'skeleton': case 'colors': case 'keypad': case 'selector': case 'overlay':
+        if (kind === 'flutter' || kind === 'kotlin') return more(x, P, entry);
+      // falls through: SwiftUI and React Native have a placeholder for these for now
       default: return h('div', { class: 'npv-todo' }, h('b', {}, x.name), h('small', {}, `${x.type}: a TODO placeholder in the native code`));
     }
   }
@@ -503,6 +510,189 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   }
   function act(action, value, amount) { const msg = A.run(action, value, amount); note = msg; drawPhone(); }
 
+  // ---------- more components (Flutter and Kotlin): charts, carousels, swipe pages, timers, keypads, popups, notifications ----------
+  let live = new Map(), popups = new Set(), toasts = [];
+  /** Each component's own state (a timer's time, a carousel's card), kept while the page redraws. */
+  const stateOf = (x, init) => { if (!live.has(x)) live.set(x, init()); return live.get(x); };
+  const overlaysOf = () => { const out = []; const walk = (x) => { if (x.kind === 'overlay') out.push(x); (x.children || []).forEach(walk); (x.box?.children || []).forEach(walk); }; for (const p of model.pages) p.items.forEach(walk); return out; };
+  function hear(m) {
+    let redraw = false;
+    for (const x of overlaysOf()) { if (m === x.openOn && !popups.has(x)) { popups.add(x); redraw = true; if (x.autoClose > 0) setTimeout(() => { popups.delete(x); drawPhone(); }, x.autoClose * 1000); } else if (m === x.closeOn && popups.has(x)) { popups.delete(x); redraw = true; } }
+    for (const [x, st] of live) st.hear?.(m);
+    const n = model.notify;
+    if (n && (m === n.listen || m.startsWith(n.listen + ' '))) {
+      const [title = '', text = '', icon = ''] = m.slice(n.listen.length).trim().split('|').map((t) => t.trim()), t = { title, text, icon: icon || (n.look === 'achievement' ? '🏆' : '') };
+      toasts = [...toasts, t].slice(-n.max); setTimeout(() => { toasts = toasts.filter((q) => q !== t); drawPhone(); }, n.seconds * 1000); redraw = true;
+    }
+    if (redraw) drawPhone();
+  }
+  const clock = setInterval(() => { for (const [, st] of live) st.tick?.(0.1); }, 100);
+  function popupLayer(P, entry) {
+    const open = overlaysOf().filter((x) => popups.has(x)); if (!open.length) return null;
+    const x = open[open.length - 1], close = () => { popups.delete(x); drawPhone(); };
+    return h('div', { class: 'npv-poplayer' + (x.mode === 'sheet' ? ' sheet' : '') + (x.dim ? ' dim' : ''), onclick: (e) => { if (e.target === e.currentTarget && x.tapCloses) close(); } },
+      h('div', { class: 'npv-pop' }, x.mode === 'sheet' && x.handle && h('i', { class: 'npv-grab' }), element(x.box, P, entry)));
+  }
+  function toastLayer(P) {
+    const n = model.notify; if (!n || !toasts.length) return null;
+    return h('div', { class: `npv-toasts ${n.position.replace(' ', '-')} ${n.look}`, style: `--tbg:${col(n.bg, P) || P.card};--tfg:${col(n.text, P) || P.text};--tac:${col(n.accent, P) || P.accent}` },
+      toasts.map((t) => h('div', { class: 'npv-toast', onclick: () => { toasts = toasts.filter((q) => q !== t); drawPhone(); } }, t.icon && h('span', { class: 'npv-tic' }, t.icon), h('div', {}, t.title && h('b', {}, t.title), t.text && n.look !== 'pill' && h('small', {}, t.text)))));
+  }
+  const NS = 'http://www.w3.org/2000/svg';
+  const svg = (tag, a = {}, ...kids) => { const el = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(a)) if (v != null) el.setAttribute(k, v); for (const c of kids.flat()) if (c) el.append(c.nodeType ? c : document.createTextNode(c)); return el; };
+  const n1 = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+  const MORE = ['#ff6b8b', '#ffc94d', '#3ccf7a', '#8e6bf2', '#22b8c9', '#ff9f43', '#e0559b'];
+  /** A chart drawn the way PChart draws it (columns, bars, line, area, pie, donut or radar). */
+  function chartSvg(x, P, items) {
+    const W = 320, H = Math.max(60, x.h - (x.title ? 52 : 24)), fg = col(x.text, P) || P.text, c = col(x.color, P) || P.accent, sub = fg, line = P.line;
+    const root = svg('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', height: H, class: 'npv-chartsvg' });
+    if (!items.length) return root;
+    const kindC = x.track && !['line', 'area', 'columns', 'bars'].includes(x.chart) ? 'line' : x.chart, n = items.length;
+    const top = Math.max(0, ...items.map((i) => i[1])), hi = x.max > 0 ? x.max : top <= 0 ? 1 : top * 1.12;
+    const txt = (s, X, Y, o = {}) => s !== '' && root.append(svg('text', { x: X, y: Y, 'text-anchor': o.anchor || 'middle', 'dominant-baseline': 'middle', 'font-size': o.size || 11, 'font-weight': o.bold ? 800 : 600, fill: o.fill || sub, opacity: o.fill ? 1 : 0.75 }, s));
+    const slice = (i) => (i === 0 ? c : MORE[(i - 1) % MORE.length]);
+    if (kindC === 'pie' || kindC === 'donut') {
+      const total = items.reduce((a, i) => a + Math.max(0, i[1]), 0); if (total <= 0) return root;
+      const r = Math.min(W, H) / 2 - 4, cx = W / 2, cy = H / 2; let a = -Math.PI / 2;
+      items.forEach(([name, v], i) => {
+        const sw = Math.max(0, v) / total * Math.PI * 2, rr = kindC === 'donut' ? r * 0.78 : r, a2 = a + sw, big = sw > Math.PI ? 1 : 0;
+        const p0 = [cx + Math.cos(a) * rr, cy + Math.sin(a) * rr], p1 = [cx + Math.cos(a2) * rr, cy + Math.sin(a2) * rr];
+        if (kindC === 'donut') root.append(svg('path', { d: `M${p0} A${rr},${rr} 0 ${big} 1 ${p1}`, fill: 'none', stroke: slice(i), 'stroke-width': r * 0.42 }));
+        else root.append(svg('path', { d: `M${cx},${cy} L${p0} A${rr},${rr} 0 ${big} 1 ${p1} Z`, fill: slice(i) }));
+        if (x.labels && sw > 0.4) { const m = a + sw / 2, k = kindC === 'donut' ? 0.78 : 0.62; txt(name, cx + Math.cos(m) * r * k, cy + Math.sin(m) * r * k, { fill: '#fff', bold: true }); }
+        a = a2;
+      });
+      if (kindC === 'donut' && x.values) txt(n1(total), cx, cy, { size: 20, bold: true, fill: fg });
+      return root;
+    }
+    if (kindC === 'radar') {
+      const r = Math.min(W, H) / 2 - (x.labels ? 18 : 4), cx = W / 2, cy = H / 2, at = (i, k) => { const a = -Math.PI / 2 + i * Math.PI * 2 / n; return [cx + Math.cos(a) * r * k, cy + Math.sin(a) * r * k]; };
+      for (const k of [0.33, 0.66, 1]) if (x.grid || k === 1) root.append(svg('polygon', { points: items.map((_, i) => at(i, k)).join(' '), fill: 'none', stroke: line }));
+      items.forEach(([name], i) => { root.append(svg('line', { x1: cx, y1: cy, x2: at(i, 1)[0], y2: at(i, 1)[1], stroke: line })); if (x.labels) txt(name, ...at(i, 1.18)); });
+      root.append(svg('polygon', { points: items.map(([, v], i) => at(i, Math.min(1, Math.max(0, v / hi)))).join(' '), fill: c, 'fill-opacity': 0.3, stroke: c, 'stroke-width': 2.5 }));
+      return root;
+    }
+    if (kindC === 'bars') {
+      const lw = x.labels && items.some((i) => i[0]) ? 52 : 0, vw = x.values ? 34 : 0, row = H / n;
+      items.forEach(([name, v], i) => { const y = row * i + row * 0.2, bh = row * 0.6, bw = (W - lw - vw) * Math.min(1, Math.max(0, v / hi));
+        root.append(svg('rect', { x: lw, y, width: bw, height: bh, rx: bh / 3, fill: c })); if (lw) txt(name, lw - 6, y + bh / 2, { anchor: 'end' }); if (x.values) txt(n1(v), lw + bw + 6, y + bh / 2, { anchor: 'start', bold: true, fill: fg }); });
+      return root;
+    }
+    const lb = x.labels && items.some((i) => i[0]) ? 18 : 2, tp = x.values ? 16 : 4, h0 = H - lb - tp, slot = W / n, yOf = (v) => tp + h0 * (1 - Math.min(1, Math.max(0, v / hi)));
+    if (x.grid) for (let i = 0; i <= 3; i++) root.append(svg('line', { x1: 0, x2: W, y1: tp + h0 * i / 3, y2: tp + h0 * i / 3, stroke: line }));
+    if (kindC === 'line' || kindC === 'area') {
+      const pts = items.map(([, v], i) => [n === 1 ? W / 2 : i * W / (n - 1), yOf(v)]);
+      if (kindC === 'area') root.append(svg('polygon', { points: [...pts, [pts[n - 1][0], tp + h0], [pts[0][0], tp + h0]].join(' '), fill: c, 'fill-opacity': 0.25 }));
+      root.append(svg('polyline', { points: pts.join(' '), fill: 'none', stroke: c, 'stroke-width': 3, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' }));
+      pts.forEach((p, i) => { if (n <= 14) { root.append(svg('circle', { cx: p[0], cy: p[1], r: 3.5, fill: c })); if (x.values) txt(n1(items[i][1]), p[0], p[1] - 11, { bold: true, fill: fg }); } if (lb > 2) txt(items[i][0], Math.min(W - 14, Math.max(14, p[0])), H - 8); });
+      return root;
+    }
+    items.forEach(([name, v], i) => { const X = slot * i + slot * 0.2, bw = slot * 0.6, y = yOf(v);
+      root.append(svg('path', { d: `M${X},${tp + h0} V${y + 6} Q${X},${y} ${X + 6},${y} H${X + bw - 6} Q${X + bw},${y} ${X + bw},${y + 6} V${tp + h0} Z`, fill: c }));
+      if (x.values) txt(n1(v), X + bw / 2, y - 8, { bold: true, fill: fg }); if (lb > 2) txt(name, X + bw / 2, H - 8); });
+    return root;
+  }
+  function more(x, P, entry) {
+    const fg = (c) => col(c, P) || P.text;
+    switch (x.kind) {
+      case 'chart': {
+        const st = stateOf(x, () => ({ hist: [], due: 0 }));
+        if (x.track && !st.tick) { st.hist.push(num(A.vars[x.track]) || 0); st.tick = (dt) => { st.due += dt; if (st.due < x.every) return; st.due = 0; st.hist.push(num(A.vars[x.track]) || 0); if (st.hist.length > x.points) st.hist.shift(); st.node?.isConnected && st.node.replaceWith(st.node = more(x, pal(), entry)); }; }
+        const items = x.track ? st.hist.map((v) => ['', v]) : x.data.map((d) => [A.fill(d.label), num(A.fill(d.value).trim()) ?? 0]);
+        return (st.node = h('div', { class: 'npv-chart', style: x.bg ? `background:${col(x.bg, P)}` : '' }, x.title && h('b', { style: `color:${fg(x.text)}` }, A.fill(x.title)), chartSvg(x, P, items)));
+      }
+      case 'carousel': {
+        const st = stateOf(x, () => ({ i: Math.max(0, x.items.findIndex((it) => it.value === show(A.vars[x.var]))) })), ac = col(x.accent, P) || P.accent;
+        const locked = (it) => it.lock && !isOn(A.vars[it.lock]);
+        const pick = (i) => { st.i = (i + x.items.length) % x.items.length; if (!x.loop) st.i = Math.max(0, Math.min(x.items.length - 1, i)); const it = x.items[st.i]; if (!locked(it)) { A.set(x.var, it.value); if (x.message) A.send(x.message); } drawPhone(); };
+        return h('div', { class: 'npv-carousel', style: `--cw:${x.cardWidth * 100}%;--ac:${ac};height:${x.h}px` },
+          h('div', { class: 'npv-cards', style: `transform:translateX(calc(${(1 - x.cardWidth) * 50}% - ${st.i} * var(--cw)))` }, x.items.map((it, i) => h('div', { class: 'npv-ccard' + (i === st.i ? ' on' : '') + (locked(it) ? ' locked' : ''), style: `background:${col(x.card, P) || P.card};color:${fg(x.text)}`, onclick: () => pick(i) },
+            h('span', { class: 'npv-cic' }, locked(it) ? '🔒' : it.icon), h('b', {}, it.name), it.desc && h('small', {}, A.fill(it.desc))))),
+          x.arrows && h('button', { class: 'npv-carr l', 'aria-label': 'Previous', onclick: () => pick(st.i - 1) }, '‹'), x.arrows && h('button', { class: 'npv-carr r', 'aria-label': 'Next', onclick: () => pick(st.i + 1) }, '›'),
+          x.dots && h('div', { class: 'npv-dots' }, x.items.map((_, i) => h('i', { class: i === st.i ? 'on' : '' }))));
+      }
+      case 'pager': {
+        const n = x.children.length, cur = Math.max(0, Math.min(n - 1, (num(A.vars[x.var]) || 1) - 1)), dot = col(x.dotColor, P) || P.accent;
+        const go = (i) => { const j = x.loop ? ((i % n) + n) % n : Math.max(0, Math.min(n - 1, i)); A.set(x.var, j + 1); drawPhone(); };
+        const st = stateOf(x, () => ({ t: 0 }));
+        st.hear = (m) => { const pre = x.message, c = (num(A.vars[x.var]) || 1) - 1; if (m === pre + ' next') go(c + 1); else if (m === pre + ' prev' || m === pre + ' back') go(c - 1); else if (m.startsWith(pre + ' ') && Number.isFinite(+m.slice(pre.length + 1))) go(+m.slice(pre.length + 1) - 1); };
+        st.tick = x.auto > 0 ? (dt) => { st.t += dt; if (st.t >= x.auto) { st.t = 0; go((num(A.vars[x.var]) || 1)); } } : null;
+        let sx = null;
+        return h('div', { class: 'npv-pager', style: `height:${x.h}px`, onpointerdown: (e) => { sx = e.clientX; }, onpointerup: (e) => { if (sx != null && Math.abs(e.clientX - sx) > 40) go(cur + (e.clientX < sx ? 1 : -1)); sx = null; } },
+          h('div', { class: 'npv-pages', style: `transform:translateX(${-cur * 100}%)` }, x.children.map((c) => h('div', { class: 'npv-pg' }, element(c, P, entry)))),
+          x.dots && h('div', { class: 'npv-dots', style: `--ac:${dot}` }, x.children.map((_, i) => h('i', { class: i === cur ? 'on' : '', onclick: () => go(i) }))));
+      }
+      case 'photogrid': {
+        const rows = A.query(x.collection, x.filter).filter((r) => show(r[x.field]).split('|').some((m) => m.trim()));
+        if (!rows.length) return h('div', { class: 'npv-empty' }, 'No pictures yet');
+        return h('div', { class: 'npv-photos', style: `grid-template-columns:repeat(${Math.max(1, x.columns)},1fr);gap:${x.gap}px` }, rows.map((r) => { const m = show(r[x.field]).split('|')[0].trim(), url = /^https?:/.test(m);
+          return h('button', { class: 'npv-ph', style: `border-radius:${x.radius}px;background:${/^#[0-9a-f]{6}$/i.test(show(r.color)) ? r.color : P.field}`, onclick: () => { A.openCollection = x.collection; A.openId = r._id; if (x.openPage) A.go(x.openPage); if (x.message) A.send(x.message); drawPhone(); } }, url ? h('img', { src: m, alt: '' }) : m); }));
+      }
+      case 'like': {
+        const on = isOn(A.vars[x.var]), c = on ? col(x.on, P) || P.accent : col(x.off, P) || P.sub;
+        const shape = x.icon === 'thumbs up' ? 'M7 10v10H4V10zm3 10h7.5a2 2 0 0 0 2-1.6l1.4-7A2 2 0 0 0 19 9h-5l.7-3.6a1.6 1.6 0 0 0-3-1L8 10v10' : x.icon === 'star' ? ICON_SVG.star : ICON_SVG.heart;
+        return h('button', { class: 'npv-like' + (on ? ' on' : ''), 'aria-label': 'Like', onclick: () => { A.set(x.var, !on); if (x.countVar) A.add(x.countVar, on ? -1 : 1); if (x.message) A.send(x.message); drawPhone(); } },
+          (() => { const s0 = svg('svg', { viewBox: '0 0 24 24', width: 26, height: 26 }); s0.append(svg('path', { d: shape, fill: on ? c : 'none', stroke: c, 'stroke-width': 2, 'stroke-linejoin': 'round' })); return s0; })(),
+          x.countVar && h('b', { style: `color:${on ? c : col(x.text, P) || P.sub}` }, show(A.vars[x.countVar] ?? 0)));
+      }
+      case 'ticker': {
+        const parts = x.text.split('|').map((t) => A.fill(t.trim())).filter(Boolean), ac = col(x.accent, P) || P.accent;
+        const line = () => h('span', { class: 'npv-tline', style: `padding-right:${x.gap}px` }, parts.flatMap((t, i) => [i ? h('i', { style: `color:${ac}` }, '   ●   ') : null, t]));
+        const secs = Math.max(2, parts.join('   ●   ').length * x.size * 0.55 / Math.max(10, x.speed));
+        return h('div', { class: 'npv-ticker', style: `height:${x.h}px;background:${col(x.bg, P) || 'transparent'};color:${fg(x.color)};font-size:${x.size}px` },
+          h('div', { class: 'npv-trun' + (x.direction === 'right' ? ' rev' : ''), style: `animation-duration:${secs}s` }, line(), line()));
+      }
+      case 'timer': {
+        const st = stateOf(x, () => ({ t: 0, running: x.autoStart, done: false, shown: -1 }));
+        const paint = () => {
+          const s = x.seconds <= 0 ? 1 : x.seconds, left = x.countUp ? st.t : s - st.t, whole = x.countUp ? Math.floor(left) : Math.ceil(left - 1e-9);
+          const label = x.format === 'm:ss' ? `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}` : x.format === 'seconds.tenths' ? left.toFixed(1) : String(whole);
+          const warn = !x.countUp && left <= x.warnAt && !st.done && st.running, c = warn ? col(x.warn, P) || P.danger : col(x.color, P) || P.accent, frac = Math.min(1, Math.max(0, left / s));
+          const d = h('b', { style: `color:${warn ? c : fg(x.text)};font-size:${x.size * (x.look === 'digits' ? 0.45 : 0.26)}px` }, label);
+          if (x.look === 'bar') return h('div', { class: 'npv-timer bar' }, d, h('div', { class: 'npv-bar2', style: `height:12px;border-radius:6px;background:${col(x.track, P) || P.line}` }, h('i', { style: `width:${frac * 100}%;background:${c}` })));
+          if (x.look === 'digits') return h('div', { class: 'npv-timer' + (warn ? ' warn' : '') }, d);
+          if (x.look === 'pill') return h('div', { class: 'npv-timer pill' + (warn ? ' warn' : ''), style: `background:${c}29` }, '⏱ ', d);
+          const R = 50 - x.size * 0.04, ring = svg('svg', { viewBox: '0 0 100 100', width: x.size, height: x.size });
+          ring.append(svg('circle', { cx: 50, cy: 50, r: R, fill: 'none', stroke: col(x.track, P) || P.line, 'stroke-width': 8 }), svg('circle', { cx: 50, cy: 50, r: R, fill: 'none', stroke: c, 'stroke-width': 8, 'stroke-linecap': 'round', 'stroke-dasharray': `${2 * Math.PI * R * frac} 999`, transform: 'rotate(-90 50 50)' }));
+          return h('div', { class: 'npv-timer ring' + (warn ? ' warn' : ''), style: `width:${x.size}px;height:${x.size}px` }, ring, d);
+        };
+        st.hear = (m) => { if (!m.startsWith(x.message)) return; const rest = m.slice(x.message.length).trim();
+          if (['start', 'resume', ''].includes(rest)) st.running = true; else if (rest === 'pause' || rest === 'stop') st.running = false; else if (rest === 'reset') { st.t = 0; st.done = false; } else if (rest === 'restart') { st.t = 0; st.done = false; st.running = true; } else if (/^add\s+-?\d/.test(rest)) st.t = Math.max(0, st.t - +rest.split(/\s+/)[1] * (x.countUp ? -1 : 1));
+          st.node?.isConnected && st.node.replaceChildren(paint()); };
+        st.tick = (dt) => { if (!st.running || st.done || !st.node?.isConnected) return; st.t = Math.min(x.seconds, st.t + dt);
+          if (st.t >= x.seconds) { st.done = true; if (x.endMessage) A.send(x.endMessage); if (x.endAction === 'restart timer') { st.t = 0; st.done = false; } }
+          const left = x.countUp ? Math.floor(st.t) : Math.ceil(x.seconds - st.t - 1e-9); if (x.var && left !== st.shown) { st.shown = left; A.vars[x.var] = left; }
+          st.node.replaceChildren(paint()); };
+        return (st.node = h('div', { class: 'npv-timerw' }, paint()));
+      }
+      case 'skeleton': {
+        if (x.doneVar && isOn(A.vars[x.doneVar])) return h('div');
+        const bar = (w) => h('i', { class: 'npv-sk', style: `width:${w}%;border-radius:${x.radius}px` }), lines = (n) => h('div', { class: 'npv-sklines' }, Array.from({ length: n }, (_, i) => bar(i === n - 1 && n > 1 ? 60 : 100)));
+        const dot = (d) => h('i', { class: 'npv-sk', style: `width:${d}px;height:${d}px;border-radius:50%;flex:none` }), block = (hh) => h('i', { class: 'npv-sk', style: `height:${hh}px;border-radius:${x.radius * 1.5}px` });
+        return h('div', { class: 'npv-skel' }, x.layout === 'text lines' ? lines(x.lines) : x.layout === 'card' ? [block(140), lines(Math.max(1, x.lines - 1))] : x.layout === 'list rows' ? Array.from({ length: x.lines }, () => h('div', { class: 'npv-skrow' }, dot(40), lines(2))) : x.layout === 'picture' ? block(180) : h('div', { class: 'npv-skrow' }, dot(48), lines(x.lines)));
+      }
+      case 'colors': {
+        const cur = show(A.vars[x.var]).toLowerCase();
+        return h('div', { class: 'npv-swatches', style: `grid-template-columns:repeat(${Math.max(1, x.columns)},1fr);gap:${x.gap}px` }, x.colors.map((c) => h('button', { class: 'npv-sw' + (c.toLowerCase() === cur ? ' on' : ''), 'aria-label': c,
+          style: `background:${col(c, P) || c};border-radius:${x.shape === 'circle' ? '50%' : x.shape === 'rounded' ? '12px' : '3px'};${c.toLowerCase() === cur ? `box-shadow:0 0 0 3.5px ${col(x.ring, P) || P.text} inset` : ''}`, onclick: () => { A.set(x.var, c); if (x.message) A.send(x.message); drawPhone(); } }, c.toLowerCase() === cur ? '✓' : '')));
+      }
+      case 'keypad': {
+        const cur = show(A.vars[x.var]), ac = col(x.accent, P) || P.accent;
+        const enter = (v) => { if (x.enterMessage) A.send(x.enterMessage); if (!x.answer) return; if (v === x.answer) { if (x.rightMessage) A.send(x.rightMessage); } else { if (x.wrongMessage) A.send(x.wrongMessage); A.set(x.var, ''); } };
+        const press = (k) => { if (k === '⌫') A.set(x.var, cur.slice(0, -1)); else if (k === '✓') enter(cur); else if (cur.length < x.maxLength) { const nx = cur + k; A.set(x.var, nx); if (x.autoEnter && nx.length === x.maxLength) enter(nx); } drawPhone(); };
+        return h('div', { class: 'npv-keypad ' + x.keyStyle },
+          x.display && h('div', { class: 'npv-kdisp', style: `background:${col(x.displayBg, P) || P.field};color:${fg(x.text)}` }, Array.from({ length: x.maxLength }, (_, i) => (i < cur.length ? (x.mask ? '•' : cur[i]) : '–')).join('  ')),
+          h('div', { class: 'npv-keys' }, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', '✓'].map((k) => h('button', { 'aria-label': k === '⌫' ? 'Delete' : k === '✓' ? 'Enter' : k, style: k === '✓' ? `background:${ac};color:#fff` : `background:${x.keyStyle === 'flat' ? 'transparent' : col(x.keyColor, P) || P.field};color:${fg(x.text)}`, onclick: () => press(k) }, k))));
+      }
+      case 'selector': {
+        const n = x.options.length, i = Math.max(0, x.options.indexOf(show(A.vars[x.var]))), pick = (d) => { A.set(x.var, x.options[x.wrap ? (i + d + n) % n : Math.max(0, Math.min(n - 1, i + d))]); drawPhone(); };
+        return h('div', { class: 'npv-selector' }, h('button', { 'aria-label': 'Previous', disabled: !x.wrap && i === 0, onclick: () => pick(-1) }, '‹'), h('b', {}, x.options[i] ?? ''), h('button', { 'aria-label': 'Next', disabled: !x.wrap && i === n - 1, onclick: () => pick(1) }, '›'));
+      }
+      case 'overlay': return null; // (drawn over the page while it's open: popupLayer)
+    }
+    return null;
+  }
+
   // ---------- the app's own bars: the App Bar's look and buttons, the Bottom Nav's style and colours ----------
   function appBar(page, stack, P) {
     const B = model.bar, ios = kind === 'swift';
@@ -529,6 +719,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
 
   function drawPhone() {
     const focus = document.activeElement?.dataset?.k, sel = focus ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
+    const was = phone.querySelector('.npv-page'), keep = was && { page: was.dataset.page, top: was.scrollTop };
     const P = pal(), stack = A.stack(), entry = stack[stack.length - 1] || (A.roots[A.tab] ||= { form: null });
     const pageName = stack.length ? entry.page : model.tabs.length ? model.tabs[A.tab].page : model.home, page = model.pages.find((p) => p.value === pageName) || model.pages[0];
     const fills = page.items.some((x) => x.fill && (x.kind === 'list' || x.kind === 'form'));
@@ -543,7 +734,10 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       overlay(),
       model.tabs.length && !stack.length && navBar(P),
       menuOpen && model.menu && sideMenu(P),
+      (kind === 'flutter' || kind === 'kotlin') && popupLayer(P, entry),
+      (kind === 'flutter' || kind === 'kotlin') && toastLayer(P),
     ].filter((c) => c && c.nodeType));
+    const pg = phone.querySelector('.npv-page'); if (pg && keep && keep.page === page.value) pg.scrollTop = keep.top; // (redrawing keeps the page where it was scrolled)
     root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : kind === 'rn' ? 'React Native (Expo)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;
     if (focus) { const el = phone.querySelector(`[data-k="${CSS.escape(focus)}"]`); if (el) { el.focus(); try { el.setSelectionRange(sel[0], sel[1]); } catch { /* number inputs */ } } }
     if (view === 'code' && codeFiles) markPage();
@@ -585,7 +779,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   /** Read the project again (after an edit): keeps the tab you're on; reset also starts the data again. */
   function refresh(reset = false) {
     const tab = A.tab, vars = A.vars, data = A.data, before = Object.fromEntries(model.collections.map((c) => [c.name, JSON.stringify(c.rows)]));
-    model = build(); N = names(model); A = makeApp(model); codeFiles = null; story = null; listing = null;
+    model = build(); N = names(model); A = makeApp(model); A.listeners.push((m) => hear(m)); live = new Map(); popups = new Set(overlaysOf().filter((x) => x.startOpen)); toasts = []; codeFiles = null; story = null; listing = null;
     if (!reset) { A.tab = Math.min(tab, Math.max(0, model.tabs.length - 1)); Object.assign(A.vars, vars); for (const c of model.collections) if (data[c.name] && before[c.name] === JSON.stringify(c.rows)) A.data[c.name] = data[c.name]; A.work(); }
     note = ''; drawAll();
   }
@@ -593,8 +787,9 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 700); };
   const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) close(); };
   let onClose = null;
-  function close() { clearTimeout(soon); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); onClose?.(); }
+  function close() { clearTimeout(soon); clearInterval(clock); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); onClose?.(); }
   addEventListener('keydown', onKey);
+  A.listeners.push((m) => hear(m)); for (const x of overlaysOf()) if (x.startOpen) popups.add(x);
   where.place(!!host);
   return { root, close, get app() { return A; }, refresh, refreshSoon, go: (pg) => { A.go(pg); drawPhone(); }, set onClose(f) { onClose = f; } };
 }

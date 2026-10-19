@@ -4,7 +4,7 @@
 // runtime (editor/native/kotlin/Pocket.kt); anything else is a TODO placeholder.
 import { appModel, PALETTES, barIcons } from './appmodel.js';
 import { NAV_ART } from './navart.js';
-import { nativeReadme, names, listExtras, pinArgs, placeOf, btnExtras, menuTo } from './nativecode.js';
+import { nativeReadme, names, listExtras, pinArgs, placeOf, btnExtras, menuTo, optArgs } from './nativecode.js';
 import { pbxproj, plist } from './native.js';
 
 /** Versions that go together (built and checked with these). */
@@ -24,6 +24,8 @@ const ICON_K = { home: 'Home', search: 'Search', explore: 'Search', user: 'Perso
 const iconK = (n) => 'Icons.Filled.' + (ICON_K[String(n || '').toLowerCase()] || 'CheckCircle');
 
 const kf = (v) => `${+v}f`, kd = (v) => (Number.isInteger(+v) ? `${+v}.0` : String(+v));
+/** Number arguments by name: Double (1.0), Float (1f) or Int (1, the rest), as the runtime's parameter is. */
+const KN = (by) => (v, k) => String((by[k] || Math.round)(v));
 
 function kElement(x, ind, fill) {
   const pad = ' '.repeat(ind), mod = fill ? ', modifier = Modifier.weight(1f)' : '';
@@ -63,6 +65,18 @@ function kElement(x, ind, fill) {
     case 'people': return `People(${ks(x.collection)}${x.profilePage ? `, profilePage = ${ks(x.profilePage)}` : ''})`;
     case 'achievements': return 'Achievements()';
     case 'trending': return `Trending(${ks(x.collection)}${x.searchVar ? `, searchVar = ${ks(x.searchVar)}` : ''})`;
+    case 'chart': return `PChart(listOf(${x.data.map((d) => `${ks(d.label)} to ${ks(d.value)}`).join(', ')})${optArgs([['chart', x.chart, 'columns'], ['track', x.track, ''], ['every', x.every, 1], ['points', x.points, 30], ['title', x.title, ''], ['max', x.max, 0], ['values', x.values, true], ['labels', x.labels, true], ['grid', x.grid, true], ['color', x.color, '@accent'], ['text', x.text, ''], ['bg', x.bg, ''], ['height', x.h, 200]], ' = ', ks, KN({ every: kd, max: kd, points: Math.round, height: Math.round }))})`;
+    case 'carousel': return `Carousel(${ks(x.var)}, listOf(\n${x.items.map((i) => `${pad}    CarouselItem(${ks(i.name)}, ${ks(i.icon)}, ${ks(i.value)}${i.lock ? `, lock = ${ks(i.lock)}` : ''}${i.desc ? `, desc = ${ks(i.desc)}` : ''}),`).join('\n')}\n${pad})${optArgs([['cardWidth', x.cardWidth, 0.55], ['arrows', x.arrows, true], ['dots', x.dots, true], ['loop', x.loop, false], ['message', x.message, ''], ['card', x.card, '@card'], ['text', x.text, ''], ['accent', x.accent, '@accent'], ['height', x.h, 220]], ' = ', ks, KN({ cardWidth: kf, height: Math.round }))})`;
+    case 'pager': return `Pager(${ks(x.var)}${optArgs([['dots', x.dots, true], ['dotColor', x.dotColor, '@accent'], ['loop', x.loop, false], ['auto', x.auto, 0], ['message', x.message, 'slide'], ['height', x.h, 320]], ' = ', ks, KN({ auto: kd, height: Math.round }))}, pages = listOf(\n${x.children.map((c) => `${pad}    { ${kElement(c, ind + 4, false)} },`).join('\n')}\n${pad}))`;
+    case 'photogrid': return `PhotoGrid(${optArgs([['collection', x.collection, 'Posts'], ['field', x.field, 'media'], ['filter', x.filter, ''], ['columns', x.columns, 3], ['gap', x.gap, 2], ['radius', x.radius, 0], ['openPage', x.openPage, ''], ['message', x.message, '']], ' = ', ks, Math.round).slice(2)})`;
+    case 'like': return `LikeButton(${ks(x.var)}${optArgs([['countVar', x.countVar, 'likes'], ['icon', x.icon, 'heart'], ['message', x.message, ''], ['on', x.on, '#f91880'], ['off', x.off, '@sub'], ['text', x.text, '@sub']], ' = ', ks)})`;
+    case 'ticker': return `Ticker(${ks(x.text)}${optArgs([['speed', x.speed, 60], ['direction', x.direction, 'left'], ['gap', x.gap, 60], ['size', x.size, 15], ['bg', x.bg, ''], ['color', x.color, ''], ['accent', x.accent, '#ffd23d'], ['height', x.h, 36]], ' = ', ks, KN({ speed: kd, gap: Math.round, size: Math.round, height: Math.round }))})`;
+    case 'timer': return `PTimer(${optArgs([['seconds', x.seconds, 30], ['countUp', x.countUp, false], ['look', x.look, 'ring'], ['format', x.format, 'seconds'], ['autoStart', x.autoStart, true], ['message', x.message, 'timer'], ['endMessage', x.endMessage, ''], ['endAction', x.endAction, 'nothing else'], ['warnAt', x.warnAt, 5], ['variable', x.var, ''], ['color', x.color, '@accent'], ['warn', x.warn, '#ff4d5e'], ['track', x.track, '@line'], ['text', x.text, ''], ['size', x.size, 120]], ' = ', ks, KN({ seconds: kd, warnAt: kd, size: Math.round })).slice(2)})`;
+    case 'skeleton': return `Skeleton(${optArgs([['layout', x.layout, 'avatar + lines'], ['lines', x.lines, 3], ['doneVar', x.doneVar, ''], ['radius', x.radius, 8]], ' = ', ks, Math.round).slice(2)})`;
+    case 'colors': return `ColorSwatches(${ks(x.var)}, listOf(${x.colors.map(ks).join(', ')})${optArgs([['columns', x.columns, 5], ['shape', x.shape, 'circle'], ['gap', x.gap, 10], ['ring', x.ring, '@text'], ['message', x.message, '']], ' = ', ks, Math.round)})`;
+    case 'keypad': return `Keypad(${ks(x.var)}${optArgs([['maxLength', x.maxLength, 4], ['mask', x.mask, false], ['answer', x.answer, ''], ['rightMessage', x.rightMessage, ''], ['wrongMessage', x.wrongMessage, ''], ['enterMessage', x.enterMessage, ''], ['autoEnter', x.autoEnter, true], ['display', x.display, true], ['keyStyle', x.keyStyle, 'round'], ['keyColor', x.keyColor, '@field'], ['text', x.text, ''], ['accent', x.accent, '@good'], ['displayBg', x.displayBg, '']], ' = ', ks, Math.round)})`;
+    case 'selector': return `Selector(${ks(x.var)}, listOf(${x.options.map(ks).join(', ')})${x.wrap ? '' : ', wrap = false'})`;
+    case 'overlay': return `PPopup(${optArgs([['mode', x.mode, 'popup'], ['openOn', x.openOn, 'popup'], ['closeOn', x.closeOn, 'close'], ['startOpen', x.startOpen, false], ['autoClose', x.autoClose, 0], ['tapCloses', x.tapCloses, false], ['dim', x.dim, true], ['handle', x.handle, true]], ' = ', ks, kd).slice(2)}) {\n${pad}    ${kElement(x.box, ind + 4, false)}\n${pad}}`;
     default: return `TodoBox(${ks(x.name)}, ${ks(x.type)}) // TODO: build the ${x.type} natively`;
   }
 }
@@ -128,7 +142,7 @@ fun setupApp() {
         tabs = listOf(${model.tabs.map((t) => `\n            NavTab(${ks(t.label)}, ${NAV_ART[t.icon] ? `PocketIcons.nav(${ks(t.icon)})` : iconK(t.icon)}, ${ks(t.page)}${t.badge ? `, badge = ${ks(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}),
         collections = listOf(${model.collections.map((c) => `\n            Collection(${ks(c.name)}, listOf(${c.fields.map(field).join(', ')})${c.rows.length ? `, sample = listOf(${c.rows.map(row).join(', ')})` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}),
         bar = ${kBar(model)},
-        menu = ${kMenu(model)},
+        menu = ${kMenu(model)},${model.notify ? `\n        notify = NotifyStyle(${optArgs([['listen', model.notify.listen, 'notify'], ['position', model.notify.position, 'top'], ['look', model.notify.look, 'card'], ['seconds', model.notify.seconds, 3], ['max', model.notify.max, 3], ['bg', model.notify.bg, '#1e2235'], ['text', model.notify.text, '#ffffff'], ['accent', model.notify.accent, '#ffd23d']], ' = ', ks, KN({ seconds: kd })).slice(2)}),` : ''}
         nav = ${model.nav ? `NavStyle(${ks(model.nav.style)}, ${ks(tok(model.nav.bar, '@bar'))}, ${ks(tok(model.nav.active, '@accent'))}, ${ks(tok(model.nav.idle, '@sub'))}, labels = ${ks(model.nav.labels || 'always')}, margin = ${Math.round(+model.nav.margin || 0)}, on = ${ks(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'},
         stats = listOf(${model.stats.map((s) => `\n            Stat(${ks(s.var)}, ${ks(s.collection)}, ${ks(s.how)}${s.field && s.field !== 'field' ? `, field = ${ks(s.field)}` : ''}${s.filter ? `, filter = ${ks(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}),
     )

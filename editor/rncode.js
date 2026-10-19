@@ -2,7 +2,7 @@
 // Made from the same app model as the Flutter, Kotlin and SwiftUI exports, so it looks and works the same.
 // App.js has the app (pages, tabs, data, App Bar, Bottom Nav, Side Menu); pages/ has one component per page;
 // pocket.js (editor/native/rn/pocket.js) is the fixed runtime with the state and the building blocks.
-import { appModel, PALETTES, barIcons } from './appmodel.js';
+import { appModel, PALETTES, barIcons, todoFor } from './appmodel.js';
 import { NAV_ART } from './navart.js';
 import { names, placeOf } from './nativecode.js';
 
@@ -107,7 +107,7 @@ ${model.pages.map((p) => `        ${JSON.stringify(p.value)}: ${N[p.value]},`).j
 }
 
 function rnReadme(model, o, dir) {
-  const todo = [...new Map(model.todo.map((t) => [t.name, t])).values()];
+  const todo = [...new Map(todoFor(model, 'rn').map((t) => [t.name, t])).values()];
   return `# ${model.name} (React Native)
 
 Made with Pocket Engine. This folder is an [Expo](https://expo.dev) app with real React Native views: the same pages, tabs,

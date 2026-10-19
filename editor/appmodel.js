@@ -5,7 +5,7 @@ const fieldKey = (n) => String(n ?? '').trim().toLowerCase().replace(/[^a-z0-9]+
 const PAGE_W = 400;
 
 /** What a page has in it that turns into a native element; null for things the native app doesn't need (the page itself, App Logic). */
-function elementOf(e, kids, todo) {
+function elementOf(e, kids, todo, ctx = {}) {
   const B = (t) => (e.behaviors || []).find((b) => b.type === t), P = (b) => b.params || b; // (saved games keep params flat on the behavior)
   const color = (c) => (c == null || c === '' ? '' : String(c));
   const text = e.text && String(e.text.value ?? '') !== '' ? { value: String(e.text.value), size: +e.text.size || 16, weight: String(e.text.weight || '600'), color: color(e.text.color), align: e.text.align || 'center' } : null;
@@ -58,7 +58,37 @@ function elementOf(e, kids, todo) {
   if ((b = B('uiCounter'))) { const p = P(b); return { kind: 'text', value: `${p.prefix || ''}{${p.var || 'score'}}${p.suffix || ''}`, size: text?.size || 32, weight: String(text?.weight || '800'), color: text?.color || '', align: text?.align || 'center' }; }
   if (e.bar) return { kind: 'bar', var: e.bar.var || 'xp', max: +e.bar.max || 100, h: +e.bar.h || 12, fill: color(e.bar.fill) || '@accent', bg: color(e.bar.bg) || '@line', radius: e.bar.radius ?? 6 };
   if ((b = B('uiList'))) { const p = P(b); if ((p.source || 'these items') === 'these items') return { kind: 'items', items: String(p.items || '').split('\n').map((s) => s.trim()).filter(Boolean) }; }
-  const UI = (e.behaviors || []).filter((x) => /^ui|^data/.test(x.type) && !['uiShowIf', 'dataStat'].includes(x.type));
+  // components with a Flutter and Kotlin version (SwiftUI and React Native show a placeholder for them for now: LATER_KINDS)
+  const named = (b, more) => ({ name: e.name || b.type, type: b.type, ...more });
+  const th = (v, game, token = '') => { const c = color(v); return !c || c.toLowerCase() === game ? token : c; }; // (the component's game colour, untouched → the app's theme colour)
+  const yes = (v, d = true) => (v == null || v === '' ? d : v !== false && v !== 'false' && v !== 'no');
+  if ((b = B('uiTabIndicator'))) return null; // (the native Bottom Nav has its own)
+  if ((b = B('uiNotifications'))) { const p = P(b); ctx.notify = { listen: p.listen || 'notify', position: p.position || 'top', look: p.look || 'card', seconds: +p.seconds || 3, max: +p.max || 3, bg: color(p.bg) || '#1e2235', text: color(p.text) || '#ffffff', accent: color(p.accent) || '#ffd23d' }; return null; } // (one for the whole app)
+  if ((b = B('uiPopup')) || (b = B('uiSheet'))) { const p = P(b), sheet = b.type === 'uiSheet';
+    return named(b, { kind: 'overlay', mode: sheet ? 'sheet' : 'popup', openOn: p.openOn || (sheet ? 'open sheet' : 'popup'), closeOn: p.closeOn || (sheet ? 'close sheet' : 'close'), startOpen: !!p.startOpen && p.startOpen !== 'false', autoClose: +p.autoClose || 0,
+      tapCloses: sheet ? true : !!p.tapCloses && p.tapCloses !== 'false', dim: sheet ? yes(p.dim) : yes(p.modal), handle: sheet && yes(p.handle), box: { ...box(), w: W || 368 } }); }
+  if ((b = B('uiChart'))) { const p = P(b);
+    return named(b, { kind: 'chart', chart: p.chart || 'columns', data: String(p.data ?? 'Mon | 12\nTue | 19\nWed | 8').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((r) => r[0] || r[1]).map(([label = '', value = '0']) => ({ label, value })),
+      track: p.track || '', every: +p.every || 1, points: +p.points || 30, title: p.title || '', max: +p.max || 0, values: yes(p.values), labels: yes(p.labels), grid: yes(p.grid), color: th(p.color, '#4fa3ff', '@accent'), text: th(p.text, '#e8eaf2'), bg: color(p.bg) || '', h: H || 200 }); }
+  if ((b = B('uiCarousel'))) { const p = P(b);
+    return named(b, { kind: 'carousel', items: String(p.items || '').split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((r) => r[0]).map(([name, icon = '', value = '', lock = '', desc = '']) => ({ name, icon, value: value || name, lock, desc })),
+      var: p.var || 'character', cardWidth: Math.min(1, Math.max(0.3, +p.cardWidth || 0.55)), arrows: yes(p.arrows), dots: yes(p.dots), loop: yes(p.loop, false), message: p.message || '', card: th(p.card, '#232842', '@card'), text: th(p.text, '#ffffff'), accent: th(p.accent, '#4fa3ff', '@accent'), h: H || 220 }); }
+  if ((b = B('uiPager'))) { const p = P(b); return named(b, { kind: 'pager', var: p.var || 'slide', dots: yes(p.dots), dotColor: th(p.dotColor, '#ffffff', '@accent'), loop: yes(p.loop, false), auto: +p.auto || 0, message: p.message || 'slide', h: H || 320, children: kids }); }
+  if ((b = B('uiPhotoGrid'))) { const p = P(b); return named(b, { kind: 'photogrid', collection: p.collection || 'Posts', field: fieldKey(p.field || 'media'), filter: p.filter || '', columns: +p.columns || 3, gap: p.gap == null ? 2 : +p.gap, radius: +p.radius || 0, openPage: p.openPage || '', message: p.message || '' }); }
+  if ((b = B('uiLike'))) { const p = P(b); return named(b, { kind: 'like', var: p.var || 'liked', countVar: p.countVar ?? 'likes', icon: p.icon || 'heart', message: p.message || '', on: color(p.on) || '#f91880', off: color(p.off) || '@sub', text: color(p.text) || '@sub' }); }
+  if ((b = B('uiTicker'))) { const p = P(b); return named(b, { kind: 'ticker', text: p.text || '', speed: +p.speed || 60, direction: p.direction || 'left', gap: p.gap == null ? 60 : +p.gap, size: +p.size || 15, bg: color(p.bg) || '', color: color(p.color) || '', accent: color(p.accent) || '#ffd23d', h: H || 36 }); }
+  if ((b = B('uiTimerRing'))) { const p = P(b); return named(b, { kind: 'timer', seconds: +p.seconds || 30, countUp: yes(p.countUp, false), look: p.look || 'ring', format: p.format || 'seconds', autoStart: yes(p.autoStart), message: p.message || 'timer', endMessage: p.endMessage || '', endAction: p.endAction || 'nothing else', warnAt: p.warnAt == null ? 5 : +p.warnAt, var: p.var || '', color: th(p.color, '#4fa3ff', '@accent'), warn: color(p.warn) || '#ff4d5e', track: th(p.track, 'rgba(255,255,255,0.14)', '@line'), text: th(p.text, '#ffffff'), size: H || 120 }); }
+  if ((b = B('uiSkeleton'))) { const p = P(b); return named(b, { kind: 'skeleton', layout: p.layout || 'avatar + lines', lines: +p.lines || 3, doneVar: p.doneVar || '', radius: p.radius == null ? 8 : +p.radius }); }
+  if ((b = B('uiColorPicker'))) { const p = P(b); return named(b, { kind: 'colors', colors: opts(p.colors || '#ff4d5e, #ff9f43, #ffd23d, #3ccf7a, #4fa3ff, #8e6bf2'), var: p.var || 'color', columns: +p.columns || 5, shape: p.shape || 'circle', gap: p.gap == null ? 10 : +p.gap, ring: th(p.ring, '#ffffff', '@text'), message: p.message || '' }); }
+  if ((b = B('uiKeypad'))) { const p = P(b); return named(b, { kind: 'keypad', var: p.var || 'code', maxLength: +p.maxLength || 4, mask: yes(p.mask, false), answer: String(p.answer ?? ''), rightMessage: p.rightMessage || '', wrongMessage: p.wrongMessage || '', enterMessage: p.enterMessage || '', autoEnter: yes(p.autoEnter), display: yes(p.display), keyStyle: p.keyStyle || 'round', keyColor: th(p.keyColor, '#2a3048', '@field'), text: th(p.text, '#ffffff'), accent: th(p.accent, '#3ccf7a', '@good'), displayBg: th(p.displayBg, '#11131d') }); }
+  if ((b = B('uiSelector'))) { const p = P(b); return named(b, { kind: 'selector', var: p.var || 'difficulty', options: opts(p.options || 'Easy, Normal, Hard'), start: +p.start || 1, wrap: yes(p.wrap) }); }
+  if ((b = B('uiPanel'))) { const p = P(b), pad = p.padding == null ? 16 : +p.padding; // a window: the card, its title in the header, then what's inside
+    const title = p.title ? [{ kind: 'text', value: String(p.title), size: +p.titleSize || 17, weight: '800', color: th(p.titleColor, '#ffffff'), align: p.titleAlign === 'center' ? 'center' : 'left', pin: { fx: p.titleAlign === 'center' ? 0.5 : 0, fy: 0, x: p.titleAlign === 'center' ? 0 : pad, y: (+p.headerH || 44) / 2, w: 0, h: 0, align: p.titleAlign === 'center' ? 'center' : 'left', m: -1, wrap: 0 } }] : [];
+    return { ...box(), children: [...title, ...kids] }; }
+  // a menu on tap (Popover): the element is drawn natively; its menu is still to build
+  if ((b = B('uiPopover'))) todo.push({ name: (e.name || 'Popover') + ' (its menu)', type: 'uiPopover' });
+  const PASS = ['uiShowIf', 'dataStat', 'uiAnim', 'uiTooltip', 'uiLayout', 'uiScroll', 'uiPopover']; // (they change how it moves or where its things go: the element itself is still drawn)
+  const UI = (e.behaviors || []).filter((x) => /^ui|^data/.test(x.type) && !PASS.includes(x.type));
   if (UI.length) { todo.push({ name: e.name || UI[0].type, type: UI[0].type }); return { kind: 'todo', name: e.name || UI[0].type, type: UI[0].type }; }
   if (e.sprite?.src && /^(https?:|data:image)/.test(e.sprite.src)) return { kind: 'image', src: e.sprite.src, h: Math.round((e.sprite.h || e.shape?.h || 160)) };
   if (kids.length || (e.shape && (sh.fill || sh.stroke) && sh.type !== 'line')) return box(); // a card, a badge, a divider line, a picture box
@@ -72,7 +102,7 @@ const orderOf = (e) => { const a = e.anchor || 'center', g = a.startsWith('top')
 
 /** game: the project JSON (as saved). */
 export function appModel(game) {
-  const ents = game.entities || [], byParent = new Map(), todo = [];
+  const ents = game.entities || [], byParent = new Map(), todo = [], ctx = {};
   for (const e of ents) { const k = e.parent || ''; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(e); }
   const kidsOf = (e) => (byParent.get(e.id) || []).slice().sort((a, b) => orderOf(a) - orderOf(b));
   const beh = (e, t) => (e.behaviors || []).find((b) => b.type === t);
@@ -85,7 +115,7 @@ export function appModel(game) {
   const build = (e) => {
     const kids = kidsOf(e).map(build).filter(Boolean);
     if (e.row != null && e.row !== '') { const cells = kids.filter((k) => k.pin.m >= 0); cells.forEach((k, i) => { k.pin.cell = i; k.pin.cells = cells.length; }); } // the cells of a row
-    const x = elementOf(e, kids, todo); if (x) x.pin = pinOf(e); return x;
+    const x = elementOf(e, kids, todo, ctx); if (x) x.pin = pinOf(e); return x;
   };
 
   const bar = ents.map((e) => beh(e, 'uiAppBar')).find(Boolean), barP = P(bar);
@@ -138,7 +168,7 @@ export function appModel(game) {
     rows: (c.rows || []).map((r) => Object.fromEntries(Object.entries(r).map(([k, v]) => [k === '_at' ? k : fieldKey(k), v]))), // (_at: when it was added; it keeps its name)
   }));
   // a feed whose collection isn't there shows sample posts in the editor: the native app gets them as its Posts
-  const feedColls = new Set(); const look = (x) => { if (['feed', 'trending', 'composer'].includes(x.kind) && x.collection) feedColls.add(x.collection); (x.children || []).forEach(look); };
+  const feedColls = new Set(); const look = (x) => { if (['feed', 'trending', 'composer', 'photogrid'].includes(x.kind) && x.collection && (x.kind !== 'photogrid' || x.field === 'media')) feedColls.add(x.collection); (x.children || []).forEach(look); (x.box?.children || []).forEach(look); };
   for (const p of pages) { p.items.forEach(look); if (p.fab) look(p.fab); }
   for (const name of feedColls) if (!collections.some((c) => fieldKey(c.name) === fieldKey(name))) collections.push({ name, sample: true, fields: POST_FIELDS.map(([n, type]) => ({ name: n, key: fieldKey(n), type, options: [], def: type === 'number' ? 0 : type === 'yes/no' ? false : '' })), rows: samplePosts() });
   const vars = {}; for (const [k, v] of Object.entries(game.vars || {})) if (k !== 'page' && (typeof v === 'number' || typeof v === 'string' || typeof v === 'boolean')) vars[k] = v;
@@ -149,14 +179,25 @@ export function appModel(game) {
     case 'chips': return x.options[x.start - 1] ?? x.options[0];
     case 'dropdown': return x.start ? x.options[x.start - 1]?.value : undefined;
     case 'toggle': return x.var === 'darkMode' ? undefined : !!x.start;
+    case 'selector': return x.options[x.start - 1] ?? x.options[0];
+    case 'carousel': return x.items.find((i) => !i.lock)?.value;
+    case 'pager': return 1;
+    case 'like': return false;
     default: return undefined; } };
-  const walk = (x) => { const v = x.var && startOf(x); if (v !== undefined && !(x.var in vars) && !(x.var in (game.vars || {}))) vars[x.var] = v; (x.children || []).forEach(walk); };
+  const walk = (x) => { const v = x.var && startOf(x); if (v !== undefined && !(x.var in vars) && !(x.var in (game.vars || {}))) vars[x.var] = v; (x.children || []).forEach(walk); (x.box?.children || []).forEach(walk); };
   for (const p of pages) p.items.forEach(walk);
   return {
     name: game.settings?.appName || game.name || 'My App', accent: game.settings?.appAccent || '', theme: themeOf(game),
-    appBar: !!bar, bar: bars, nav: navs, menu, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
+    appBar: !!bar, bar: bars, nav: navs, menu, notify: ctx.notify || null, later: laterOf(pages), tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
   };
 }
+
+/** The kinds only the Flutter and Kotlin code have so far: SwiftUI and React Native draw a placeholder for them. */
+export const LATER_KINDS = new Set(['chart', 'carousel', 'pager', 'photogrid', 'like', 'ticker', 'timer', 'skeleton', 'colors', 'keypad', 'selector', 'overlay']);
+const laterOf = (pages) => { const out = []; const walk = (x) => { if (LATER_KINDS.has(x.kind)) out.push({ name: x.name, type: x.type }); (x.children || []).forEach(walk); (x.box?.children || []).forEach(walk); };
+  for (const p of pages) { p.items.forEach(walk); if (p.fab) walk(p.fab); } return out; };
+/** The parts a target's code shows as placeholders: kind is flutter, kotlin, swift or rn. */
+export const todoFor = (model, kind) => (kind === 'flutter' || kind === 'kotlin' ? model.todo : [...model.todo, ...model.later]);
 
 /** Light or dark, the way the editor decides: the darkMode variable, else the theme picked, else (none picked) the background's brightness. */
 function themeOf(game) {

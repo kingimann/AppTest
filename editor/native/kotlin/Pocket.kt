@@ -5,7 +5,35 @@
 // Pocket Engine's native export; the pages in pages/ are yours to change, and so is this file.
 package __PACKAGE__
 
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -108,7 +136,12 @@ class Palette(val c: Map<String, Color>) {
         val t = v.removePrefix("@")
         c[t]?.let { return it }
         val h = v.removePrefix("#")
-        return if (h.length == 6) h.toLongOrNull(16)?.let { Color(0xFF000000 or it) } else null
+        if (h.length == 6) h.toLongOrNull(16)?.let { return Color(0xFF000000 or it) }
+        Regex("^rgba?\\(\\s*(\\d+)\\s*,\\s*(\\d+)\\s*,\\s*(\\d+)\\s*(?:,\\s*([\\d.]+)\\s*)?\\)$").find(v)?.let { m -> // rgba(255,255,255,0.1)
+            val (r, g, b) = m.destructured
+            return Color(r.toInt(), g.toInt(), b.toInt(), ((m.groupValues[4].toFloatOrNull() ?: 1f) * 255).toInt().coerceIn(0, 255))
+        }
+        return null
     }
     val bg get() = c.getValue("bg")
     val card get() = c.getValue("card")
@@ -173,6 +206,8 @@ class AppState(
     val name: String, val home: String, val light: Palette, val dark: Palette, vars: Map<String, Any?>,
     val tabs: List<NavTab>, val collections: List<Collection>, val stats: List<Stat>, val themeSetting: String = "follow the phone",
     val bar: BarStyle = BarStyle(), val nav: NavStyle = NavStyle(), val menu: SideMenuStyle? = null,
+    /** Pop-up notifications ("notify Title|text|icon"); null: the app has none. */
+    val notify: NotifyStyle? = null,
 ) {
     /** Is the Side Menu open? (☰ or your avatar on the App Bar opens it.) */
     var menuOpen by mutableStateOf(false)
@@ -357,10 +392,30 @@ class AppState(
     }
     fun back() { if (stack.isNotEmpty()) stack.removeAt(stack.size - 1) }
 
+    // ---- messages ----
+    private val listeners = mutableListOf<(String) -> Unit>()
+    /** The pop-up notifications on screen now. */
+    val toasts = mutableStateListOf<Toast>()
+    /** Hear the app's messages (a popup's "popup", a timer's "timer pause"…); call what it returns to stop. */
+    fun listen(f: (String) -> Unit): () -> Unit { listeners.add(f); return { listeners.remove(f) } }
+    /** Send a message (a button's "message" action, an App Bar button…) to everything listening. */
+    fun send(message: String) {
+        val m = fill(message).trim()
+        if (m.isEmpty()) return
+        listeners.toList().forEach { it(m) }
+        val n = notify ?: return
+        if (m == n.listen || m.startsWith(n.listen + " ")) {
+            val parts = m.removePrefix(n.listen).trim().split("|").map { it.trim() }
+            toasts.add(Toast(parts[0], parts.getOrElse(1) { "" }, parts.getOrElse(2) { "" }.ifEmpty { if (n.look == "achievement") "🏆" else "" }))
+            while (toasts.size > n.max) toasts.removeAt(0)
+        }
+    }
+
     /** What a button does (the same words as the button's Action in Pocket Engine). */
     fun run(action: String, value: Any? = "", amount: Double = 1.0) {
         val v = show(value)
         when (action) {
+            "message" -> send(v)
             "go to page" -> go(v)
             "go back" -> back()
             "set variable" -> set(v, amount)
@@ -419,6 +474,7 @@ fun PocketApp(pages: Map<String, @Composable () -> Unit>) {
                 },
             ) { pad -> Box(Modifier.padding(pad)) { (pages[page] ?: { Text("No page $page") })() } }
             if (app.menuOpen && app.menu != null) PocketDrawer(page)
+            if (app.notify != null) ToastLayer() // (pop-up notifications over every page)
             }
         }
     }
@@ -473,7 +529,7 @@ fun PocketBar(title: String, page: String) {
                 when {
                     "dark mode" in a.does -> app.set("darkMode", !dark)
                     a.does.startsWith("page:") -> app.go(a.does.removePrefix("page:"))
-                    else -> println("TODO: the App Bar button sends \"${a.does}\"")
+                    else -> app.send(a.does)
                 }
             }) { BadgedBox(badge = { if (n > 0) Badge { Text(n.toString()) } }) { Icon(PocketIcons.nav(if (a.icon == "theme") (if (dark) "sun" else "moon") else a.icon), contentDescription = a.icon, tint = ic, modifier = Modifier.size(if (b.circles == "plain") 24.dp else 20.dp)) } }
         }
@@ -508,7 +564,7 @@ fun PocketDrawer(page: String) {
                             when (it.kind) {
                                 "toggle" -> app.set(it.to, !isOn(app.get(it.to)))
                                 "page" -> { close(); app.go(it.to) }
-                                else -> { close(); println("TODO: the Side Menu sends \"${it.to}\"") }
+                                else -> { close(); app.send(it.to.removePrefix("msg:")) }
                             }
                         }.padding(horizontal = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp),
@@ -1442,5 +1498,416 @@ fun Trending(collection: String = "Posts", searchVar: String = "") {
     val counts = app.rows(collection).flatMap { r -> Regex("#\\w+").findAll(r.s("text")).map { it.value }.toList() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.take(8)
     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         for ((tag, n) in counts) AssistChip(onClick = { if (searchVar.isNotEmpty()) app.set(searchVar, tag) }, label = { Text("$tag · $n") })
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// More components: charts, carousels, swipe pages, timers, keypads, popups, notifications…
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Hear the app's messages while this is on screen. */
+@Composable
+fun OnMessage(f: (String) -> Unit) {
+    val latest by rememberUpdatedState(f)
+    DisposableEffect(Unit) { val off = app.listen { latest(it) }; onDispose { off() } }
+}
+
+/** How pop-up notifications look and where they show. */
+class NotifyStyle(val listen: String = "notify", val position: String = "top", val look: String = "card", val seconds: Double = 3.0, val max: Int = 3, val bg: String = "#1e2235", val text: String = "#ffffff", val accent: String = "#ffd23d")
+
+class Toast(val title: String, val text: String, val icon: String)
+
+/** The notifications on screen, stacked at the top (or bottom, or centre). */
+@Composable
+fun ToastLayer() {
+    val n = app.notify ?: return
+    val p = LocalPalette.current
+    val bg = p.resolve(n.bg) ?: p.card; val fg = p.resolve(n.text) ?: p.text; val ac = p.resolve(n.accent) ?: p.accent
+    val pill = n.look == "pill"; val banner = n.look == "banner"
+    Box(Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = if (banner) 0.dp else 12.dp, vertical = 8.dp), contentAlignment = when (n.position) { "bottom" -> Alignment.BottomCenter; "center" -> Alignment.Center; "top right" -> Alignment.TopEnd; else -> Alignment.TopCenter }) {
+        Column(Modifier.padding(bottom = if (n.position == "bottom") 88.dp else 0.dp), verticalArrangement = Arrangement.spacedBy(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            for (t in app.toasts.toList()) key(t) {
+                LaunchedEffect(t) { delay((n.seconds * 1000).toLong()); app.toasts.remove(t) }
+                var shown by remember { mutableStateOf(false) }
+                LaunchedEffect(Unit) { shown = true }
+                val k by animateFloatAsState(if (shown) 1f else 0f, tween(260))
+                val shape = RoundedCornerShape(if (banner) 0.dp else if (pill) 30.dp else 16.dp)
+                Row(
+                    Modifier.then(if (banner) Modifier.fillMaxWidth() else Modifier.widthIn(max = 420.dp)).alpha(k).offset(y = ((1 - k) * (if (n.position == "bottom") 24 else -24)).dp)
+                        .shadow(10.dp, shape).clip(shape).background(bg).then(if (n.look == "achievement") Modifier.border(2.dp, ac, shape) else Modifier)
+                        .clickable { app.toasts.remove(t) }.padding(horizontal = if (pill) 18.dp else 14.dp, vertical = if (pill) 10.dp else 12.dp),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    if (t.icon.isNotEmpty()) Text(t.icon, fontSize = if (pill) 18.sp else 24.sp)
+                    Column {
+                        if (t.title.isNotEmpty()) Text(t.title, color = if (n.look == "achievement") ac else fg, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)
+                        if (t.text.isNotEmpty() && !pill) Text(t.text, color = fg.copy(alpha = 0.8f), fontSize = 13.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun num1(v: Double): String = if (v == kotlin.math.floor(v)) v.toLong().toString() else (kotlin.math.round(v * 10) / 10).toString()
+private val MORE = listOf(Color(0xFFFF6B8B), Color(0xFFFFC94D), Color(0xFF3CCF7A), Color(0xFF8E6BF2), Color(0xFF22B8C9), Color(0xFFFF9F43), Color(0xFFE0559B))
+
+/** A bar, column, line, area, pie, donut or radar chart: from label | value lines ({variables} work), or a variable tracked over time. */
+@Composable
+fun PChart(data: List<Pair<String, String>>, chart: String = "columns", track: String = "", every: Double = 1.0, points: Int = 30, title: String = "", max: Double = 0.0, values: Boolean = true, labels: Boolean = true, grid: Boolean = true, color: String = "@accent", text: String = "", bg: String = "", height: Int = 200) {
+    val p = LocalPalette.current
+    val fg = p.resolve(text) ?: p.text; val col = p.resolve(color) ?: p.accent; val line = p.line
+    val history = remember { mutableStateListOf<Double>() }
+    if (track.isNotEmpty()) LaunchedEffect(track) {
+        while (true) { history.add(num(app.get(track)) ?: 0.0); while (history.size > points) history.removeAt(0); delay((every * 1000).toLong().coerceIn(100, 3_600_000)) }
+    }
+    val items = if (track.isNotEmpty()) history.map { "" to it } else data.map { app.fill(it.first) to (app.fill(it.second).trim().toDoubleOrNull() ?: 0.0) }
+    val kind = if (track.isNotEmpty() && chart !in listOf("line", "area", "columns", "bars")) "line" else chart
+    val tm = rememberTextMeasurer()
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.resolve(bg) ?: Color.Transparent).padding(12.dp)) {
+        if (title.isNotEmpty()) Text(app.fill(title), color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, modifier = Modifier.padding(bottom = 8.dp))
+        Canvas(Modifier.fillMaxWidth().height((height - if (title.isEmpty()) 24 else 52).dp)) { drawChart(tm, kind, items, max, col, fg, line, values, labels, grid) }
+    }
+}
+
+private fun DrawScope.label(tm: TextMeasurer, s: String, at: Offset, color: Color, size: Float = 11f, bold: Boolean = false, align: Float = 0.5f) {
+    if (s.isEmpty()) return
+    val r = tm.measure(s, TextStyle(fontSize = size.sp, color = color, fontWeight = if (bold) FontWeight.ExtraBold else FontWeight.SemiBold), maxLines = 1)
+    drawText(r, topLeft = Offset(at.x - r.size.width * align, at.y - r.size.height / 2f))
+}
+
+private fun DrawScope.drawChart(tm: TextMeasurer, kind: String, items: List<Pair<String, Double>>, max: Double, color: Color, text: Color, line: Color, values: Boolean, labels: Boolean, grid: Boolean) {
+    if (items.isEmpty()) return
+    val n = items.size; val w = size.width; val h0 = size.height
+    val top = items.maxOf { it.second }; val hi = if (max > 0) max else if (top <= 0) 1.0 else top * 1.12
+    val sub = text.copy(alpha = 0.75f)
+    fun slice(i: Int) = if (i == 0) color else MORE[(i - 1) % MORE.size]
+    if (kind == "pie" || kind == "donut") {
+        val total = items.sumOf { maxOf(0.0, it.second) }; if (total <= 0) return
+        val r = minOf(w, h0) / 2f - 4f; val c = Offset(w / 2f, h0 / 2f)
+        var a = -90f
+        items.forEachIndexed { i, (name, v) ->
+            val sw = (maxOf(0.0, v) / total * 360).toFloat()
+            if (kind == "donut") { val rr = r * 0.78f; drawArc(slice(i), a + 1f, maxOf(0f, sw - 2f), false, Offset(c.x - rr, c.y - rr), Size(rr * 2, rr * 2), style = Stroke(r * 0.42f)) }
+            else drawArc(slice(i), a, sw, true, Offset(c.x - r, c.y - r), Size(r * 2, r * 2))
+            if (labels && sw > 23f) { val m = (a + sw / 2) * kotlin.math.PI / 180; val k = if (kind == "donut") 0.78f else 0.62f; label(tm, name, Offset(c.x + kotlin.math.cos(m).toFloat() * r * k, c.y + kotlin.math.sin(m).toFloat() * r * k), Color.White, bold = true) }
+            a += sw
+        }
+        if (kind == "donut" && values) label(tm, num1(total), c, text, 20f, true)
+        return
+    }
+    if (kind == "radar") {
+        val r = minOf(w, h0) / 2f - if (labels) 18f else 4f; val c = Offset(w / 2f, h0 / 2f)
+        fun at(i: Int, k: Float): Offset { val a = -kotlin.math.PI / 2 + i * kotlin.math.PI * 2 / n; return Offset(c.x + kotlin.math.cos(a).toFloat() * r * k, c.y + kotlin.math.sin(a).toFloat() * r * k) }
+        fun poly(pts: List<Offset>) = Path().apply { pts.forEachIndexed { i, o -> if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y) }; close() }
+        for (k in listOf(0.33f, 0.66f, 1f)) if (grid || k == 1f) drawPath(poly((0 until n).map { at(it, k) }), line, style = Stroke(1f))
+        for (i in 0 until n) { drawLine(line, c, at(i, 1f)); if (labels) label(tm, items[i].first, at(i, 1.18f), sub) }
+        val shape = poly(items.mapIndexed { i, it -> at(i, (it.second / hi).coerceIn(0.0, 1.0).toFloat()) })
+        drawPath(shape, color.copy(alpha = 0.3f)); drawPath(shape, color, style = Stroke(2.5f))
+        return
+    }
+    if (kind == "bars") {
+        val lw = if (labels && items.any { it.first.isNotEmpty() }) 52f else 0f; val vw = if (values) 34f else 0f; val row = h0 / n
+        items.forEachIndexed { i, (name, v) ->
+            val y = row * i + row * 0.2f; val bh = row * 0.6f; val bw = (w - lw - vw) * (v / hi).coerceIn(0.0, 1.0).toFloat()
+            drawRoundRect(color, Offset(lw, y), Size(bw, bh), CornerRadius(bh / 3))
+            if (lw > 0) label(tm, name, Offset(lw - 6f, y + bh / 2), sub, align = 1f)
+            if (values) label(tm, num1(v), Offset(lw + bw + 6f, y + bh / 2), text, bold = true, align = 0f)
+        }
+        return
+    }
+    val lb = if (labels && items.any { it.first.isNotEmpty() }) 18f else 2f; val tp = if (values) 16f else 4f; val h = h0 - lb - tp; val slot = w / n
+    if (grid) for (i in 0..3) { val y = tp + h * i / 3; drawLine(line, Offset(0f, y), Offset(w, y)) }
+    fun yOf(v: Double) = tp + h * (1 - (v / hi).coerceIn(0.0, 1.0).toFloat())
+    if (kind == "line" || kind == "area") {
+        val pts = items.mapIndexed { i, it -> Offset(if (n == 1) w / 2 else i * w / (n - 1), yOf(it.second)) }
+        val path = Path().apply { pts.forEachIndexed { i, o -> if (i == 0) moveTo(o.x, o.y) else lineTo(o.x, o.y) } }
+        if (kind == "area") drawPath(Path().apply { addPath(path); lineTo(pts.last().x, tp + h); lineTo(pts.first().x, tp + h); close() }, color.copy(alpha = 0.25f))
+        drawPath(path, color, style = Stroke(3f))
+        pts.forEachIndexed { i, o ->
+            if (n <= 14) { drawCircle(color, 3.5f, o); if (values) label(tm, num1(items[i].second), Offset(o.x, o.y - 11f), text, bold = true) }
+            if (lb > 2f) label(tm, items[i].first, Offset(o.x.coerceIn(14f, w - 14f), h0 - 8f), sub)
+        }
+        return
+    }
+    items.forEachIndexed { i, (name, v) -> // columns
+        val x = slot * i + slot * 0.2f; val bw = slot * 0.6f; val y = yOf(v)
+        drawRoundRect(color, Offset(x, y), Size(bw, tp + h - y), CornerRadius(6f))
+        if (values) label(tm, num1(v), Offset(x + bw / 2, y - 8f), text, bold = true)
+        if (lb > 2f) label(tm, name, Offset(x + bw / 2, h0 - 8f), sub)
+    }
+}
+
+/** One card in a carousel: its name, icon (an emoji), the value it picks, the variable that unlocks it, a line about it. */
+class CarouselItem(val name: String, val icon: String, val value: String, val lock: String = "", val desc: String = "")
+
+/** Swipe through cards; the one in the middle is picked into a variable (locked cards wait for their variable). */
+@Composable
+fun Carousel(variable: String, items: List<CarouselItem>, cardWidth: Float = 0.55f, arrows: Boolean = true, dots: Boolean = true, loop: Boolean = false, message: String = "", card: String = "@card", text: String = "", accent: String = "@accent", height: Int = 220) {
+    val n = items.size; if (n == 0) return
+    val p = LocalPalette.current
+    val fg = p.resolve(text) ?: p.text; val ac = p.resolve(accent) ?: p.accent
+    val start = maxOf(0, items.indexOfFirst { it.value == show(app.get(variable)) })
+    val state = rememberPagerState(initialPage = if (loop) n * 500 + start else start) { if (loop) n * 1000 else n }
+    val scope = rememberCoroutineScope()
+    fun locked(x: CarouselItem) = x.lock.isNotEmpty() && !isOn(app.get(x.lock))
+    LaunchedEffect(state.currentPage) {
+        val x = items[state.currentPage % n]
+        if (!locked(x) && show(app.get(variable)) != x.value) { app.set(variable, x.value); if (message.isNotEmpty()) app.send(message) }
+    }
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        BoxWithConstraints(Modifier.fillMaxWidth().height((height - if (dots) 22 else 0).dp), contentAlignment = Alignment.Center) {
+            val side = maxWidth * (1 - cardWidth) / 2
+            HorizontalPager(state, contentPadding = PaddingValues(horizontal = side), modifier = Modifier.fillMaxSize()) { page ->
+                val x = items[page % n]; val on = page == state.currentPage; val lock = locked(x)
+                val k by animateFloatAsState(if (on) 1f else 0.86f)
+                Column(
+                    Modifier.fillMaxSize().scale(k).padding(horizontal = 6.dp).clip(RoundedCornerShape(20.dp)).background(p.resolve(card) ?: p.card).border(2.5.dp, if (on) ac else Color.Transparent, RoundedCornerShape(20.dp)).padding(14.dp).alpha(if (lock) 0.5f else 1f),
+                    verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text(if (lock) "🔒" else x.icon, fontSize = 46.sp)
+                    Spacer(Modifier.height(8.dp))
+                    Text(x.name, color = fg, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (x.desc.isNotEmpty()) Text(app.fill(x.desc), color = fg.copy(alpha = 0.7f), fontSize = 13.sp, maxLines = 2, textAlign = TextAlign.Center, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            if (arrows) Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = { scope.launch { state.animateScrollToPage(state.currentPage - 1) } }) { Text("‹", color = fg, fontSize = 30.sp) }
+                IconButton(onClick = { scope.launch { state.animateScrollToPage(state.currentPage + 1) } }) { Text("›", color = fg, fontSize = 30.sp) }
+            }
+        }
+        if (dots) Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (i in 0 until n) { val on = state.currentPage % n == i; Box(Modifier.size(width = if (on) 18.dp else 7.dp, height = 7.dp).clip(CircleShape).background(if (on) ac else p.line)) }
+        }
+    }
+}
+
+/** Swipe left and right between pages (onboarding, a tour); the page number goes into a variable, and "slide next" / "slide prev" / "slide 2" move it. */
+@Composable
+fun Pager(variable: String, dots: Boolean = true, dotColor: String = "@accent", loop: Boolean = false, auto: Double = 0.0, message: String = "slide", height: Int = 320, pages: List<@Composable () -> Unit>) {
+    val n = pages.size; if (n == 0) return
+    val p = LocalPalette.current
+    val dot = p.resolve(dotColor) ?: p.accent
+    val state = rememberPagerState(initialPage = ((num(app.get(variable)) ?: 1.0).toInt() - 1).coerceIn(0, n - 1)) { n }
+    val scope = rememberCoroutineScope()
+    fun go(i: Int) { val j = if (loop) ((i % n) + n) % n else i.coerceIn(0, n - 1); scope.launch { state.animateScrollToPage(j) } }
+    OnMessage { m ->
+        when {
+            m == "$message next" -> go(state.currentPage + 1)
+            m == "$message prev" || m == "$message back" -> go(state.currentPage - 1)
+            m.startsWith("$message ") && m.removePrefix("$message ").toIntOrNull() != null -> go(m.removePrefix("$message ").toInt() - 1)
+        }
+    }
+    if (auto > 0) LaunchedEffect(auto) { while (true) { delay((auto * 1000).toLong()); go(state.currentPage + 1) } }
+    LaunchedEffect(state.currentPage) { if ((num(app.get(variable)) ?: 0.0).toInt() != state.currentPage + 1) app.set(variable, (state.currentPage + 1).toDouble()) }
+    val want = (num(app.get(variable)) ?: 1.0).toInt() - 1 // (the variable changed somewhere else: follow it)
+    LaunchedEffect(want) { if (want in 0 until n && want != state.currentPage) state.animateScrollToPage(want) }
+    Column(Modifier.fillMaxWidth().height(height.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        HorizontalPager(state, Modifier.fillMaxWidth().weight(1f)) { page -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { pages[page]() } }
+        if (dots) Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (i in 0 until n) { val on = state.currentPage == i; Box(Modifier.size(width = if (on) 18.dp else 7.dp, height = 7.dp).clip(CircleShape).background(if (on) dot else dot.copy(alpha = 0.3f))) }
+        }
+    }
+}
+
+/** A grid of square pictures from a collection's media field (or emojis); tap one to open it. */
+@Composable
+fun PhotoGrid(collection: String = "Posts", field: String = "media", filter: String = "", columns: Int = 3, gap: Int = 2, radius: Int = 0, openPage: String = "", message: String = "") {
+    val p = LocalPalette.current
+    val rows = app.query(collection, filter = filter).filter { mediaList(it[field]).isNotEmpty() }
+    if (rows.isEmpty()) { Text("No pictures yet", color = p.sub, modifier = Modifier.fillMaxWidth().padding(24.dp), textAlign = TextAlign.Center); return }
+    val cols = maxOf(1, columns)
+    Column(verticalArrangement = Arrangement.spacedBy(gap.dp)) {
+        for (chunk in rows.chunked(cols)) Row(horizontalArrangement = Arrangement.spacedBy(gap.dp)) {
+            for (r in chunk) BoxWithConstraints(Modifier.weight(1f).aspectRatio(1f).clip(RoundedCornerShape(radius.dp)).clickable {
+                app.open(collection, r.s("_id")); if (openPage.isNotEmpty()) app.go(openPage); if (message.isNotEmpty()) app.send(message)
+            }) { Tile(mediaList(r[field]).first(), colorOf(r, r.s("_id")), maxWidth) }
+            repeat(cols - chunk.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+/** A heart (or thumbs-up, or star) that turns a variable on or off, with a count next to it. */
+@Composable
+fun LikeButton(variable: String, countVar: String = "likes", icon: String = "heart", message: String = "", on: String = "#f91880", off: String = "@sub", text: String = "@sub") {
+    val p = LocalPalette.current
+    val liked = isOn(app.get(variable)); val c = if (liked) p.resolve(on) ?: p.accent else p.resolve(off) ?: p.sub
+    val k by animateFloatAsState(if (liked) 1f else 0.9f, androidx.compose.animation.core.spring(dampingRatio = 0.35f))
+    val ic = when (icon) { "thumbs up" -> Icons.Filled.ThumbUp; "star" -> Icons.Filled.Star; else -> if (liked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder }
+    Row(Modifier.clip(RoundedCornerShape(20.dp)).clickable {
+        app.set(variable, !liked); if (countVar.isNotEmpty()) app.add(countVar, if (liked) -1.0 else 1.0); if (message.isNotEmpty()) app.send(message)
+    }.padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(ic, contentDescription = "Like", tint = c, modifier = Modifier.size(26.dp).scale(k * if (liked) 1.08f else 1f))
+        if (countVar.isNotEmpty()) Text(compactNum(app.get(countVar)), color = if (liked) c else p.resolve(text) ?: p.sub, fontWeight = FontWeight.Bold, modifier = Modifier.padding(start = 6.dp))
+    }
+}
+
+/** Text that scrolls across (several messages separated by |, with {variables}). */
+@Composable
+fun Ticker(text: String, speed: Double = 60.0, direction: String = "left", gap: Int = 60, size: Int = 15, bg: String = "", color: String = "", accent: String = "#ffd23d", height: Int = 36) {
+    val p = LocalPalette.current
+    val fg = p.resolve(color) ?: p.text; val ac = p.resolve(accent) ?: p.accent
+    val parts = text.split("|").map { app.fill(it.trim()) }.filter { it.isNotEmpty() }
+    val line = buildAnnotatedString { parts.forEachIndexed { i, t -> if (i > 0) withStyle(SpanStyle(color = ac)) { append("   ●   ") }; append(t) } }
+    val tm = rememberTextMeasurer()
+    val style = TextStyle(fontSize = size.sp, color = fg, fontWeight = FontWeight.Bold)
+    val w = tm.measure(line, style, maxLines = 1).size.width + gap * 2f // (in pixels; gap in dp ≈ 2 px)
+    val t = rememberInfiniteTransition()
+    val k by t.animateFloat(0f, 1f, infiniteRepeatable(tween((w / 2 / maxOf(10.0, speed) * 1000).toInt(), easing = androidx.compose.animation.core.LinearEasing), RepeatMode.Restart))
+    Box(Modifier.fillMaxWidth().height(height.dp).background(p.resolve(bg) ?: Color.Transparent).clipToBounds(), contentAlignment = Alignment.CenterStart) {
+        Row(Modifier.wrapContentWidth(Alignment.Start, unbounded = true).offset { IntOffset((if (direction == "right") -w + k * w else -k * w).toInt(), 0) }) {
+            repeat(4) { Text(line, style = style, maxLines = 1, softWrap = false, modifier = Modifier.padding(end = gap.dp)) }
+        }
+    }
+}
+
+/** A countdown (or count-up) as a ring, bar, big digits or a pill: red near the end, then a message. "timer start / pause / reset / restart / add 5" control it. */
+@Composable
+fun PTimer(seconds: Double = 30.0, countUp: Boolean = false, look: String = "ring", format: String = "seconds", autoStart: Boolean = true, message: String = "timer", endMessage: String = "", endAction: String = "nothing else", warnAt: Double = 5.0, variable: String = "", color: String = "@accent", warn: String = "#ff4d5e", track: String = "@line", text: String = "", size: Int = 120) {
+    val p = LocalPalette.current
+    var t by remember { mutableStateOf(0.0) }
+    var running by remember { mutableStateOf(autoStart) }
+    var done by remember { mutableStateOf(false) }
+    OnMessage { m ->
+        if (m.startsWith(message)) {
+            val rest = m.removePrefix(message).trim()
+            when {
+                rest == "start" || rest == "resume" || rest.isEmpty() -> running = true
+                rest == "pause" || rest == "stop" -> running = false
+                rest == "reset" -> { t = 0.0; done = false }
+                rest == "restart" -> { t = 0.0; done = false; running = true }
+                Regex("^add\\s+-?\\d").containsMatchIn(rest) -> t = maxOf(0.0, t - (rest.split(Regex("\\s+"))[1].toDoubleOrNull() ?: 0.0) * if (countUp) -1 else 1)
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        var shown = -1
+        while (true) {
+            delay(100)
+            if (!running || done) continue
+            t = minOf(seconds, t + 0.1)
+            if (t >= seconds) { done = true; if (endMessage.isNotEmpty()) app.send(endMessage); if (endAction == "restart timer") { t = 0.0; done = false } }
+            val left = if (countUp) kotlin.math.floor(t).toInt() else kotlin.math.ceil(seconds - t).toInt()
+            if (variable.isNotEmpty() && left != shown) { shown = left; app.set(variable, left.toDouble()) }
+        }
+    }
+    val s = if (seconds <= 0) 1.0 else seconds; val left = if (countUp) t else s - t
+    val warnOn = !countUp && left <= warnAt && !done && running
+    val c = if (warnOn) p.resolve(warn) ?: p.danger else p.resolve(color) ?: p.accent
+    val whole = if (countUp) kotlin.math.floor(left).toInt() else kotlin.math.ceil(left).toInt()
+    val label = when (format) { "m:ss" -> "${whole / 60}:${(whole % 60).toString().padStart(2, '0')}"; "seconds.tenths" -> (kotlin.math.round(left * 10) / 10).toString(); else -> whole.toString() }
+    val frac = (left / s).coerceIn(0.0, 1.0).toFloat(); val fg = p.resolve(text) ?: p.text; val tr = p.resolve(track) ?: p.line
+    val pulse by animateFloatAsState(if (warnOn && (t * 2).toInt() % 2 == 0) 1.06f else 1f, tween(200))
+    @Composable fun digits() = Text(label, color = if (warnOn) c else fg, fontWeight = FontWeight.Black, fontSize = (size * if (look == "digits") 0.45f else 0.26f).sp)
+    Box(Modifier.fillMaxWidth().scale(pulse), contentAlignment = Alignment.Center) {
+        when (look) {
+            "bar" -> Column(horizontalAlignment = Alignment.CenterHorizontally) { digits(); Spacer(Modifier.height(6.dp)); LinearProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxWidth().height(12.dp).clip(RoundedCornerShape(6.dp)), color = c, trackColor = tr) }
+            "digits" -> digits()
+            "pill" -> Row(Modifier.clip(RoundedCornerShape(30.dp)).background(c.copy(alpha = 0.16f)).padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) { Text("⏱", fontSize = 18.sp); Spacer(Modifier.width(6.dp)); digits() }
+            else -> Box(Modifier.size(size.dp), contentAlignment = Alignment.Center) { CircularProgressIndicator(progress = { frac }, modifier = Modifier.fillMaxSize(), color = c, trackColor = tr, strokeWidth = (size * 0.08f).dp, strokeCap = StrokeCap.Round); digits() }
+        }
+    }
+}
+
+/** Grey shapes that shimmer while content loads; gone when its variable turns on. */
+@Composable
+fun Skeleton(layout: String = "avatar + lines", lines: Int = 3, doneVar: String = "", radius: Int = 8) {
+    if (doneVar.isNotEmpty() && isOn(app.get(doneVar))) return
+    val p = LocalPalette.current
+    val k by rememberInfiniteTransition().animateFloat(0f, 1f, infiniteRepeatable(tween(1100), RepeatMode.Reverse))
+    val col = lerp(p.text.copy(alpha = 0.07f), p.text.copy(alpha = 0.15f), k)
+    @Composable fun bar(f: Float) = Box(Modifier.fillMaxWidth(f).padding(vertical = 5.dp).height(12.dp).clip(RoundedCornerShape(radius.dp)).background(col))
+    @Composable fun rows(n: Int) = Column(Modifier.fillMaxWidth()) { for (i in 0 until n) bar(if (i == n - 1 && n > 1) 0.6f else 1f) }
+    @Composable fun dot(d: Int) = Box(Modifier.size(d.dp).clip(CircleShape).background(col))
+    when (layout) {
+        "text lines" -> rows(lines)
+        "card" -> Column { Box(Modifier.fillMaxWidth().height(140.dp).clip(RoundedCornerShape((radius * 1.5f).dp)).background(col)); Spacer(Modifier.height(8.dp)); rows(maxOf(1, lines - 1)) }
+        "list rows" -> Column { repeat(lines) { Row(Modifier.padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) { dot(40); Spacer(Modifier.width(12.dp)); rows(2) } } }
+        "picture" -> Box(Modifier.fillMaxWidth().height(180.dp).clip(RoundedCornerShape((radius * 1.5f).dp)).background(col))
+        else -> Row { dot(48); Spacer(Modifier.width(12.dp)); rows(lines) }
+    }
+}
+
+/** Colour swatches: tap one to pick it into a variable. */
+@Composable
+fun ColorSwatches(variable: String, colors: List<String>, columns: Int = 5, shape: String = "circle", gap: Int = 10, ring: String = "@text", message: String = "") {
+    val p = LocalPalette.current
+    val cur = show(app.get(variable)).lowercase(); val cols = maxOf(1, columns)
+    val sh = if (shape == "circle") CircleShape else RoundedCornerShape(if (shape == "rounded") 12.dp else 3.dp)
+    Column(verticalArrangement = Arrangement.spacedBy(gap.dp)) {
+        for (chunk in colors.chunked(cols)) Row(horizontalArrangement = Arrangement.spacedBy(gap.dp)) {
+            for (c in chunk) {
+                val on = c.lowercase() == cur; val fill = p.resolve(c) ?: p.line
+                Box(Modifier.weight(1f).aspectRatio(1f).clip(sh).background(fill).border(if (on) 3.5.dp else 1.dp, if (on) p.resolve(ring) ?: p.text else p.line, sh).clickable { app.set(variable, c); if (message.isNotEmpty()) app.send(message) }, contentAlignment = Alignment.Center) {
+                    if (on) Icon(Icons.Filled.Check, contentDescription = c, tint = if (fill.luminance() > 0.5f) Color.Black.copy(alpha = 0.8f) else Color.White)
+                }
+            }
+            repeat(cols - chunk.size) { Spacer(Modifier.weight(1f)) }
+        }
+    }
+}
+
+/** A number pad for a code, a PIN or an answer: ✓ checks it against the answer and sends the right / wrong message. */
+@Composable
+fun Keypad(variable: String, maxLength: Int = 4, mask: Boolean = false, answer: String = "", rightMessage: String = "", wrongMessage: String = "", enterMessage: String = "", autoEnter: Boolean = true, display: Boolean = true, keyStyle: String = "round", keyColor: String = "@field", text: String = "", accent: String = "@good", displayBg: String = "") {
+    val p = LocalPalette.current
+    val cur = show(app.get(variable)); val fg = p.resolve(text) ?: p.text; val ac = p.resolve(accent) ?: p.accent
+    fun enter(v: String) {
+        if (enterMessage.isNotEmpty()) app.send(enterMessage)
+        if (answer.isEmpty()) return
+        if (v == answer) { if (rightMessage.isNotEmpty()) app.send(rightMessage) } else { if (wrongMessage.isNotEmpty()) app.send(wrongMessage); app.set(variable, "") }
+    }
+    fun press(k: String) {
+        when (k) {
+            "⌫" -> if (cur.isNotEmpty()) app.set(variable, cur.dropLast(1))
+            "✓" -> enter(cur)
+            else -> if (cur.length < maxLength) { val next = cur + k; app.set(variable, next); if (autoEnter && next.length == maxLength) enter(next) }
+        }
+    }
+    val sh = if (keyStyle == "round") CircleShape else RoundedCornerShape(if (keyStyle == "flat") 6.dp else 16.dp)
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Column(Modifier.widthIn(max = 300.dp)) {
+            if (display) Text((0 until maxLength).joinToString("  ") { if (it < cur.length) (if (mask) "•" else cur[it].toString()) else "–" },
+                Modifier.fillMaxWidth().padding(bottom = 8.dp).clip(RoundedCornerShape(14.dp)).background(p.resolve(displayBg) ?: p.field).padding(vertical = 14.dp),
+                color = fg, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold, textAlign = TextAlign.Center)
+            for (r in listOf(listOf("1", "2", "3"), listOf("4", "5", "6"), listOf("7", "8", "9"), listOf("⌫", "0", "✓"))) Row {
+                for (k in r) Box(Modifier.weight(1f).padding(6.dp).aspectRatio(if (keyStyle == "round") 1f else 1.5f).clip(sh)
+                    .background(if (k == "✓") ac else if (keyStyle == "flat") Color.Transparent else p.resolve(keyColor) ?: p.field).clickable { press(k) }, contentAlignment = Alignment.Center) {
+                    Text(k, color = if (k == "✓") Color.White else fg, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+/** ‹ Easy › : pick one of several options with arrows; the choice goes into a variable. */
+@Composable
+fun Selector(variable: String, options: List<String>, wrap: Boolean = true) {
+    val n = options.size; if (n == 0) return
+    val p = LocalPalette.current
+    val i = maxOf(0, options.indexOf(show(app.get(variable))))
+    fun pick(d: Int) = app.set(variable, options[if (wrap) (i + d + n) % n else (i + d).coerceIn(0, n - 1)])
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.field), verticalAlignment = Alignment.CenterVertically) {
+        IconButton(onClick = { pick(-1) }, enabled = wrap || i > 0) { Text("‹", fontSize = 28.sp, color = p.text) }
+        Text(options[i], Modifier.weight(1f), color = p.text, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, textAlign = TextAlign.Center)
+        IconButton(onClick = { pick(1) }, enabled = wrap || i < n - 1) { Text("›", fontSize = 28.sp, color = p.text) }
+    }
+}
+
+/** A popup (a dialog) or a bottom sheet with things inside: opens on a message and closes on another (or after a few seconds). */
+@Composable
+fun PPopup(mode: String = "popup", openOn: String = "popup", closeOn: String = "close", startOpen: Boolean = false, autoClose: Double = 0.0, tapCloses: Boolean = false, dim: Boolean = true, handle: Boolean = true, content: @Composable () -> Unit) {
+    var open by remember { mutableStateOf(startOpen) }
+    OnMessage { m -> if (m == openOn) open = true else if (m == closeOn) open = false }
+    if (autoClose > 0) LaunchedEffect(open) { if (open) { delay((autoClose * 1000).toLong()); open = false } }
+    if (!open) return
+    if (mode == "sheet") {
+        ModalBottomSheet(onDismissRequest = { open = false }, dragHandle = if (handle) ({ BottomSheetDefaults.DragHandle() }) else null, scrimColor = if (dim) BottomSheetDefaults.ScrimColor else Color.Transparent) {
+            Box(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 24.dp)) { content() }
+        }
+    } else {
+        Dialog(onDismissRequest = { if (tapCloses) open = false }, properties = DialogProperties(dismissOnClickOutside = tapCloses, usePlatformDefaultWidth = false)) {
+            Box(Modifier.fillMaxWidth().padding(20.dp)) { content() }
+        }
     }
 }

@@ -1,7 +1,9 @@
 // Pocket runtime for Flutter: the app's state (variables, data collections, the opened record, navigation)
 // and the building blocks the pages use (PocketPage, RecordList, RecordForm, PButton…). Made by Pocket Engine's
 // native export; the pages in lib/pages/ are yours to change, and so is this file.
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -179,6 +181,8 @@ class Palette {
     if (c.containsKey(t)) return c[t];
     final h = v.replaceFirst('#', '');
     if (RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(h)) return Color(int.parse('FF$h', radix: 16));
+    final m = RegExp(r'^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$').firstMatch(v); // rgba(255,255,255,0.1)
+    if (m != null) return Color.fromRGBO(int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!), double.tryParse(m[4] ?? '1') ?? 1);
     return null;
   }
 }
@@ -192,7 +196,7 @@ Palette pal(BuildContext context) => Theme.of(context).brightness == Brightness.
 late AppState app;
 
 class AppState extends ChangeNotifier {
-  AppState({required this.name, required this.collections, required this.stats, required Map<String, Object?> vars, required this.tabs, required this.home, required this.light, required this.dark, this.themeSetting = 'follow the phone', this.bar = const BarStyle(), this.nav = const NavStyle(), this.menu}) {
+  AppState({required this.name, required this.collections, required this.stats, required Map<String, Object?> vars, required this.tabs, required this.home, required this.light, required this.dark, this.themeSetting = 'follow the phone', this.bar = const BarStyle(), this.nav = const NavStyle(), this.menu, this.notify}) {
     this.vars.addAll(vars);
   }
 
@@ -204,6 +208,8 @@ class AppState extends ChangeNotifier {
   final BarStyle bar;
   /// The Side Menu (null: the app has none).
   final SideMenuStyle? menu;
+  /// Pop-up notifications ("notify Title|text|icon"); null: the app has none.
+  final NotifyStyle? notify;
   bool get menuOn => menu != null && bar.left != 'none' && bar.left != 'back';
   final NavStyle nav;
   final Map<String, Object?> vars = {};
@@ -377,10 +383,32 @@ class AppState extends ChangeNotifier {
   void back() => navigator.currentState?.maybePop();
   void pickTab(int i) { tab = i; notifyListeners(); }
 
+  // ---- messages ----
+  final List<void Function(String)> _listeners = [];
+  /// The pop-up notifications on screen now.
+  final toasts = ValueNotifier<List<Toast>>([]);
+  /// Hear the app's messages (a popup's "popup", a timer's "timer pause"…); call what it returns to stop.
+  void Function() listen(void Function(String) f) { _listeners.add(f); return () => _listeners.remove(f); }
+  /// Send a message (a button's "message" action, an App Bar button…) to everything listening.
+  void send(String message) {
+    final m = fill(message).trim();
+    if (m.isEmpty) return;
+    for (final f in [..._listeners]) { f(m); }
+    final n = notify;
+    if (n != null && (m == n.listen || m.startsWith('${n.listen} '))) {
+      final parts = m.substring(n.listen.length).trim().split('|').map((x) => x.trim()).toList();
+      final t = Toast(parts[0], parts.length > 1 ? parts[1] : '', parts.length > 2 && parts[2].isNotEmpty ? parts[2] : (n.look == 'achievement' ? '🏆' : ''));
+      final list = [...toasts.value, t];
+      toasts.value = list.length > n.max ? list.sublist(list.length - n.max) : list;
+      Timer(Duration(milliseconds: (n.seconds * 1000).round()), () => toasts.value = toasts.value.where((x) => x != t).toList());
+    }
+  }
+
   /// What a button does (the same words as the button's Action in Pocket Engine).
   void run(String action, [Object? value, num amount = 1]) {
     final v = '${value ?? ''}';
     switch (action) {
+      case 'message': send(v);
       case 'go to page': go(v);
       case 'go back': back();
       case 'set variable': set(v, amount);
@@ -424,6 +452,7 @@ class PocketApp extends StatelessWidget {
           theme: pocketTheme(app.light, Brightness.light),
           darkTheme: pocketTheme(app.dark, Brightness.dark),
           home: app.tabs.isEmpty ? pages[app.home]!(context) : _Tabs(pages: pages),
+          builder: (context, child) => Stack(children: [child ?? const SizedBox.shrink(), if (app.notify != null) const ToastLayer()]), // (pop-up notifications over every page)
           onGenerateRoute: (s) => pages[s.name] == null ? null : MaterialPageRoute(builder: pages[s.name]!, settings: s),
         ),
       );
@@ -493,7 +522,7 @@ class PocketDrawer extends StatelessWidget {
         onTap: () {
           if (it.kind == 'toggle') { app.set(it.to, !isOn(app.get(it.to))); return; }
           Navigator.of(context).pop(); // (closes the menu)
-          if (it.kind == 'page') { app.go(it.to); } else { debugPrint('TODO: the Side Menu sends "${it.to}"'); }
+          if (it.kind == 'page') { app.go(it.to); } else { app.send(it.to.replaceFirst('msg:', '')); }
         },
       );
     }
@@ -594,7 +623,7 @@ class PocketPage extends StatelessWidget {
               onPressed: () {
                 if (a.does.contains('dark mode')) { app.set('darkMode', !dark); }
                 else if (a.does.startsWith('page:')) { app.go(a.does.substring(5)); }
-                else { debugPrint('TODO: the App Bar button sends "${a.does}"'); }
+                else { app.send(a.does); }
               },
             ),
         const SizedBox(width: 4),
@@ -1763,4 +1792,635 @@ class Trending extends StatelessWidget {
       for (final e in top.take(8)) ActionChip(label: Text('${e.key} · ${e.value}'), onPressed: () { if (searchVar.isNotEmpty) app.set(searchVar, e.key); }),
     ]);
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// More components: charts, carousels, swipe pages, timers, keypads, popups, notifications…
+// ---------------------------------------------------------------------------------------------------------------
+
+/// Hears the app's messages while it's on screen.
+mixin Listens<T extends StatefulWidget> on State<T> {
+  void Function()? _off;
+  void onMessage(String m);
+  @override
+  void initState() { super.initState(); _off = app.listen(onMessage); }
+  @override
+  void dispose() { _off?.call(); super.dispose(); }
+}
+
+/// How pop-up notifications look and where they show.
+class NotifyStyle {
+  const NotifyStyle({this.listen = 'notify', this.position = 'top', this.look = 'card', this.seconds = 3, this.max = 3, this.bg = '#1e2235', this.text = '#ffffff', this.accent = '#ffd23d'});
+  final String listen, position, look, bg, text, accent;
+  final double seconds;
+  final int max;
+}
+
+class Toast {
+  Toast(this.title, this.text, this.icon);
+  final String title, text, icon;
+}
+
+/// The notifications on screen, stacked at the top (or bottom, or centre), sliding in.
+class ToastLayer extends StatelessWidget {
+  const ToastLayer({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final n = app.notify!, p = pal(context), bg = p.resolve(n.bg) ?? p.card, fg = p.resolve(n.text) ?? p.text, ac = p.resolve(n.accent) ?? p.accent;
+    final pill = n.look == 'pill', banner = n.look == 'banner';
+    return ValueListenableBuilder<List<Toast>>(
+      valueListenable: app.toasts,
+      builder: (context, list, _) => SafeArea(
+        child: Align(
+          alignment: switch (n.position) { 'bottom' => Alignment.bottomCenter, 'center' => Alignment.center, 'top right' => Alignment.topRight, _ => Alignment.topCenter },
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(banner ? 0 : 12, 8, banner ? 0 : 12, n.position == 'bottom' ? 96 : 8),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              for (final t in list)
+                TweenAnimationBuilder<double>(
+                  key: ObjectKey(t), tween: Tween(begin: 0, end: 1), duration: const Duration(milliseconds: 260), curve: Curves.easeOutBack,
+                  builder: (context, k, child) => Opacity(opacity: k.clamp(0.0, 1.0), child: Transform.translate(offset: Offset(0, (1 - k) * (n.position == 'bottom' ? 24 : -24)), child: child)),
+                  child: GestureDetector(
+                    onTap: () => app.toasts.value = app.toasts.value.where((x) => x != t).toList(),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      constraints: BoxConstraints(maxWidth: banner ? double.infinity : 420),
+                      width: banner ? double.infinity : null,
+                      padding: EdgeInsets.symmetric(horizontal: pill ? 18 : 14, vertical: pill ? 10 : 12),
+                      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(banner ? 0 : pill ? 30 : 16), border: n.look == 'achievement' ? Border.all(color: ac, width: 2) : null, boxShadow: const [BoxShadow(color: Color(0x33000000), blurRadius: 18, offset: Offset(0, 6))]),
+                      child: Material(type: MaterialType.transparency, child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        if (t.icon.isNotEmpty) Padding(padding: const EdgeInsets.only(right: 10), child: Text(t.icon, style: TextStyle(fontSize: pill ? 18 : 24))),
+                        Flexible(child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          if (t.title.isNotEmpty) Text(t.title, style: TextStyle(color: n.look == 'achievement' ? ac : fg, fontWeight: FontWeight.w800, fontSize: 15)),
+                          if (t.text.isNotEmpty && !pill) Text(t.text, style: TextStyle(color: fg.withValues(alpha: 0.8), fontSize: 13)),
+                        ])),
+                      ])),
+                    ),
+                  ),
+                ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A bar, column, line, area, pie, donut or radar chart: from label | value lines ({variables} work), or a variable tracked over time.
+class PChart extends StatefulWidget {
+  const PChart({super.key, this.chart = 'columns', this.data = const [], this.track = '', this.every = 1, this.points = 30, this.title = '', this.max = 0, this.values = true, this.labels = true, this.grid = true, this.color = '#4fa3ff', this.text = '', this.bg = '', this.height = 200});
+  final String chart, track, title, color, text, bg;
+  final List<(String, String)> data;
+  final double every, max, height;
+  final int points;
+  final bool values, labels, grid;
+  @override
+  State<PChart> createState() => _PChartState();
+}
+
+class _PChartState extends State<PChart> {
+  final List<double> history = [];
+  Timer? _timer;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.track.isNotEmpty) {
+      history.add(nv(app.get(widget.track)).toDouble());
+      _timer = Timer.periodic(Duration(milliseconds: (widget.every * 1000).round().clamp(100, 3600000)), (_) => setState(() {
+            history.add(nv(app.get(widget.track)).toDouble());
+            if (history.length > widget.points) history.removeAt(0);
+          }));
+    }
+  }
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), fg = p.resolve(widget.text) ?? p.text;
+    final items = widget.track.isNotEmpty ? [for (final v in history) ('', v)] : [for (final d in widget.data) (app.fill(d.$1), (num.tryParse(app.fill(d.$2).trim()) ?? 0).toDouble())];
+    final kind = widget.track.isNotEmpty && !['line', 'area', 'columns', 'bars'].contains(widget.chart) ? 'line' : widget.chart;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: p.resolve(widget.bg), borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        if (widget.title.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(app.fill(widget.title), style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: fg))),
+        SizedBox(height: widget.height - (widget.title.isEmpty ? 24 : 52), width: double.infinity, child: CustomPaint(painter: _ChartPainter(kind, items, widget.max, p.resolve(widget.color) ?? p.accent, fg, p.line, widget.values, widget.labels, widget.grid))),
+      ]),
+    );
+  }
+}
+
+class _ChartPainter extends CustomPainter {
+  _ChartPainter(this.kind, this.items, this.max, this.color, this.text, this.line, this.values, this.labels, this.grid);
+  final String kind;
+  final List<(String, double)> items;
+  final double max;
+  final Color color, text, line;
+  final bool values, labels, grid;
+  static const _more = [Color(0xFFFF6B8B), Color(0xFFFFC94D), Color(0xFF3CCF7A), Color(0xFF8E6BF2), Color(0xFF22B8C9), Color(0xFFFF9F43), Color(0xFFE0559B)];
+  Color _slice(int i) => i == 0 ? color : _more[(i - 1) % _more.length];
+  static String _n(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+  void _txt(Canvas c, String s, Offset at, {double size = 11, Color? color, bool bold = false, double align = 0.5}) {
+    if (s.isEmpty) return;
+    final tp = TextPainter(text: TextSpan(text: s, style: TextStyle(fontSize: size, color: color ?? text.withValues(alpha: 0.75), fontWeight: bold ? FontWeight.w800 : FontWeight.w600)), textDirection: TextDirection.ltr, maxLines: 1)..layout();
+    tp.paint(c, at - Offset(tp.width * align, tp.height / 2));
+  }
+
+  @override
+  void paint(Canvas c, Size s) {
+    if (items.isEmpty) return;
+    final top = items.fold<double>(0, (a, e) => math.max(a, e.$2)), hi = max > 0 ? max : (top <= 0 ? 1 : top * 1.12);
+    final n = items.length, ink = Paint()..color = color;
+    if (kind == 'pie' || kind == 'donut') {
+      final total = items.fold<double>(0, (a, e) => a + math.max(0, e.$2));
+      if (total <= 0) return;
+      final r = math.min(s.width, s.height) / 2 - 4, ctr = Offset(s.width / 2, s.height / 2);
+      var a = -math.pi / 2;
+      for (var i = 0; i < n; i++) {
+        final sw = math.max(0, items[i].$2) / total * math.pi * 2;
+        if (kind == 'donut') {
+          c.drawArc(Rect.fromCircle(center: ctr, radius: r * 0.78), a + 0.02, math.max(0, sw - 0.04), false, Paint()..color = _slice(i)..style = PaintingStyle.stroke..strokeWidth = r * 0.42);
+        } else {
+          c.drawArc(Rect.fromCircle(center: ctr, radius: r), a, sw, true, Paint()..color = _slice(i));
+        }
+        if (labels && sw > 0.4) { final m = a + sw / 2; _txt(c, items[i].$1, ctr + Offset(math.cos(m), math.sin(m)) * r * (kind == 'donut' ? 0.78 : 0.62), color: Colors.white, bold: true); }
+        a += sw;
+      }
+      if (kind == 'donut' && values) _txt(c, _n(total), ctr, size: 20, color: text, bold: true);
+      return;
+    }
+    if (kind == 'radar') {
+      final r = math.min(s.width, s.height) / 2 - (labels ? 18 : 4), ctr = Offset(s.width / 2, s.height / 2);
+      Offset at(int i, double k) { final a = -math.pi / 2 + i * math.pi * 2 / n; return ctr + Offset(math.cos(a), math.sin(a)) * r * k; }
+      final web = Paint()..color = line..style = PaintingStyle.stroke;
+      for (final k in [0.33, 0.66, 1.0]) { if (!grid && k < 1) continue; c.drawPath(Path()..addPolygon([for (var i = 0; i < n; i++) at(i, k)], true), web); }
+      for (var i = 0; i < n; i++) { c.drawLine(ctr, at(i, 1), web); if (labels) _txt(c, items[i].$1, at(i, 1.18)); }
+      final poly = [for (var i = 0; i < n; i++) at(i, (items[i].$2 / hi).clamp(0.0, 1.0))];
+      c.drawPath(Path()..addPolygon(poly, true), Paint()..color = color.withValues(alpha: 0.3));
+      c.drawPath(Path()..addPolygon(poly, true), Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 2.5);
+      return;
+    }
+    if (kind == 'bars') { // across
+      final lw = labels && items.any((e) => e.$1.isNotEmpty) ? 52.0 : 0.0, vw = values ? 34.0 : 0.0, row = s.height / n, w = s.width - lw - vw;
+      for (var i = 0; i < n; i++) {
+        final y = row * i + row * 0.2, bh = row * 0.6, bw = w * (items[i].$2 / hi).clamp(0.0, 1.0);
+        c.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(lw, y, bw, bh), Radius.circular(bh / 3)), ink);
+        if (lw > 0) _txt(c, items[i].$1, Offset(lw - 6, y + bh / 2), align: 1);
+        if (values) _txt(c, _n(items[i].$2), Offset(lw + bw + 6, y + bh / 2), align: 0, color: text, bold: true);
+      }
+      return;
+    }
+    final lb = labels && items.any((e) => e.$1.isNotEmpty) ? 18.0 : 2.0, tp = values ? 16.0 : 4.0, h = s.height - lb - tp, slot = s.width / n;
+    if (grid) { for (var i = 0; i <= 3; i++) { final y = tp + h * i / 3; c.drawLine(Offset(0, y), Offset(s.width, y), Paint()..color = line..strokeWidth = 1); } }
+    double yOf(double v) => tp + h * (1 - (v / hi).clamp(0.0, 1.0));
+    if (kind == 'line' || kind == 'area') {
+      final pts = [for (var i = 0; i < n; i++) Offset(n == 1 ? s.width / 2 : i * s.width / (n - 1), yOf(items[i].$2))];
+      final path = Path()..addPolygon(pts, false);
+      if (kind == 'area') c.drawPath(Path.from(path)..lineTo(pts.last.dx, tp + h)..lineTo(pts.first.dx, tp + h)..close(), Paint()..color = color.withValues(alpha: 0.25));
+      c.drawPath(path, Paint()..color = color..style = PaintingStyle.stroke..strokeWidth = 3..strokeJoin = StrokeJoin.round..strokeCap = StrokeCap.round);
+      for (var i = 0; i < n; i++) {
+        if (n <= 14) c.drawCircle(pts[i], 3.5, ink);
+        if (values && n <= 14) _txt(c, _n(items[i].$2), pts[i] - const Offset(0, 11), color: text, bold: true);
+        if (lb > 2) _txt(c, items[i].$1, Offset(pts[i].dx.clamp(14, s.width - 14), s.height - 8));
+      }
+      return;
+    }
+    for (var i = 0; i < n; i++) { // columns
+      final x = slot * i + slot * 0.2, bw = slot * 0.6, y = yOf(items[i].$2);
+      c.drawRRect(RRect.fromRectAndCorners(Rect.fromLTRB(x, y, x + bw, tp + h), topLeft: const Radius.circular(6), topRight: const Radius.circular(6)), ink);
+      if (values) _txt(c, _n(items[i].$2), Offset(x + bw / 2, y - 8), color: text, bold: true);
+      if (lb > 2) _txt(c, items[i].$1, Offset(x + bw / 2, s.height - 8));
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ChartPainter o) => true;
+}
+
+/// One card in a carousel: its name, icon (an emoji), the value it picks, the variable that unlocks it, a line about it.
+class CarouselItem {
+  const CarouselItem(this.name, this.icon, this.value, {this.lock = '', this.desc = ''});
+  final String name, icon, value, lock, desc;
+}
+
+/// Swipe through cards; the one in the middle is picked into a variable (locked cards wait for their variable).
+class Carousel extends StatefulWidget {
+  const Carousel(this.variable, this.items, {super.key, this.cardWidth = 0.55, this.arrows = true, this.dots = true, this.loop = false, this.message = '', this.card = '@card', this.text = '', this.accent = '@accent', this.height = 220});
+  final String variable, message, card, text, accent;
+  final List<CarouselItem> items;
+  final double cardWidth, height;
+  final bool arrows, dots, loop;
+  @override
+  State<Carousel> createState() => _CarouselState();
+}
+
+class _CarouselState extends State<Carousel> {
+  late int _i = math.max(0, widget.items.indexWhere((x) => x.value == AppState.show(app.get(widget.variable))));
+  late final PageController _c = PageController(viewportFraction: widget.cardWidth, initialPage: widget.loop ? widget.items.length * 500 + _i : _i);
+  @override
+  void dispose() { _c.dispose(); super.dispose(); }
+  bool _locked(CarouselItem x) => x.lock.isNotEmpty && !isOn(app.get(x.lock));
+  void _picked(int page) {
+    final n = widget.items.length;
+    setState(() => _i = page % n);
+    final x = widget.items[_i];
+    if (!_locked(x)) { app.set(widget.variable, x.value); if (widget.message.isNotEmpty) app.send(widget.message); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), n = widget.items.length, fg = p.resolve(widget.text) ?? p.text, ac = p.resolve(widget.accent) ?? p.accent;
+    if (n == 0) return const SizedBox.shrink();
+    Widget arrow(IconData icon, int d) => IconButton(onPressed: () => _c.animateToPage((_c.page ?? 0).round() + d, duration: const Duration(milliseconds: 280), curve: Curves.easeOut), icon: Icon(icon, color: fg));
+    return Column(children: [
+      SizedBox(
+        height: widget.height - (widget.dots ? 22 : 0),
+        child: Stack(alignment: Alignment.center, children: [
+          PageView.builder(
+            controller: _c,
+            itemCount: widget.loop ? null : n,
+            onPageChanged: _picked,
+            itemBuilder: (context, page) {
+              final x = widget.items[page % n], on = page % n == _i, locked = _locked(x);
+              return AnimatedScale(
+                scale: on ? 1 : 0.86, duration: const Duration(milliseconds: 220),
+                child: Container(
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(color: p.resolve(widget.card) ?? p.card, borderRadius: BorderRadius.circular(20), border: Border.all(color: on ? ac : Colors.transparent, width: 2.5)),
+                  child: Opacity(opacity: locked ? 0.5 : 1, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Text(locked ? '🔒' : x.icon, style: const TextStyle(fontSize: 46)),
+                    const SizedBox(height: 8),
+                    Text(x.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg, fontWeight: FontWeight.w800, fontSize: 17)),
+                    if (x.desc.isNotEmpty) Text(app.fill(x.desc), maxLines: 2, textAlign: TextAlign.center, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg.withValues(alpha: 0.7), fontSize: 13)),
+                  ])),
+                ),
+              );
+            },
+          ),
+          if (widget.arrows) Row(children: [arrow(Icons.chevron_left, -1), const Spacer(), arrow(Icons.chevron_right, 1)]),
+        ]),
+      ),
+      if (widget.dots) Padding(padding: const EdgeInsets.only(top: 10), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        for (var i = 0; i < n; i++) AnimatedContainer(duration: const Duration(milliseconds: 200), margin: const EdgeInsets.symmetric(horizontal: 3), width: i == _i ? 18 : 7, height: 7, decoration: BoxDecoration(color: i == _i ? ac : p.line, borderRadius: BorderRadius.circular(4))),
+      ])),
+    ]);
+  }
+}
+
+/// Swipe left and right between pages (onboarding, a tour); the page number goes into a variable, and "slide next" / "slide prev" / "slide 2" move it.
+class Pager extends StatefulWidget {
+  const Pager(this.variable, {super.key, required this.pages, this.dots = true, this.dotColor = '@accent', this.loop = false, this.auto = 0, this.message = 'slide', this.height = 320});
+  final String variable, dotColor, message;
+  final List<Widget> pages;
+  final bool dots, loop;
+  final double auto, height;
+  @override
+  State<Pager> createState() => _PagerState();
+}
+
+class _PagerState extends State<Pager> with Listens<Pager> {
+  late int _i = (nv(app.get(widget.variable)).toInt() - 1).clamp(0, math.max(0, widget.pages.length - 1));
+  late final PageController _c = PageController(initialPage: _i);
+  Timer? _timer;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.auto > 0) _timer = Timer.periodic(Duration(milliseconds: (widget.auto * 1000).round()), (_) => _go(_i + 1));
+  }
+  @override
+  void dispose() { _timer?.cancel(); _c.dispose(); super.dispose(); }
+  void _go(int i) {
+    final n = widget.pages.length;
+    if (n == 0) return;
+    final j = widget.loop ? (i % n + n) % n : i.clamp(0, n - 1);
+    if (_c.hasClients) _c.animateToPage(j, duration: const Duration(milliseconds: 320), curve: Curves.easeOutCubic);
+  }
+  @override
+  void onMessage(String m) {
+    final pre = widget.message;
+    if (m == '$pre next') { _go(_i + 1); } else if (m == '$pre prev' || m == '$pre back') { _go(_i - 1); }
+    else if (m.startsWith('$pre ') && int.tryParse(m.substring(pre.length + 1)) != null) { _go(int.parse(m.substring(pre.length + 1)) - 1); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), dot = p.resolve(widget.dotColor) ?? p.accent;
+    final want = nv(app.get(widget.variable)).toInt() - 1; // (the variable changed somewhere else: follow it)
+    if (want != _i && want >= 0 && want < widget.pages.length) WidgetsBinding.instance.addPostFrameCallback((_) => _go(want));
+    return SizedBox(height: widget.height, child: Column(children: [
+      Expanded(child: PageView(controller: _c, onPageChanged: (i) { setState(() => _i = i); app.set(widget.variable, i + 1); }, children: [for (final w in widget.pages) Center(child: w)])),
+      if (widget.dots) Padding(padding: const EdgeInsets.only(top: 8), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        for (var i = 0; i < widget.pages.length; i++) AnimatedContainer(duration: const Duration(milliseconds: 200), margin: const EdgeInsets.symmetric(horizontal: 3), width: i == _i ? 18 : 7, height: 7, decoration: BoxDecoration(color: i == _i ? dot : dot.withValues(alpha: 0.3), borderRadius: BorderRadius.circular(4))),
+      ])),
+    ]));
+  }
+}
+
+/// A grid of square pictures from a collection's media field (or emojis); tap one to open it.
+class PhotoGrid extends StatelessWidget {
+  const PhotoGrid({super.key, this.collection = 'Posts', this.field = 'media', this.filter = '', this.columns = 3, this.gap = 2, this.radius = 0, this.openPage = '', this.message = ''});
+  final String collection, field, filter, openPage, message;
+  final int columns;
+  final double gap, radius;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), rows = app.query(collection, filter: filter).where((r) => mediaList(r[field]).isNotEmpty).toList();
+    if (rows.isEmpty) return Padding(padding: const EdgeInsets.all(24), child: Text('No pictures yet', textAlign: TextAlign.center, style: TextStyle(color: p.sub)));
+    return GridView.count(
+      crossAxisCount: columns < 1 ? 3 : columns, mainAxisSpacing: gap, crossAxisSpacing: gap, shrinkWrap: true, padding: EdgeInsets.zero, physics: const NeverScrollableScrollPhysics(),
+      children: [
+        for (final r in rows)
+          GestureDetector(
+            onTap: () { app.open(collection, '${r['_id']}'); if (openPage.isNotEmpty) app.go(openPage); if (message.isNotEmpty) app.send(message); },
+            child: ClipRRect(borderRadius: BorderRadius.circular(radius), child: LayoutBuilder(builder: (context, c) => Tile(mediaList(r[field]).first, colorOf(r, '${r['_id']}'), height: c.maxWidth))),
+          ),
+      ],
+    );
+  }
+}
+
+/// A heart (or thumbs-up, or star) that turns a variable on or off, with a count next to it.
+class LikeButton extends StatelessWidget {
+  const LikeButton(this.variable, {super.key, this.countVar = 'likes', this.icon = 'heart', this.message = '', this.on = '#f91880', this.off = '@sub', this.text = '@sub'});
+  final String variable, countVar, icon, message, on, off, text;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), liked = isOn(app.get(variable)), c = liked ? (p.resolve(on) ?? p.accent) : (p.resolve(off) ?? p.sub);
+    final ic = switch (icon) { 'thumbs up' => liked ? Icons.thumb_up : Icons.thumb_up_off_alt, 'star' => liked ? Icons.star : Icons.star_border, _ => liked ? Icons.favorite : Icons.favorite_border };
+    return Align(alignment: Alignment.centerLeft, child: InkWell(
+      borderRadius: BorderRadius.circular(20),
+      onTap: () { app.set(variable, !liked); if (countVar.isNotEmpty) app.add(countVar, liked ? -1 : 1); if (message.isNotEmpty) app.send(message); },
+      child: Padding(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6), child: Row(mainAxisSize: MainAxisSize.min, children: [
+        TweenAnimationBuilder<double>(key: ValueKey(liked), tween: Tween(begin: liked ? 1.5 : 1, end: 1), duration: const Duration(milliseconds: 300), curve: Curves.elasticOut, builder: (context, k, child) => Transform.scale(scale: k, child: child), child: Icon(ic, color: c, size: 26)),
+        if (countVar.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 6), child: Text(compactNum(app.get(countVar)), style: TextStyle(color: liked ? c : (p.resolve(text) ?? p.sub), fontWeight: FontWeight.w700))),
+      ])),
+    ));
+  }
+}
+
+/// Text that scrolls across (several messages separated by |, with {variables}).
+class Ticker extends StatefulWidget {
+  const Ticker(this.text, {super.key, this.speed = 60, this.direction = 'left', this.gap = 60, this.size = 15, this.bg = '', this.color = '', this.accent = '#ffd23d', this.height = 36});
+  final String text, direction, bg, color, accent;
+  final double speed, gap, size, height;
+  @override
+  State<Ticker> createState() => _TickerState();
+}
+
+class _TickerState extends State<Ticker> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(seconds: 10))..repeat();
+  @override
+  void dispose() { _c.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), fg = p.resolve(widget.color) ?? p.text, parts = widget.text.split('|').map((x) => app.fill(x.trim())).where((x) => x.isNotEmpty).toList();
+    final span = TextSpan(style: TextStyle(fontSize: widget.size, color: fg, fontWeight: FontWeight.w700), children: [
+      for (var i = 0; i < parts.length; i++) ...[if (i > 0) TextSpan(text: '   ●   ', style: TextStyle(color: p.resolve(widget.accent) ?? p.accent)), TextSpan(text: parts[i])],
+    ]);
+    final tp = TextPainter(text: span, textDirection: TextDirection.ltr, maxLines: 1)..layout();
+    final w = tp.width + widget.gap, ms = (w / math.max(10, widget.speed) * 1000).round();
+    if (_c.duration!.inMilliseconds != ms) { _c.duration = Duration(milliseconds: ms); _c.repeat(); }
+    return Container(
+      height: widget.height, color: p.resolve(widget.bg),
+      child: ClipRect(child: LayoutBuilder(builder: (context, box) {
+        final copies = (box.maxWidth / w).ceil() + 1;
+        return AnimatedBuilder(animation: _c, builder: (context, _) {
+          final dx = widget.direction == 'right' ? -w + _c.value * w : -_c.value * w;
+          return OverflowBox(alignment: Alignment.centerLeft, maxWidth: double.infinity, child: Transform.translate(offset: Offset(dx, 0), child: Row(mainAxisSize: MainAxisSize.min, children: [
+            for (var k = 0; k < copies; k++) SizedBox(width: w, child: Text.rich(span, maxLines: 1, softWrap: false)),
+          ])));
+        });
+      })),
+    );
+  }
+}
+
+/// A countdown (or count-up) as a ring, bar, big digits or a pill: red near the end, then a message. "timer start / pause / reset / restart / add 5" control it.
+class PTimer extends StatefulWidget {
+  const PTimer({super.key, this.seconds = 30, this.countUp = false, this.look = 'ring', this.format = 'seconds', this.autoStart = true, this.message = 'timer', this.endMessage = '', this.endAction = 'nothing else', this.warnAt = 5, this.variable = '', this.color = '@accent', this.warn = '#ff4d5e', this.track = '@line', this.text = '', this.size = 120});
+  final double seconds, warnAt, size;
+  final bool countUp, autoStart;
+  final String look, format, message, endMessage, endAction, variable, color, warn, track, text;
+  @override
+  State<PTimer> createState() => _PTimerState();
+}
+
+class _PTimerState extends State<PTimer> with Listens<PTimer> {
+  double t = 0;
+  late bool running = widget.autoStart;
+  bool done = false;
+  int _shown = -1;
+  Timer? _tick;
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!running || done) return;
+      setState(() { t = math.min(widget.seconds, t + 0.1); if (t >= widget.seconds) _end(); });
+      final left = widget.countUp ? t.floor() : (widget.seconds - t).ceil();
+      if (widget.variable.isNotEmpty && left != _shown) { _shown = left; app.set(widget.variable, left); }
+    });
+  }
+  @override
+  void dispose() { _tick?.cancel(); super.dispose(); }
+  void _end() {
+    done = true;
+    if (widget.endMessage.isNotEmpty) app.send(widget.endMessage);
+    if (widget.endAction == 'restart timer') { t = 0; done = false; }
+  }
+  @override
+  void onMessage(String m) {
+    final base = widget.message;
+    if (!m.startsWith(base)) return;
+    final rest = m.substring(base.length).trim();
+    setState(() {
+      if (rest == 'start' || rest == 'resume' || rest.isEmpty) { running = true; }
+      else if (rest == 'pause' || rest == 'stop') { running = false; }
+      else if (rest == 'reset') { t = 0; done = false; }
+      else if (rest == 'restart') { t = 0; done = false; running = true; }
+      else if (RegExp(r'^add\s+-?\d').hasMatch(rest)) { t = math.max(0, t - (double.tryParse(rest.split(RegExp(r'\s+'))[1]) ?? 0) * (widget.countUp ? -1 : 1)); }
+    });
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), s = widget.seconds <= 0 ? 1.0 : widget.seconds, left = widget.countUp ? t : s - t;
+    final warn = !widget.countUp && left <= widget.warnAt && !done && running, c = warn ? (p.resolve(widget.warn) ?? p.danger) : (p.resolve(widget.color) ?? p.accent);
+    final label = switch (widget.format) {
+      'm:ss' => '${(widget.countUp ? left.floor() : left.ceil()) ~/ 60}:${((widget.countUp ? left.floor() : left.ceil()) % 60).toString().padLeft(2, '0')}',
+      'seconds.tenths' => left.toStringAsFixed(1),
+      _ => '${widget.countUp ? left.floor() : left.ceil()}',
+    };
+    final frac = (left / s).clamp(0.0, 1.0), fg = p.resolve(widget.text) ?? p.text, track = p.resolve(widget.track) ?? p.line;
+    final digits = Text(label, style: TextStyle(color: warn ? c : fg, fontWeight: FontWeight.w900, fontSize: widget.look == 'digits' ? widget.size * 0.45 : widget.size * 0.26, fontFeatures: const [FontFeature.tabularFigures()]));
+    final body = switch (widget.look) {
+      'bar' => Column(mainAxisSize: MainAxisSize.min, children: [digits, const SizedBox(height: 6), ClipRRect(borderRadius: BorderRadius.circular(6), child: LinearProgressIndicator(value: frac, minHeight: 12, color: c, backgroundColor: track))]),
+      'digits' => digits,
+      'pill' => Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), decoration: BoxDecoration(color: c.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(30)), child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Icons.timer_outlined, color: c, size: 20), const SizedBox(width: 6), digits])),
+      _ => SizedBox(width: widget.size, height: widget.size, child: Stack(fit: StackFit.expand, children: [CircularProgressIndicator(value: frac, strokeWidth: widget.size * 0.08, color: c, backgroundColor: track, strokeCap: StrokeCap.round), Center(child: digits)])),
+    };
+    return Center(child: AnimatedScale(scale: warn && (t * 2).floor().isEven ? 1.06 : 1, duration: const Duration(milliseconds: 200), child: body));
+  }
+}
+
+/// Grey shapes that shimmer while content loads; gone when its variable turns on.
+class Skeleton extends StatefulWidget {
+  const Skeleton({super.key, this.layout = 'avatar + lines', this.lines = 3, this.doneVar = '', this.radius = 8});
+  final String layout, doneVar;
+  final int lines;
+  final double radius;
+  @override
+  State<Skeleton> createState() => _SkeletonState();
+}
+
+class _SkeletonState extends State<Skeleton> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100))..repeat(reverse: true);
+  @override
+  void dispose() { _c.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    if (widget.doneVar.isNotEmpty && isOn(app.get(widget.doneVar))) return const SizedBox.shrink();
+    final p = pal(context);
+    return AnimatedBuilder(animation: _c, builder: (context, _) {
+      final col = Color.lerp(p.text.withValues(alpha: 0.07), p.text.withValues(alpha: 0.15), _c.value)!;
+      Widget bar(double w, [double h = 12]) => FractionallySizedBox(widthFactor: w, child: Container(height: h, margin: const EdgeInsets.symmetric(vertical: 5), decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(widget.radius))));
+      Widget lines(int n) => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [for (var i = 0; i < n; i++) bar(i == n - 1 && n > 1 ? 0.6 : 1)]);
+      Widget dot(double d) => Container(width: d, height: d, decoration: BoxDecoration(color: col, shape: BoxShape.circle));
+      return switch (widget.layout) {
+        'text lines' => lines(widget.lines),
+        'card' => Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Container(height: 140, decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(widget.radius * 1.5))), const SizedBox(height: 8), lines(math.max(1, widget.lines - 1))]),
+        'list rows' => Column(children: [for (var i = 0; i < widget.lines; i++) Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Row(children: [dot(40), const SizedBox(width: 12), Expanded(child: lines(2))]))]),
+        'picture' => Container(height: 180, decoration: BoxDecoration(color: col, borderRadius: BorderRadius.circular(widget.radius * 1.5))),
+        _ => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [dot(48), const SizedBox(width: 12), Expanded(child: lines(widget.lines))]),
+      };
+    });
+  }
+}
+
+/// Colour swatches: tap one to pick it into a variable.
+class ColorSwatches extends StatelessWidget {
+  const ColorSwatches(this.variable, this.colors, {super.key, this.columns = 5, this.shape = 'circle', this.gap = 10, this.ring = '@text', this.message = ''});
+  final String variable, shape, ring, message;
+  final List<String> colors;
+  final int columns;
+  final double gap;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), cur = AppState.show(app.get(variable)).toLowerCase();
+    return GridView.count(
+      crossAxisCount: columns < 1 ? 5 : columns, mainAxisSpacing: gap, crossAxisSpacing: gap, shrinkWrap: true, padding: EdgeInsets.zero, physics: const NeverScrollableScrollPhysics(),
+      children: [
+        for (final c in colors)
+          GestureDetector(
+            onTap: () { app.set(variable, c); if (message.isNotEmpty) app.send(message); },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              decoration: BoxDecoration(
+                color: p.resolve(c) ?? p.line,
+                shape: shape == 'circle' ? BoxShape.circle : BoxShape.rectangle,
+                borderRadius: shape == 'circle' ? null : BorderRadius.circular(shape == 'rounded' ? 12 : 3),
+                border: Border.all(color: c.toLowerCase() == cur ? (p.resolve(ring) ?? p.text) : p.line, width: c.toLowerCase() == cur ? 3.5 : 1),
+              ),
+              child: c.toLowerCase() == cur ? Icon(Icons.check, color: (p.resolve(c) ?? p.line).computeLuminance() > 0.5 ? Colors.black87 : Colors.white) : null,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// A number pad for a code, a PIN or an answer: ✓ checks it against the answer and sends the right / wrong message.
+class Keypad extends StatelessWidget {
+  const Keypad(this.variable, {super.key, this.maxLength = 4, this.mask = false, this.answer = '', this.rightMessage = '', this.wrongMessage = '', this.enterMessage = '', this.autoEnter = true, this.display = true, this.keyStyle = 'round', this.keyColor = '@field', this.text = '', this.accent = '@good', this.displayBg = ''});
+  final String variable, answer, rightMessage, wrongMessage, enterMessage, keyStyle, keyColor, text, accent, displayBg;
+  final int maxLength;
+  final bool mask, autoEnter, display;
+  void _enter(String v) {
+    if (enterMessage.isNotEmpty) app.send(enterMessage);
+    if (answer.isEmpty) return;
+    if (v == answer) { if (rightMessage.isNotEmpty) app.send(rightMessage); }
+    else { if (wrongMessage.isNotEmpty) app.send(wrongMessage); app.set(variable, ''); }
+  }
+  void _press(String k) {
+    final cur = AppState.show(app.get(variable));
+    if (k == '⌫') { if (cur.isNotEmpty) app.set(variable, cur.substring(0, cur.length - 1)); return; }
+    if (k == '✓') { _enter(cur); return; }
+    if (cur.length >= maxLength) return;
+    final next = cur + k;
+    app.set(variable, next);
+    if (autoEnter && next.length == maxLength) _enter(next);
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), cur = AppState.show(app.get(variable)), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? p.accent;
+    final shape = keyStyle == 'round' ? const CircleBorder() : RoundedRectangleBorder(borderRadius: BorderRadius.circular(keyStyle == 'flat' ? 6 : 16));
+    Widget key(String k) => Padding(padding: const EdgeInsets.all(6), child: AspectRatio(aspectRatio: keyStyle == 'round' ? 1 : 1.5, child: Material(
+          color: k == '✓' ? ac : keyStyle == 'flat' ? Colors.transparent : (p.resolve(keyColor) ?? p.field), shape: shape,
+          child: InkWell(customBorder: shape, onTap: () => _press(k), child: Center(child: Text(k, style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700, color: k == '✓' ? Colors.white : fg)))),
+        )));
+    return Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 300), child: Column(mainAxisSize: MainAxisSize.min, children: [
+      if (display) Container(
+        width: double.infinity, margin: const EdgeInsets.only(bottom: 8), padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(color: p.resolve(displayBg) ?? p.field, borderRadius: BorderRadius.circular(14)),
+        child: Text(List.generate(maxLength, (i) => i < cur.length ? (mask ? '•' : cur[i]) : '–').join('  '), textAlign: TextAlign.center, style: TextStyle(fontSize: 26, fontWeight: FontWeight.w800, letterSpacing: 2, color: fg)),
+      ),
+      for (final r in const [['1', '2', '3'], ['4', '5', '6'], ['7', '8', '9'], ['⌫', '0', '✓']]) Row(children: [for (final k in r) Expanded(child: key(k))]),
+    ])));
+  }
+}
+
+/// ‹ Easy › : pick one of several options with arrows; the choice goes into a variable.
+class Selector extends StatelessWidget {
+  const Selector(this.variable, this.options, {super.key, this.wrap = true});
+  final String variable;
+  final List<String> options;
+  final bool wrap;
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), n = options.length;
+    if (n == 0) return const SizedBox.shrink();
+    final i = math.max(0, options.indexOf(AppState.show(app.get(variable))));
+    void pick(int d) => app.set(variable, options[wrap ? (i + d + n) % n : (i + d).clamp(0, n - 1)]);
+    return Container(
+      decoration: BoxDecoration(color: p.field, borderRadius: BorderRadius.circular(14)),
+      child: Row(children: [
+        IconButton(tooltip: 'Previous', onPressed: wrap || i > 0 ? () => pick(-1) : null, icon: const Icon(Icons.chevron_left)),
+        Expanded(child: AnimatedSwitcher(duration: const Duration(milliseconds: 180), child: Text(options[i], key: ValueKey(i), textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 17, color: p.text)))),
+        IconButton(tooltip: 'Next', onPressed: wrap || i < n - 1 ? () => pick(1) : null, icon: const Icon(Icons.chevron_right)),
+      ]),
+    );
+  }
+}
+
+/// A popup (a dialog) or a bottom sheet with things inside: opens on a message and closes on another (or after a few seconds).
+class PPopup extends StatefulWidget {
+  const PPopup({super.key, this.mode = 'popup', this.openOn = 'popup', this.closeOn = 'close', this.startOpen = false, this.autoClose = 0, this.tapCloses = false, this.dim = true, this.handle = true, required this.child});
+  final String mode, openOn, closeOn;
+  final bool startOpen, tapCloses, dim, handle;
+  final double autoClose;
+  final Widget child;
+  @override
+  State<PPopup> createState() => _PPopupState();
+}
+
+class _PPopupState extends State<PPopup> with Listens<PPopup> {
+  bool _open = false;
+  @override
+  void initState() {
+    super.initState();
+    if (widget.startOpen) WidgetsBinding.instance.addPostFrameCallback((_) => _show());
+  }
+  @override
+  void onMessage(String m) { if (m == widget.openOn) { _show(); } else if (m == widget.closeOn) { _hide(); } }
+  void _show() {
+    if (_open || !mounted) return;
+    _open = true;
+    final content = ListenableBuilder(listenable: app, builder: (context, _) => widget.child);
+    final Future<void> shown = widget.mode == 'sheet'
+        ? showModalBottomSheet<void>(context: context, useRootNavigator: true, isScrollControlled: true, showDragHandle: widget.handle, barrierColor: widget.dim ? null : Colors.transparent, builder: (context) => SafeArea(child: Padding(padding: const EdgeInsets.fromLTRB(16, 0, 16, 16), child: content)))
+        : showDialog<void>(context: context, useRootNavigator: true, barrierDismissible: widget.tapCloses, barrierColor: widget.dim ? Colors.black54 : Colors.transparent, builder: (context) => Dialog(backgroundColor: Colors.transparent, elevation: 0, insetPadding: const EdgeInsets.all(20), child: content));
+    shown.whenComplete(() => _open = false);
+    if (widget.autoClose > 0) Timer(Duration(milliseconds: (widget.autoClose * 1000).round()), _hide);
+  }
+  void _hide() { if (_open && mounted) Navigator.of(context, rootNavigator: true).pop(); }
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
 }

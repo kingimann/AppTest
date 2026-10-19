@@ -4054,7 +4054,7 @@ function renderInspector() {
       t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
       C('shape.opacity', { label: 'Opacity', type: 'number', def: 1, range: [0, 1], step: 0.05 }),
       fold('shape:adjust', 'Colour, flip, order & blend', [
-        h('div', { class: 'row' }, h('label', {}, 'Flip'), h('div', { class: 'pair' }, [['flipX', 'Left ↔ right'], ['flipY', 'Upside down']].map(([k, l]) =>
+        h('div', { class: 'row' }, h('label', {}, 'Flip'), h('div', { class: 'pair' }, [['flipX', '↔ X'], ['flipY', '↕ Y']].map(([k, l]) =>
           h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!j.shape[k], onchange: (e) => { if (e.target.checked) j.shape[k] = true; else delete j.shape[k]; changed(); pushHistory(); } }), l)))),
         C('shape.rot', { label: 'Turn the shape (°, the object stays put)', type: 'number', def: 0, range: [-180, 180], step: 5 }),
         C('shape.hue', { label: 'Hue shift (°)', type: 'number', def: 0, range: [-180, 180], step: 5 }),

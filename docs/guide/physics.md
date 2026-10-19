@@ -31,6 +31,24 @@ Polygons with dents (a star, a cup) are split into convex pieces for you. Polygo
 
 **Edit Collider** (on the collider card) shows green handles in the Scene: drag edges to resize, the middle to move it off-centre, or any corner of a polygon or edge.
 
+### Collider settings
+
+Besides its shape, size and offset, a 2D collider has:
+
+| Setting | Key | Meaning |
+|---|---|---|
+| Friction, Bounciness | `friction`, `bounce` | How it grips and bounces (the Material list fills both) |
+| Hitbox size | `hitPct` | % of the size: under 100 makes hits forgiving, over 100 makes pickups easy to grab. Only the hits change, not the look |
+| Pass through tags | `ignore` | Things with these tags go straight through it |
+| Conveyor belt | `conveyor` | Carries what stands on it (+ right, − left, in px per second) |
+| Bounce pad | `launch` | Throws anything that lands on it up at this speed. The game hears a `launch` event |
+| Show the hitbox while playing | `debug` | A dashed outline in Play: green = solid, yellow = trigger |
+
+```js
+{ name: 'Belt', shape: { type: 'rect', w: 300, h: 20, fill: '#555' }, collider: { shape: 'box', conveyor: 120 } }
+{ name: 'Spring', shape: { type: 'rect', w: 60, h: 16, fill: '#ff5a5a' }, collider: { shape: 'box', launch: 900 } }
+```
+
 ### Rigidbody settings
 
 | Setting | Key | Meaning |

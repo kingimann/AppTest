@@ -1410,12 +1410,12 @@ body.home-open #app { visibility: hidden; }
 /* play bar docks: above / below the game (the game view makes room), floating, or a small round button */
 #playBar #pbHandle { display: none; }
 body.playing.pb-top #playBar, body.playing.pb-bottom #playBar { left: 0; right: 0; transform: none; border-radius: 0; border-width: 0; justify-content: center; box-shadow: none; background: var(--g1); }
-body.playing.pb-top #playBar { top: 0; padding: calc(env(safe-area-inset-top) + 6px) 8px 6px; border-bottom: 1px solid var(--g0); }
-body.playing.pb-bottom #playBar { top: auto; bottom: 0; padding: 6px 8px calc(env(safe-area-inset-bottom) + 6px); border-top: 1px solid var(--g0); }
-body.playing.pb-top #scenePanel { top: calc(env(safe-area-inset-top) + 59px); }
-body.playing.pb-bottom #scenePanel { bottom: calc(env(safe-area-inset-bottom) + 59px); }
-body.playing.pb-top #playStats { top: calc(env(safe-area-inset-top) + 68px); }
-body.playing.pb-bottom #playConsole { bottom: calc(env(safe-area-inset-bottom) + 66px); }
+body.playing.pb-top #playBar { top: 0; padding: calc(env(safe-area-inset-top) + 4px) 8px 4px; border-bottom: 1px solid var(--g0); }
+body.playing.pb-bottom #playBar { top: auto; bottom: 0; padding: 4px 8px calc(env(safe-area-inset-bottom) + 4px); border-top: 1px solid var(--g0); }
+body.playing.pb-top #scenePanel { top: calc(env(safe-area-inset-top) + 49px); }
+body.playing.pb-bottom #scenePanel { bottom: calc(env(safe-area-inset-bottom) + 49px); }
+body.playing.pb-top #playStats { top: calc(env(safe-area-inset-top) + 58px); }
+body.playing.pb-bottom #playConsole { bottom: calc(env(safe-area-inset-bottom) + 56px); }
 body.playing.pb-mini #playBar > .tb:not(#pbHandle) { display: none; }
 body.playing.pb-mini #playBar #pbHandle { display: inline-flex; border-radius: 50%; }
 body.playing.pb-mini #playBar { padding: 4px; border-radius: 30px; }
@@ -2821,3 +2821,9 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv.testing .npv-phone:not(.game) { padding-bottom: env(safe-area-inset-bottom); }
 .npv-testbtn { flex: none; }
 .npv.testing[data-view="code"] .npv-app { display: flex; }
+
+/* a slimmer play bar: Stop, Pause, Step (while paused), Console and ⋮; Inspect, Stats, Screenshot and Preview are in ⋮ (and show here while they're on) */
+body.playing:not(.pb-open) #playBar #pbInspect:not(.on), body.playing:not(.pb-open) #playBar #pbStats:not(.on), body.playing:not(.pb-open) #playBar #pbShot, body.playing:not(.pb-open) #playBar #pbPreview, body.playing:not(.pb-open) #playBar #pbStep:disabled { display: none; }
+body.playing:not(.pb-mini) #playBar .tb { height: 40px; min-width: 48px; }
+body.playing.pb-top #playBar, body.playing.pb-bottom #playBar { gap: 6px; }
+body.playing #playBar #pbPlay { min-width: 56px; border-radius: 12px; }

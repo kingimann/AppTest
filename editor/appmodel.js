@@ -119,7 +119,7 @@ export function appModel(game) {
   const build = (e) => {
     const kids = kidsOf(e).map(build).filter(Boolean);
     if (e.row != null && e.row !== '') { const cells = kids.filter((k) => k.pin.m >= 0); cells.forEach((k, i) => { k.pin.cell = i; k.pin.cells = cells.length; }); } // the cells of a row
-    const x = elementOf(e, kids, todo, ctx); if (x) x.pin = pinOf(e); return x;
+    const x = elementOf(e, kids, todo, ctx); if (x) { x.pin = pinOf(e); x.src = e.id; if (x.box) x.box.src = e.id; } return x; // (src: the object it's made from, so the native preview can pick it for editing)
   };
 
   const bar = ents.map((e) => beh(e, 'uiAppBar')).find(Boolean), barP = P(bar);

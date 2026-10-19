@@ -219,6 +219,10 @@ Components with a native version so far: Move, Score over time, Spawner, Velocit
 
 ## Native code (apps)
 
+**Edit it right in the native preview.** In File › Native App Preview, turn on **✎ Edit** and tap any part of the app (in the Flutter, Kotlin, SwiftUI or React Native tab): the editor selects that object and opens it in the Inspector. Change it there and the preview, and the code of all four, follow straight away; selecting something in the editor lights it up in the preview (on its page). Turn ✎ Edit off to use the app again.
+
+The Inspector's **Native code** card (on any part of an app's page) says whether it's fully native in all four, drawn as its card, or a placeholder, and shows the exact Flutter, Kotlin, SwiftUI and React Native code made for it, with Copy and *Show in the native preview*. In games, each component's header has a **native** or **web view only** chip for the native Flutter / Kotlin game.
+
 The Flutter, Xcode and Android Studio projects all run your project in a web view. For an **app**, pick **Native code (apps)** in Build Settings to get it written out as real native code instead, to keep building on in code:
 
 - **Native Flutter code**: a Flutter app (Dart widgets) for iOS and Android. Run `dart run tool/setup.dart`, then `flutter run`.

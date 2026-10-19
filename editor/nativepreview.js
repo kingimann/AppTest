@@ -1,4 +1,4 @@
-// Native App Preview: try the app the way the native exports build it (Flutter, Kotlin / Compose, SwiftUI) and browse their
+// Native App Preview: try the app the way the native exports build it (Flutter, Kotlin / Compose, SwiftUI, React Native) and browse their
 // code, right in the editor. The preview runs the same model and the same rules as the native runtimes (lib/pocket.dart,
 // Pocket.kt, Pocket.swift): pages, tabs, back, Data Lists, Forms, stats, {variables}. Material look for Flutter and Kotlin,
 // iOS look for SwiftUI. Nothing is compiled here: Download gives the real project.
@@ -188,7 +188,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   function drawHead() {
     head.replaceChildren(
       h('div', { class: 'npv-title' }, h('b', {}, 'Native app'), h('small', {}, `${model.pages.length} pages · ${model.collections.length} data collection${model.collections.length === 1 ? '' : 's'}`)),
-      seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI']], kind, (k) => { kind = k; codeFiles = null; drawAll(); }),
+      seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI'], ['rn', 'React Native']], kind, (k) => { kind = k; codeFiles = null; drawAll(); }),
       seg([['app', 'App'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
       h('div', { class: 'npv-acts' },
         zoom.controls,
@@ -407,16 +407,17 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   function sideMenu(P) {
     const M = model.menu, page = (() => { const st = A.stack(); return st.length ? st[st.length - 1].page : model.tabs.length ? model.tabs[A.tab].page : model.home; })();
     const close = () => { menuOpen = false; drawPhone(); };
+    const lit = (v) => (A.vars[v] != null ? isOn(A.vars[v]) : v === 'darkMode' && dark()); // (Dark mode follows the app's look until it's set)
     const row = (it) => {
       if (it.kind === 'line') return h('hr', { class: 'npv-mline' });
       if (it.kind === 'section') return h('div', { class: 'npv-msec' }, it.label);
       const n = it.badge ? num(A.vars[it.badge]) || 0 : 0, on = it.kind === 'page' && it.page === page;
       return h('button', { class: 'npv-mrow' + (on ? ' on' : ''), 'data-menu': it.page || it.var || it.msg, onclick: () => {
-        if (it.kind === 'toggle') { A.set(it.var, !isOn(A.vars[it.var])); drawPhone(); return; }
+        if (it.kind === 'toggle') { A.set(it.var, !lit(it.var)); drawPhone(); return; }
         if (it.kind === 'page') { menuOpen = false; A.go(it.page); drawPhone(); return; }
         menuOpen = false; note = `“${it.msg}” is a message: the native code has a TODO there`; drawPhone(); } },
         it.icon && navIcon(it.icon), h('span', {}, A.fill(it.label)),
-        it.kind === 'toggle' ? h('i', { class: 'npv-msw' + (isOn(A.vars[it.var]) ? ' on' : '') }) : n > 0 ? h('b', { class: 'npv-mbadge' }, n > 99 ? '99+' : n) : null);
+        it.kind === 'toggle' ? h('i', { class: 'npv-msw' + (lit(it.var) ? ' on' : '') }) : n > 0 ? h('b', { class: 'npv-mbadge' }, n > 99 ? '99+' : n) : null);
     };
     const head = M.header === 'none' ? null : M.social
       ? h('button', { class: 'npv-mhead', onclick: () => { menuOpen = false; A.go(M.profilePage); drawPhone(); } }, avatar(meName(), me(), 52), h('b', {}, meName()), h('small', {}, '@' + me()))
@@ -543,13 +544,13 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       model.tabs.length && !stack.length && navBar(P),
       menuOpen && model.menu && sideMenu(P),
     ].filter((c) => c && c.nodeType));
-    root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;
+    root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : kind === 'rn' ? 'React Native (Expo)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;
     if (focus) { const el = phone.querySelector(`[data-k="${CSS.escape(focus)}"]`); if (el) { el.focus(); try { el.setSelectionRange(sel[0], sel[1]); } catch { /* number inputs */ } } }
     if (view === 'code' && codeFiles) markPage();
   }
 
   // ---------- the code ----------
-  const pageFile = (value) => { const n = N[value]; if (!n) return ''; const snake = n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(); return kind === 'flutter' ? `/pages/${snake}.dart` : kind === 'swift' ? `/Pages/${n}.swift` : `/pages/${n}.kt`; };
+  const pageFile = (value) => { const n = N[value]; if (!n) return ''; const snake = n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(); return kind === 'flutter' ? `/pages/${snake}.dart` : kind === 'swift' ? `/Pages/${n}.swift` : kind === 'rn' ? `/pages/${n}.js` : `/pages/${n}.kt`; };
   function markPage() {
     const st = A.stack(), cur = st.length ? st[st.length - 1].page : model.tabs.length ? model.tabs[A.tab].page : model.home;
     const btn = codeBox.querySelector('.npv-thispage'); if (btn) btn.dataset.page = cur;
@@ -558,7 +559,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     if (!codeFiles) {
       codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Writing the code…'));
       try { codeFiles = (await files(kind)).filter((f) => typeof f.data === 'string'); } catch (err) { codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Could not write the code: ' + err.message)); return; }
-      const pref = codeFiles.find((f) => f.name.endsWith(pageFile(model.home))) || codeFiles.find((f) => /main\.dart$|App\.kt$|App\.swift$/.test(f.name)) || codeFiles[0];
+      const pref = codeFiles.find((f) => f.name.endsWith(pageFile(model.home))) || codeFiles.find((f) => /main\.dart$|App\.kt$|App\.swift$|App\.js$/.test(f.name)) || codeFiles[0];
       codeSel = pref?.name || '';
     }
     const f = codeFiles.find((x) => x.name === codeSel) || codeFiles[0], short = (n) => n.split('/').slice(1).join('/');

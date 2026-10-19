@@ -1,14 +1,19 @@
 // The editor's own line icons (Pocket Engine's ui- icons, 64 × 64, drawn with a 5-wide round stroke), as SVG path data:
-// [stroked paths, filled paths]. The native exports draw the App Bar and Bottom Nav with them, so the icons look the same.
-// Made from engine/pocket.js (its 'ui-…' artIcon entries; circles and rectangles turned into paths).
+// [stroked paths, filled paths]. The native exports draw the App Bar, Bottom Nav and Side Menu with them, so the icons look the same.
+// Made from engine/pocket.js (its 'ui-…' icons; circles, rectangles and lines turned into paths).
 export const NAV_ART = {
   home: ['M10 30L32 10l22 20M16 26v26h32V26M27 52V38h10v14'],
+  play: ['M22 12l28 20-28 20z', 'M22 12l28 20-28 20z'],
+  pause: ['', 'M19 12h4a3 3 0 0 1 3 3v34a3 3 0 0 1 -3 3h-4a3 3 0 0 1 -3 -3v-34a3 3 0 0 1 3 -3zM41 12h4a3 3 0 0 1 3 3v34a3 3 0 0 1 -3 3h-4a3 3 0 0 1 -3 -3v-34a3 3 0 0 1 3 -3z'],
   menu: ['M12 18h40M12 32h40M12 46h40'],
   close: ['M16 16l32 32M48 16L16 48'],
   back: ['M38 12L18 32l20 20'],
   next: ['M26 12l20 20-20 20'],
+  gear: ['M23 32a9 9 0 1 0 18 0a9 9 0 1 0 -18 0zM48 32L56 32M43.31 43.31L48.97 48.97M32 48L32 56M20.68 43.31L15.02 48.97M16 32L8 32M20.68 20.68L15.02 15.02M31.99 16L31.99 8M43.31 20.68L48.97 15.02M15 32a17 17 0 1 0 34 0a17 17 0 1 0 -34 0z'],
   user: ['M14 54c0-10 8-16 18-16s18 6 18 16M22 22a10 10 0 1 0 20 0a10 10 0 1 0 -20 0z'],
   cart: ['M6 12h8l6 28h28l6-20H18', 'M20 50a4 4 0 1 0 8 0a4 4 0 1 0 -8 0zM40 50a4 4 0 1 0 8 0a4 4 0 1 0 -8 0z'],
+  star: ['M32 8l7 15 16 2-12 11 3 16-14-8-14 8 3-16L9 25l16-2z'],
+  heart: ['M32 52S10 38 10 24c0-7 5-12 11-12 5 0 9 3 11 7 2-4 6-7 11-7 6 0 11 5 11 12 0 14-22 28-22 28z'],
   trophy: ['M20 10h24v12c0 8-5 13-12 13s-12-5-12-13zM20 14h-8c0 8 3 11 8 12M44 14h8c0 8-3 11-8 12M32 35v10M22 52h20'],
   map: ['M8 14l16-6 16 6 16-6v42l-16 6-16-6-16 6zM24 8v42M40 14v42'],
   chat: ['M10 14h44v28H28l-12 10v-10h-6z'],
@@ -38,6 +43,8 @@ export const NAV_ART = {
   chart: ['M10 54h44M16 46V30M28 46V16M40 46V26M52 46V36'],
   download: ['M32 10v32M20 30l12 12 12-12M12 54h40'],
   refresh: ['M50 20a20 20 0 1 0 4 16M50 8v12H38'],
+  more: ['', 'M9 32a5 5 0 1 0 10 0a5 5 0 1 0 -10 0zM27 32a5 5 0 1 0 10 0a5 5 0 1 0 -10 0zM45 32a5 5 0 1 0 10 0a5 5 0 1 0 -10 0z'],
+  coin: ['M12 32a20 20 0 1 0 40 0a20 20 0 1 0 -40 0zM32 22v20'],
   gem: ['M18 12h28l12 14-26 30L6 26zM6 26h52'],
   shop: ['M10 26l4-14h36l4 14zM14 26v26h36V26M26 52V38h12v14'],
   info: ['M32 28v18M32 18v1M8 32a24 24 0 1 0 48 0a24 24 0 1 0 -48 0z'],

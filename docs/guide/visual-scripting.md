@@ -6,7 +6,7 @@ A **Visual Script** is logic built from **nodes** joined by **wires**. It can do
 
 - *Add Component → Logic → Visual Script*, then **Open Node Editor**.
 - *Create → Logic & Scripts → Visual Script*.
-- The **Scripts** tab lists every visual script in the game, with a mini map of each. **New Visual Script** adds one to the selected object. It asks how to start: a **Blank script** (an empty canvas) or a small working **Example** (*Tap to score*: On Tap → add 1 to score → show it; *Score every second* on an object you can't tap; *Page opened → message* in an app).
+- The **Scripts** tab lists every visual script in the game, with a mini map of each. **New Visual Script** adds one to the selected object. It asks how to start: a **Blank script** (an empty canvas), **Pick a ready-made script** (opens the script browser, below) or a small working **Example** (*Tap to score*: On Tap → add 1 to score → show it; *Score every second* on an object you can't tap; *Page opened → message* in an app).
 
 A script belongs to an object: "this object" in a node means that object.
 
@@ -36,6 +36,7 @@ A step with several white outputs chooses one: **If** has *true* / *false*, **Ra
 ## Editing
 
 - **Kept simple:** a script opens at a size you can read (a big one starts at its top-left; ⋯ › Fit All Nodes shows it all); the tip at the bottom is one short line and goes away after your first few visits; Add Node shows the 8 main categories (*All 30 categories* shows the rest); a node's ⋯ menu has the few things you need (What Does This Do?, Duplicate, Turn Off, Delete) and *More…* for the rest (Copy, Copy From Here, Collapse, Select Several, Remove Wires).
+- **Moving around:** drag empty space to pan, pinch to zoom. The top right has **− / + zoom buttons** (the % between them fits every node) and a **map** of the whole script: your nodes in their colours and a white box for what's on screen. Tap or drag on the map to go there; ⋮ › *Hide the Map* turns it off. With a mouse or trackpad, the wheel scrolls (Shift + wheel sideways) and **Ctrl / ⌘ + wheel** or a trackpad pinch zooms at the pointer.
 - **Add Node** (the + button) opens a picker with search, **Suggested next** (what usually follows the selected node), **Recently used**, **Common actions** (the handful most scripts use: Add to Variable, Set Variable, Play Sound, Show Message, Wait, If, Move By, Jump, Spawn, Destroy, Show / Hide, Win, Game Over) and one folder per category. Each name appears once: where a trigger instruction does the same as a node (Play Sound, Wait…), only the node is listed (old scripts using the other one keep working).
 - **Drag a wire into empty space** (or tap a dot, then empty space) and a picker opens with only the nodes that can plug in there (*Fits here* first); the new node lands where you let go, already wired.
 - **Tap a white wire › Insert Node Here…** puts an action in the middle of it (from → new node → to).
@@ -204,4 +205,4 @@ A value wire goes from a value node's `out` port to the input's key: `{ from: { 
 
 ## Ready-made scripts
 
-★ in the Node Editor has templates: chase the player, tap 5 times → win, spawn a ring of 8, hit → blink + hurt, run / idle by speed, an enemy with its own HP, explode on a custom event, waves of enemies, a daily reward with a streak, a 30-second countdown, keyboard controls, asking the player's name, a shop badge and more.
+⋮ › **Ready-made Scripts** opens a browser you can search, in groups (*Score & winning*, *Player & controls*, *Enemies & spawning*, *Effects & feel*, *Screens & UI*, *Logic & data*), with your own saved scripts first. Each card shows how many nodes it adds and what runs (*On Tap → Add to Variable → Punch*). Tap one to drop it in below your nodes. It has templates: chase the player, tap 5 times → win, spawn a ring of 8, hit → blink + hurt, run / idle by speed, an enemy with its own HP, explode on a custom event, waves of enemies, a daily reward with a streak, a 30-second countdown, keyboard controls, asking the player's name, a shop badge and more.

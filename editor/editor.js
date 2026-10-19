@@ -2680,7 +2680,7 @@ function gettingStarted() {
 /** Add a Visual Script to the selected object (or the player, or a new logic object) and open the Node Editor. */
 /** New Visual Script: start blank, or from a small working example (tap to score…). */
 function addVisualScript(mode) {
-  if (mode !== 'blank' && mode !== 'example') {
+  if (mode !== 'blank' && mode !== 'example' && mode !== 'ready') {
     const app = !!levelList()[0].settings?.app, j0 = ent(selectedId), tapish = !app && ((j0 && !j0.template && !j0.ui && hasVisual(j0)) || (!j0 && project.entities.some((e) => (e.tags || []).includes('player'))));
     const ex = app ? ['Page opened → message', 'When a page opens, show a message. Change it into what you need.'] : tapish ? ['Tap to score', 'On Tap → add 1 to score → show it.'] : ['Score every second', 'Every second → add 1 to score.'];
     const opt = (ic, t, d, m, primary) => h('button', { class: 'btn' + (primary ? ' primary' : ''), style: 'display:flex;flex-direction:column;align-items:flex-start;gap:2px;width:100%;text-align:left;padding:12px 14px', 'data-script': m, onclick: () => { closeLayer(); addVisualScript(m); } }, h('b', { style: 'display:flex;align-items:center;gap:8px' }, icon(ic), t), h('small', { style: 'opacity:.8;font-weight:500' }, d));
@@ -2689,6 +2689,7 @@ function addVisualScript(mode) {
       h('div', { class: 'btns', style: 'flex-direction:column;align-items:stretch' },
         opt('plus', 'Blank script', 'An empty canvas: tap Add Node and start with an event.', 'blank', true),
         opt('play', 'Example: ' + ex[0], ex[1], 'example'),
+        opt('star', 'Pick a ready-made script', 'Score, controls, enemies, effects, UI… browse and drop one in.', 'ready'),
         h('button', { class: 'btn', onclick: closeLayer }, 'Cancel')))]);
     return;
   }
@@ -2698,7 +2699,8 @@ function addVisualScript(mode) {
   if (!j || j.template) j = app ? project.entities.find((e) => e.name === 'App Logic') : project.entities.find((e) => (e.tags || []).includes('player'));
   if (!j) j = addEntity(app ? { name: 'App Logic' } : { name: 'Game Logic', ...(is3D() ? { y: 0 } : {}) });
   const b = defaultBehavior('graph', is3D() && !j.ui);
-  if (mode === 'blank') b.graph = { nodes: [], links: [] };
+  graphBrowse = mode === 'ready';
+  if (mode === 'blank' || mode === 'ready') b.graph = { nodes: [], links: [] };
   else if (app && !j.ui && !hasVisual(j)) // an app starts from a page opening
     b.graph = { nodes: [{ id: 'n1', type: 'onPage', x: 20, y: 40, params: { page: '', var: 'page' } }, { id: 'n2', type: 'toast', x: 330, y: 20, params: { text: 'Opened {page}', where: 'bottom' } }],
       links: [{ from: { node: 'n1', port: 'then' }, to: { node: 'n2', port: 'in' } }] };
@@ -3330,14 +3332,16 @@ function graphCard(target, path) {
     !sc && (g.nodes || []).length ? h('button', { class: 'btn gc-save', onclick: () => { const n = prompt('Name this script so you can reuse it', target().name ? `${target().name} script` : 'My script'); if (n?.trim()) { saveScript(beh, g, n.trim()); renderInspector(); } } }, icon('save'), 'Save as Reusable Script') : null);
 }
 let graphHistT = 0;
+let graphBrowse = false; // (New Visual Script › ready-made: the editor opens on its script browser)
 function editGraph(target, path) {
+  const browse = graphBrowse; graphBrowse = false;
   const e = target(), id = e.id;
   const T = () => ent(id) || e;
   const B = () => getPath(T(), path.replace(/\.graph$/, ''));
   const back = () => ed.close();
   const ed = openNodeEditor({
     hideNode: (t) => !gameOnlineOK() && /^(net|pf)[A-Z]/.test(t), // (PlayFab / Photon nodes: games only)
-    graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz, app: !!levelList()[0].settings?.app,
+    browse, graph: getPath(e, path), title: e.name, h, popMenu, toast, buzz, app: !!levelList()[0].settings?.app,
     stats: (nodeId) => { const sk = /\.scripts\.\d+\.graph$/.test(path) ? getPath(e, path.replace(/\.graph$/, ''))?.id : ''; return engine.graphStats?.get(e.id)?.get((sk ? sk + ':' : '') + nodeId); }, // live debug: what ran in the last Play
     templates: project.entities.filter((x) => x.template).map((x) => x.name),
     objects: project.entities.filter((x) => !x.template && x.name).map((x) => x.name),

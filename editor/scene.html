@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Pocket Engine scene</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0e1014; overflow: hidden; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+  #view { position: absolute; inset: 0; }
+  #sel { position: absolute; z-index: 50; border: 2px solid #f7a02c; border-radius: 4px; pointer-events: none; display: none; box-shadow: 0 0 0 1px rgba(0,0,0,.45); }
+  #sel i { position: absolute; width: 8px; height: 8px; background: #f7a02c; border-radius: 2px; }
+</style>
+</head>
+<body>
+<!-- The phone app's native editor (mobile/) shows this page as its Scene view: Pocket Engine draws the level here, the app does everything else. -->
+<div id="view"></div>
+<div id="sel"><i style="left:-5px;top:-5px"></i><i style="right:-5px;top:-5px"></i><i style="left:-5px;bottom:-5px"></i><i style="right:-5px;bottom:-5px"></i></div>
+<script type="module" src="scene.js"></script>
+</body>
+</html>

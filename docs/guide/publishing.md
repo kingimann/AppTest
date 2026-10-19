@@ -202,7 +202,8 @@ The **Kotlin project** (Build Settings › Flutter project › *Also: Kotlin pro
 The repository's `mobile/` folder is Pocket Engine itself as an iPhone and Android app, made with Expo (React Native).
 
 - **Native screens:** Home, Projects (search, open, rename, duplicate, export, delete, import, back up), Learn (the guides) and Settings (the look, haptics, the editor's address).
-- **The editor:** it opens full screen inside the app, and the phone's Back button returns to Home.
+- **The editor:** native React Native screens: Hierarchy, Inspector (every component's settings, Add Component), Add, Console, undo / redo, auto-save and Play. Only the scene and the running game are drawn by the engine, in a web view; tap to select, drag to move, pinch to zoom.
+- **The full editor:** the web editor opens full screen in the app for everything else (⋯ › Open in the full editor, or Settings › Open projects in). The phone's Back button returns to Home.
 - **Exports:** they go to the phone's share sheet.
 - **Your projects:** they stay in the editor's storage on the phone, the same as the web version.
 

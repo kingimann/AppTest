@@ -24,6 +24,8 @@ const WebFrame = forwardRef(function WebFrame({ uri, onMessage, style, hooks = t
   useImperativeHandle(ref, () => ({
     /** Calls the page's window.pocketBridge with a message. */
     send: (m) => view.current?.injectJavaScript(`window.pocketBridge && window.pocketBridge(${JSON.stringify(JSON.stringify(m))}); true;`),
+    /** Calls the Scene page's window.pocketScene. */
+    sendScene: (m) => view.current?.injectJavaScript(`window.pocketScene && window.pocketScene(${JSON.stringify(JSON.stringify(m))}); true;`),
     reload: () => view.current?.reload(),
   }));
   return (

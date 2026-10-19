@@ -17,6 +17,7 @@ import LearnScreen from './src/screens/LearnScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import EditorScreen from './src/screens/EditorScreen';
 import DocsScreen from './src/screens/DocsScreen';
+import NativeEditor from './src/editor/NativeEditor';
 
 const TABS = [['home', 'Home', 'home'], ['projects', 'Projects', 'folder'], ['learn', 'Learn', 'book'], ['settings', 'Settings', 'gear']];
 
@@ -35,7 +36,7 @@ function TabBar({ T, tab, setTab }) {
 }
 
 /** ⋯ on a project: open, rename, duplicate, export, delete. */
-function ProjectSheet({ T, p, onClose, onOpen, onChanged }) {
+function ProjectSheet({ T, p, onClose, onOpen, onFull, onChanged }) {
   const [name, setName] = useState(p?.name || ''), [renaming, setRenaming] = useState(false);
   useEffect(() => { setName(p?.name || ''); setRenaming(false); }, [p]);
   if (!p) return null;
@@ -58,6 +59,7 @@ function ProjectSheet({ T, p, onClose, onOpen, onChanged }) {
           ) : (
             <>
               {row('play', 'Open', () => { onClose(); onOpen(p); })}
+              {row('code', 'Open in the full editor', () => { onClose(); onFull(p); })}
               {row('edit', 'Rename', () => setRenaming(true))}
               {row('copy', 'Duplicate', () => run(async () => { await request('duplicate', { project: p.id }); onClose(); onChanged(); }))}
               {row('share', 'Export (.json)', () => run(async () => { const r = await request('export', { project: p.id }); await shareText((r.name || 'project').replace(/[^\w\- ]+/g, '') + '.json', r.json); }))}
@@ -84,8 +86,11 @@ function Main() {
   }, [templates]);
   useEffect(() => onBridgeReady(() => { refresh(); }), [bridgeV]); // eslint-disable-line react-hooks/exhaustive-deps
   const editor = (q) => setScreen({ type: 'editor', uri: `${site()}/editor/?app=1&${q}` });
-  const open = (p) => editor('project=' + encodeURIComponent(p.id));
-  const create = (t) => editor('template=' + encodeURIComponent(t.key) + (t.key.startsWith('empty') ? '&name=' + encodeURIComponent(t.kind === 'app' ? 'My App' : 'New Game') : ''));
+  const full = (id) => editor('project=' + encodeURIComponent(id)); // the full (web) editor: every tool
+  const classic = prefs.editor === 'full';
+  const open = (p) => (classic ? full(p.id) : setScreen({ type: 'native', open: { project: p.id }, key: Date.now() }));
+  const create = (t) => { const name = t.key.startsWith('empty') ? (t.kind === 'app' ? 'My App' : 'New Game') : undefined;
+    if (classic) editor('template=' + encodeURIComponent(t.key) + (name ? '&name=' + encodeURIComponent(name) : '')); else setScreen({ type: 'native', open: { template: t.key, name }, key: Date.now() }); };
   const back = () => { setScreen(null); refresh(); };
   const doImport = async () => { try { const text = await pickText(); if (!text) return; const r = await request('import', { text }); await refresh(); if (r.backup) say('Backup restored', `${r.backup.added} added, ${r.backup.updated} updated`); else if (r.id) open({ id: r.id }); } catch (e) { say('Could not import', String(e.message || e)); } };
   const doBackup = async () => { try { const text = await request('backup'); await shareText(`pocket-engine-backup-${new Date().toISOString().slice(0, 10)}.json`, text); } catch (e) { say('Could not back up', String(e.message || e)); } };
@@ -94,7 +99,8 @@ function Main() {
     <View style={{ flex: 1, backgroundColor: T.bg }}>
       <StatusBar style={T.dark ? 'light' : 'dark'} />
       <Bridge version={bridgeV} />
-      {screen?.type === 'editor' ? <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: '#0e1014' }}><EditorScreen T={T} uri={screen.uri} onHome={back} /></SafeAreaView>
+      {screen?.type === 'native' ? <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: T.card }}><NativeEditor key={screen.key} T={T} open={screen.open} onHome={back} onFullEditor={full} /></SafeAreaView>
+        : screen?.type === 'editor' ? <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: '#0e1014' }}><EditorScreen T={T} uri={screen.uri} onHome={back} /></SafeAreaView>
         : screen?.type === 'docs' ? <SafeAreaView edges={['top', 'bottom']} style={{ flex: 1, backgroundColor: T.card }}><DocsScreen T={T} uri={screen.uri} title={screen.title} onBack={() => setScreen(null)} /></SafeAreaView>
         : (
           <SafeAreaView edges={['top']} style={{ flex: 1 }}>
@@ -105,7 +111,7 @@ function Main() {
             <TabBar T={T} tab={tab} setTab={setTab} />
           </SafeAreaView>
         )}
-      <ProjectSheet T={T} p={sheet} onClose={() => setSheet(null)} onOpen={open} onChanged={refresh} />
+      <ProjectSheet T={T} p={sheet} onClose={() => setSheet(null)} onOpen={open} onFull={(p) => full(p.id)} onChanged={refresh} />
     </View>
   );
 }

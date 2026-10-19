@@ -30,7 +30,13 @@ The Character Controller's **Controls** setting picks how the player steers it. 
 | **Tilt** | Tilt the phone (a joystick on a computer) |
 | **Keyboard only** | Arrow keys / WASD, Space to jump, nothing on screen |
 
-Space always jumps on a keyboard. Shift runs, and X or K dashes.
+Space always jumps on a keyboard. Shift runs, X or K dashes, and J or Enter is Fire.
+
+### Keyboard and game controllers
+
+**Game controllers** (Bluetooth or USB: Xbox, PlayStation, Switch Pro…) work on phones, tablets and computers. The left stick and D-pad steer, **A** jumps, **B** is Fire, **X** dashes and **RB** runs.
+
+*Game Settings › Keyboard & Controller* changes the keys and buttons for Jump, Fire, Dash and Run (for example `w, pad:y` for Jump), turns controllers off, and sets the stick's dead zone. Controller buttons are named `pad:a`, `pad:b`, `pad:x`, `pad:y`, `pad:lb`, `pad:rb`, `pad:lt`, `pad:rt`, `pad:start`, `pad:select` and `pad:up` / `down` / `left` / `right`. Triggers and scripts can use those names in *Key pressed* and *Key held*, and the game hears a `gamepad` event when a controller connects.
 
 ### Platformer moves
 

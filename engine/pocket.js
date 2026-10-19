@@ -2246,6 +2246,9 @@ function collide(e, other, m) {
 // Input: touch — virtual joystick, buttons, taps, drags, swipes and tilt
 // ============================================================================
 /** A key's name for scripts: 'space', 'arrowup', 'a', 'enter'… (also accepts Space, Up, ArrowUp, A). */
+/** Default keys and controller buttons for the player's actions (Game Settings › Keyboard & controller changes them). */
+const KEY_DEFAULTS = { jump: 'space, pad:a', fire: 'j, enter, pad:b', dash: 'x, k, pad:x', run: 'shift, pad:rb' };
+const PAD_BUTTONS = ['pad:a', 'pad:b', 'pad:x', 'pad:y', 'pad:lb', 'pad:rb', 'pad:lt', 'pad:rt', 'pad:select', 'pad:start', 'pad:ls', 'pad:rs', 'pad:up', 'pad:down', 'pad:left', 'pad:right']; // the standard layout
 export function keyName(k) {
   const q = String(k ?? '').toLowerCase();
   return { ' ': 'space', spacebar: 'space', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright', esc: 'escape', return: 'enter' }[q.trim() || q] || q.trim();
@@ -3058,6 +3061,32 @@ export class Input {
   }
   get stickRadius() { const st = this.engine.scene?.settings || {}; return Math.min(70, this.engine.width * 0.15) * (CONTROL_SCALE[st.controlSize] || 1) * clamp(+st.joystickSize || 1, 0.5, 2) * (this.engine.prefs?.controlScale || 1); }
 
+  /** A game controller (Bluetooth or USB, on phones and computers): its buttons act as keys named pad:a, pad:b, pad:x, pad:y, pad:lb, pad:rb, pad:lt, pad:rt, pad:select, pad:start, pad:up… and the left stick steers. Polled once a frame. */
+  pollPad() {
+    const st = this.engine.scene?.settings || {};
+    let pad = null;
+    if (st.gamepad !== false && typeof navigator !== 'undefined' && navigator.getGamepads) { try { pad = [...navigator.getGamepads()].find((q) => q && q.connected !== false) || null; } catch { pad = null; } }
+    this.padKeys ||= new Set(); this.padAxis = null;
+    const now = new Set();
+    if (pad) {
+      if (!this.padSeen) { this.padSeen = true; this.engine.scene?.emit?.('gamepad', pad.id || 'controller'); }
+      PAD_BUTTONS.forEach((n, i) => { const b = pad.buttons?.[i]; if (n && b && (b.pressed || b.value > 0.5)) now.add(n); });
+      const dz = clamp(+(st.gamepadDeadZone ?? 0.2), 0, 0.9); let x = +pad.axes?.[0] || 0, y = +pad.axes?.[1] || 0; const l = Math.hypot(x, y);
+      if (l < dz) { x = 0; y = 0; } else { const m = Math.min(1, (l - dz) / (1 - dz)); x = x / l * m; y = y / l * m; }
+      this.padAxis = { x, y };
+    }
+    for (const k of now) if (!this.padKeys.has(k)) { this.keysDown.push(k); this.keys.add(k); }
+    for (const k of this.padKeys) if (!now.has(k)) { this.keys.delete(k); this.keysUp.push(k); }
+    this.padKeys = now;
+  }
+  /** The keys (and controller buttons) for an action: Game Settings › Keyboard & controller (keyJump, keyFire, keyDash, keyRun), or the defaults. */
+  binds(action) {
+    const st = this.engine.scene?.settings || {}, raw = st['key' + action[0].toUpperCase() + action.slice(1)];
+    return String(raw != null && String(raw).trim() !== '' ? raw : KEY_DEFAULTS[action] || '').split(',').map((q) => keyName(q)).filter(Boolean);
+  }
+  keyHit(action) { return this.binds(action).some((k) => this.keysDown.includes(k)); }
+  keyHeld(action) { return this.binds(action).some((k) => this.keys.has(k)); }
+
   /** Movement axis in [-1, 1] from the joystick or tilt. y is down (forward = negative). */
   axis() {
     let x = 0, y = 0;
@@ -3082,7 +3111,8 @@ export class Input {
     }
     if (this.useTilt && this.tiltAxis) { x += this.tiltAxis.x; y += this.tiltAxis.y; } // dead zone, range and smoothing were applied as it arrived
     x += this.extra.x; y += this.extra.y;
-    if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); y += (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0); } // arrow keys / WASD on a computer
+    if (this.padAxis) { x += this.padAxis.x; y += this.padAxis.y; }
+    if (this.keys?.size) { const k = this.keys, has = (...a) => a.some((q) => k.has(q)); x += (has('arrowright', 'd', 'pad:right') ? 1 : 0) - (has('arrowleft', 'a', 'pad:left') ? 1 : 0); y += (has('arrowdown', 's', 'pad:down') ? 1 : 0) - (has('arrowup', 'w', 'pad:up') ? 1 : 0); } // arrow keys / WASD on a computer
     const l = Math.hypot(x, y);
     if (l > 1) { x /= l; y /= l; }
     return { x, y };
@@ -3090,7 +3120,7 @@ export class Input {
 
   /** Is a touch button held? Actions: 'jump', 'action' */
   isDown(action) {
-    if (action === 'jump' || action === 'action') return this.buttons.some((b) => b.action === action && b.id != null) || this.virtHeld.has(action) || (action === 'jump' && !!this.keys?.has('space'));
+    if (action === 'jump' || action === 'action') return this.buttons.some((b) => b.action === action && b.id != null) || this.virtHeld.has(action) || this.keyHeld(action === 'jump' ? 'jump' : 'fire');
     return false;
   }
   /** Was an action pressed this frame? */
@@ -3098,9 +3128,9 @@ export class Input {
     const j = this.justPressed;
     if (action === 'jump') {
       const hasBtn = this.buttons.some((b) => b.action === 'jump');
-      return j.has('btn:jump') || j.has('virt:jump') || this.keysDown?.includes('space') || (!hasBtn && !this.noTapJump && (j.has('tap') || j.has('swipe:up')));
+      return j.has('btn:jump') || j.has('virt:jump') || this.keyHit('jump') || (!hasBtn && !this.noTapJump && (j.has('tap') || j.has('swipe:up')));
     }
-    if (action === 'action') return j.has('btn:action') || j.has('virt:action');
+    if (action === 'action') return j.has('btn:action') || j.has('virt:action') || this.keyHit('fire');
     return j.has(action);
   }
   get pointerDown() { return [...this.pointers.values()].some((p) => p.role === 'free'); }
@@ -5502,7 +5532,7 @@ registerBehavior('move', {
         }
         if (ax || ay) { const l = Math.hypot(ax, ay); lastDir = { x: ax / l, y: ay / l }; }
         // run
-        const keys = inp.keys || new Set(), shift = keys.has('shift');
+        const shift = inp.keyHeld('run');
         const rw = p.runWith || 'off', pushEdge = Math.hypot(a.x, a.y) > 0.95 && !!inp.stick;
         running = rw !== 'off' && !M.locked && (rw === 'always' ? !shift : shift || (rw === 'edge' && pushEdge) || (rw === 'action' && inp.isDown('action')) || (rw === 'jump' && inp.isDown('jump')));
         const sv = p.speedVar ? +s.vars[p.speedVar] : NaN, speed = p.speed * (Number.isFinite(sv) ? sv : 1) * (M.speedMul ?? 1) * (running ? +p.runSpeed || 1.7 : 1);
@@ -5515,7 +5545,7 @@ registerBehavior('move', {
           else if (dw === 'jump' && inp.justPressed.has('btn:jump')) go = [0, 0];
           else if (dw === 'doubletap' && inp.taps.length) { if (s.time - lastTap < 0.3) { go = [0, 0]; lastTap = -1; } else lastTap = s.time; }
           else if (dw === 'swipe') { for (const [k, v] of [['left', [-1, 0]], ['right', [1, 0]], ['up', [0, -1]], ['down', [0, 1]]]) if (inp.justPressed.has('swipe:' + k)) go = three && p.relative !== 'camera' ? v : v; }
-          if (inp.keysDown?.includes('space') && (dw === 'action' || dw === 'doubletap' || dw === 'swipe')) go = [0, 0];
+          if (inp.keyHit('dash')) go = [0, 0];
           if (go) e.move.dash(go[0] || lastDir.x, go[1] || lastDir.y);
         }
         // which finger drags: any free finger, or one that started on the object
@@ -5660,14 +5690,14 @@ registerBehavior('platformer', {
         const a = M.locked ? { x: 0, y: 0 } : inp.axis(), keys = inp.keys || new Set(), kd = inp.keysDown || [];
         if (a.x) facing = Math.sign(a.x);
         // run
-        const shift = keys.has('shift');
+        const shift = inp.keyHeld('run');
         running = p.runWith === 'edge' ? Math.abs(a.x) > 0.9 || shift : p.runWith === 'action' ? inp.isDown('action') || shift : p.runWith === 'always' ? !shift : shift && (p.runWith || 'off') !== 'off';
         const speed = p.speed * (running ? +p.runSpeed || 1.6 : 1) * (M.speedMul ?? 1);
         // dash
         dashCd -= dt;
         if (!three && (p.dashWith || 'off') !== 'off' && !M.locked) {
           let go = 0;
-          if (kd.includes('x') || kd.includes('k')) go = facing;
+          if (inp.keyHit('dash')) go = facing;
           if (p.dashWith === 'action' && inp.pressed('action')) go = facing;
           if (p.dashWith === 'swipe') { if (inp.pressed('swipe:left')) go = -1; else if (inp.pressed('swipe:right')) go = 1; }
           if (p.dashWith === 'doubletap') {
@@ -20650,7 +20680,7 @@ registerBehavior('controller2d', {
           }
           case 'jetpack': {
             b.vel.x += (a.x * p.speed - b.vel.x) * Math.min(1, dt * 10);
-            const hold = inp.isDown('jump') || inp.virtHeld.has('jump') || (!inp.buttons.some((q) => q.action === 'jump') && !custom && inp.pointerDown) || inp.keys?.has('space') || inp.keys?.has('arrowup') || inp.keys?.has('w');
+            const hold = inp.isDown('jump') || inp.virtHeld.has('jump') || (!inp.buttons.some((q) => q.action === 'jump') && !custom && inp.pointerDown) || inp.keyHeld('jump') || inp.keys?.has('arrowup') || inp.keys?.has('w') || inp.keys?.has('pad:up');
             const tank = +p.fuel || 0;
             if (b.grounded) fuel = Math.min(1, fuel + dt / Math.max(0.5, tank * 0.5));
             if (hold && (tank <= 0 || fuel > 0)) { b.vel.y = Math.max(b.vel.y - (s.gravity || 1600) * 2.1 * dt, -p.jump * 0.75); if (tank > 0) fuel = Math.max(0, fuel - dt / tank); if (Math.random() < dt * 30) s.burst?.(e.x, e.y + (e.extents().hy || 16), e.z, '#ffb347', 2, 0.4); }
@@ -26040,7 +26070,7 @@ export class Engine {
     }
     if (this.scene) {
       try { // a bug in one frame shows in the Console instead of freezing the game
-        if (!this.editing) this.update(dt * this.timeScale);
+        if (!this.editing) { this.input.pollPad(); this.update(dt * this.timeScale); }
         // editing (lazyEdit): draw while something is happening (wake), when a picture loads, and twice a second otherwise
         if (!this.editing || !this.lazyEdit || now < (this.awakeUntil || 0) || Redraw.tick !== this._redrawTick || now - (this._editDrawn || 0) > 500) { this._redrawTick = Redraw.tick; this._editDrawn = now; this.render(); }
         this.updateSettingsUI();

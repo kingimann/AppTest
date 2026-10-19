@@ -210,6 +210,10 @@ class Body(j: JsonMap) {
     /** How far a platform moved since the last step (riders go with it). */
     var dx = 0.0; var dy = 0.0; var px = Double.NaN; var py = Double.NaN
     var groundedOn: GameObject? = null
+    /** A wall it touches this frame: +1 on its right, -1 on its left, 0 none; a ceiling above it. */
+    var wall = 0; var ceiling = false
+    /** Falls through one-way platforms until this game time (down on a platform). */
+    var dropUntil = -1.0
     val solid get() = !sensor && (type == "static" || type == "kinematic")
     val isDynamic get() = type == "dynamic"
 }
@@ -390,6 +394,14 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     val tapTargets = mutableSetOf<GameObject>()
     /** Directions and buttons held by HUD Touch Buttons. */
     val virtualHeld = mutableSetOf<String>()
+    /** A player's control scheme (touch sides, hold where to go, swipe) steers through these each frame: a push added to axis(), held actions, and no tap-to-jump. */
+    var extraX = 0.0; var extraY = 0.0
+    val virtHeld = mutableSetOf<String>()
+    var noTapJump = false
+    /** Keys pressed this frame. */
+    val keysDown = mutableSetOf<Key>()
+    /** Where a fixed joystick sits (null: where the thumb lands). */
+    var stickBase: Offset? = null
     /** Panels components show over the game (a dialogue box, a shop…), drawn after the canvas. */
     val panels = mutableListOf<@Composable () -> Unit>()
     /** Game-wide systems components share (the inventory, quests, turns…), by name. */
@@ -731,7 +743,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
             if (b.lockX) b.vx = 0.0
             if (b.lockY) b.vy = 0.0
             e.x += b.vx * dt; e.y += b.vy * dt
-            b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.landed = 0.0
+            b.wasGrounded = b.grounded; b.grounded = false; b.groundedOn = null; b.landed = 0.0; b.wall = 0; b.ceiling = false
         }
         val gd = if (gravity == 0.0) 0.0 else sign(gravity)
         for (i in list.indices) for (j in i + 1 until list.size) {
@@ -745,7 +757,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
                 val dynA = ba.isDynamic && !bc.isDynamic
                 val dyn = if (dynA) a else if (bc.isDynamic && !ba.isDynamic) c else null ?: continue
                 val n = if (dynA) ny else -ny
-                if (!(gd != 0.0 && n * gd > 0.5) || dyn.body!!.vy * gd < -0.01 || depth > max(dyn.half.h * 0.5, 0.0001)) continue
+                if (!(gd != 0.0 && n * gd > 0.5) || dyn.body!!.vy * gd < -0.01 || dyn.body!!.dropUntil > time || depth > max(dyn.half.h * 0.5, 0.0001)) continue // (dropping down through it: no)
             }
             val share = if (ba.isDynamic && bc.isDynamic) 0.5 else 1.0
             if (ba.isDynamic) {
@@ -757,7 +769,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
                     ba.grounded = true; ba.groundedOn = c
                     if (!bc.isDynamic) { a.x += bc.dx; if (bc.dy * gd < 0) a.y += bc.dy } // ride moving platforms
                     val fr = max(ba.friction, bc.friction); if (fr > 0) ba.vx *= max(0.0, 1 - fr * dt * 10)
-                }
+                } else if (gd != 0.0 && ny * gd < -0.5) ba.ceiling = true else if (!bc.isDynamic && abs(nx) > 0.5) ba.wall = sign(nx).toInt() // a wall (not another moving thing) on that side
             }
             if (bc.isDynamic) {
                 c.x += nx * depth * share; c.y += ny * depth * share
@@ -768,7 +780,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
                     bc.grounded = true; bc.groundedOn = a
                     if (!ba.isDynamic) { c.x += ba.dx; if (ba.dy * gd < 0) c.y += ba.dy }
                     val fr = max(ba.friction, bc.friction); if (fr > 0) bc.vx *= max(0.0, 1 - fr * dt * 10)
-                }
+                } else if (gd != 0.0 && ny * gd > 0.5) bc.ceiling = true else if (!ba.isDynamic && abs(nx) > 0.5) bc.wall = -sign(nx).toInt()
             }
         }
         for (e in list) { val b = e.body!!; if (!b.isDynamic) { b.px = e.x; b.py = e.y } }
@@ -802,7 +814,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     fun axis(): Offset {
         var x = 0.0; var y = 0.0
         stick?.let { st ->
-            val r = 50.0 * uiK; val dx = (st.at.x - st.start.x) / r; val dy = (st.at.y - st.start.y) / r; val l = hypot(dx, dy)
+            val r = 50.0 * uiK; val base = stickBase ?: st.start; val dx = (st.at.x - base.x) / r; val dy = (st.at.y - base.y) / r; val l = hypot(dx, dy)
             if (l > 0.12) { val m = min(1.0, (l - 0.12) / 0.88); x += dx / l * m; y += dy / l * m }
             val dir = strOf(settings["joystickDirections"], "all")
             if (dir == "horizontal") y = 0.0
@@ -815,16 +827,21 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
         if (k(Key.DirectionLeft, Key.A)) x -= 1
         if (k(Key.DirectionDown, Key.S)) y += 1
         if (k(Key.DirectionUp, Key.W)) y -= 1
+        x += extraX; y += extraY
         val l = hypot(x, y)
         return if (l > 1) Offset((x / l).toFloat(), (y / l).toFloat()) else Offset(x.toFloat(), y.toFloat())
     }
     fun isDown(action: String): Boolean {
-        if (action in virtualHeld) return true
+        if (action in virtualHeld || action in virtHeld) return true
         if (buttons.any { it.action == action && it.finger != null }) return true
         if (action == "jump") return Key.Spacebar in keys || Key.DirectionUp in keys || Key.W in keys
         if (action == "action") return Key.X in keys || Key.F in keys || Key.Enter in keys
         return false
     }
+    /** Jump pressed this frame (the button, a tap, Space, or a control scheme's jump). */
+    fun jumpPressed() = "jump" in pressed || "virt:jump" in pressed
+    /** A real swipe this frame (not an arrow key, which also counts as one). */
+    fun swiped(dir: String) = "swipe:$dir" in pressed && keysDown.none { k -> when (dir) { "left" -> k == Key.DirectionLeft || k == Key.A; "right" -> k == Key.DirectionRight || k == Key.D; "up" -> k == Key.DirectionUp || k == Key.W; else -> k == Key.DirectionDown || k == Key.S } }
     fun hasButton(action: String) = buttons.any { it.action == action } || objects.any { o -> !o.dead && o.part<TouchKey>()?.let { strOf(it.p["action"], "jump") == (if (action == "action") "fire" else action) } == true }
     /** The screen a HUD object belongs to: its own "Show when", or its nearest parent's (title, play, over, win, paused, always). */
     fun screenOfUi(o: GameObject): String { var q: GameObject? = o; while (q != null) { if (q.showWhen != "always") return q.showWhen; q = q.parent }; return "always" }
@@ -881,10 +898,14 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
         }
         if (tapTargets.any { !it.dead && it.ui && hitsAt(it, at) }) { p.role = "ui"; taps.add(Tap(at, toWorld(at), id)); return }
         val zone = strOf(settings["joystickZone"], "left half")
-        if (settings["joystick"] == true && stick == null && (zone == "anywhere" || at.x < screen.width / 2)) { p.role = "stick"; stick = p; return }
+        if (settings["joystick"] == true && stick == null && (zone == "anywhere" || at.x < screen.width / 2)) {
+            p.role = "stick"; stick = p
+            stickBase = if (settings["joystickMode"] == "fixed") { val r = (50.0 * uiK).toFloat(); Offset(safeLeft + 30f + r, screen.height - safeBottom - 30f - r) } else null
+            return
+        }
         taps.add(Tap(at, toWorld(at), id))
         pressed.add("tap")
-        if (!hasButton("jump")) pressed.add("jump") // (no jump button: a tap jumps)
+        if (!hasButton("jump") && !noTapJump) pressed.add("jump") // (no jump button: a tap jumps, unless the fingers steer)
     }
     fun pointerMove(id: Long, at: Offset) {
         val p = pointers[id] ?: return
@@ -906,6 +927,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     /** One step of the game. */
     fun step(dt: Double) {
         if (screen != laidOutFor) { laidOutFor = screen; layoutButtons() }
+        keysDown.clear(); for (k in keys) if (k !in keysBefore) keysDown.add(k)
         for (k in keys) {
             if (k in keysBefore) continue
             if (k == Key.Spacebar || k == Key.DirectionUp || k == Key.W) pressed.add("jump")
@@ -968,7 +990,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
         if (settings["saveProgress"] == true && floor(time * 2) != floor((time - dt) * 2)) store("pocket.save.$saveKey", toJsonValue(vars).toString())
         endFrame()
     }
-    private fun endFrame() { taps.clear(); downs.clear(); ups.clear(); pressed.clear(); dragDelta = Offset.Zero; frame++ }
+    private fun endFrame() { taps.clear(); downs.clear(); ups.clear(); pressed.clear(); dragDelta = Offset.Zero; extraX = 0.0; extraY = 0.0; virtHeld.clear(); frame++ }
     private fun stepTweens(dt: Double) {
         for (t in tweens.toList()) {
             if (t.o.dead) { tweens.remove(t); continue }
@@ -1025,13 +1047,54 @@ private fun keepIn(e: GameObject, g: PocketGame) {
 }
 private fun dist(ax: Double, ay: Double, bx: Double, by: Double) = hypot(bx - ax, by - ay)
 
-/** Move: arrow keys / WASD, the joystick, and dragging on the screen (the object follows the finger's movement). */
+/** Puts the Fire (or Jump) button on screen for run / dash, labelled for what it does. */
+private fun runDashButtons(g: PocketGame, runWith: String, dashWith: String) {
+    for ((use, word) in listOf(runWith to "RUN", dashWith to "DASH")) {
+        if (use == "action" && g.settings["actionButton"] != true) { g.settings["actionButton"] = true; if (strOf(g.settings["actionLabel"], "FIRE") == "FIRE") g.settings["actionLabel"] = word; g.layoutButtons() }
+        if (use == "jump" && g.settings["jumpButton"] != true) { g.settings["jumpButton"] = true; if (strOf(g.settings["jumpLabel"], "JUMP") == "JUMP") g.settings["jumpLabel"] = word; g.layoutButtons() }
+    }
+}
+private fun shiftHeld(g: PocketGame) = Key.ShiftLeft in g.keys || Key.ShiftRight in g.keys
+
+/** Move: arrow keys / WASD, the joystick, and dragging on the screen (the object follows the finger's movement); run and dash. */
 class Move(p: JsonMap) : Component(p) {
+    private var dashT = 0.0; private var dashCd = 0.0; private var dashX = 1.0; private var dashY = 0.0; private var lastX = 1.0; private var lastY = 0.0; private var lastTap = -9.0
+    override fun start(e: GameObject, g: PocketGame) = runDashButtons(g, s("runWith", "off"), s("dashWith", "off"))
     override fun update(e: GameObject, dt: Double, g: PocketGame) {
-        val speed = slowed(e, n("speed", 260.0)); val axes = s("axes", "all"); val control = s("control", "both")
+        val axes = s("axes", "all"); val control = s("control", "both")
         var a = if (control == "drag") Offset.Zero else g.axis()
         if (axes == "vertical") a = Offset(0f, a.y)
         if (axes == "horizontal") a = Offset(a.x, 0f)
+        val l = a.getDistance(); if (l > 0.1f) { lastX = a.x / l.toDouble(); lastY = a.y / l.toDouble() }
+        // run
+        val shift = shiftHeld(g)
+        val running = when (s("runWith", "off")) { "edge" -> l > 0.9f || shift; "action" -> g.isDown("action") || shift; "jump" -> g.isDown("jump"); "always" -> !shift; else -> false }
+        val speed = slowed(e, n("speed", 260.0)) * (if (running) n("runSpeed", 1.7) else 1.0)
+        // dash: a quick burst the way it's going
+        dashCd -= dt
+        val dw = s("dashWith", "off")
+        if (dw != "off") {
+            var go = Key.K in g.keysDown; var dx = lastX; var dy = lastY
+            when (dw) {
+                "action" -> if ("action" in g.pressed || "virt:action" in g.pressed) go = true
+                "jump" -> if (g.jumpPressed()) go = true
+                "doubletap" -> if (g.taps.isNotEmpty()) { if (g.time - lastTap < 0.3) { go = true; lastTap = -9.0 } else lastTap = g.time }
+                "swipe" -> for ((k, v) in listOf("left" to (-1.0 to 0.0), "right" to (1.0 to 0.0), "up" to (0.0 to -1.0), "down" to (0.0 to 1.0))) if (g.swiped(k)) { go = true; dx = v.first; dy = v.second }
+            }
+            if (axes == "horizontal") dy = 0.0
+            if (axes == "vertical") dx = 0.0
+            if (go && dashCd <= 0 && dashT <= 0 && (dx != 0.0 || dy != 0.0)) {
+                dashX = dx; dashY = dy; dashT = n("dashTime", 0.15).let { if (it > 0) it else 0.15 }; dashCd = n("dashCooldown", 0.6) + dashT
+                if (p["dashTrail"] != false) g.burst(e.x, e.y, Color.White, 10)
+                g.buzz()
+            }
+        }
+        if (dashT > 0) {
+            dashT -= dt; val ds = n("dashSpeed", 800.0)
+            e.x += dashX * ds * dt; e.y += dashY * ds * dt
+            if (p["keepInView"] != false) keepIn(e, g)
+            return
+        }
         val b = e.body
         if (b != null && b.isDynamic && g.gravity != 0.0 && b.gravityScale != 0.0) b.vx = a.x * speed // (with gravity: left and right only)
         else { e.x += a.x * speed * dt; e.y += a.y * speed * dt }
@@ -1046,65 +1109,264 @@ class Move(p: JsonMap) : Component(p) {
     }
 }
 
-/** Platformer: run and jump with gravity (the joystick or arrows, and the jump button, a tap or space). */
+/** Platformer: run and jump with gravity (the joystick or arrows, and the jump button, a tap or space). More moves: air jumps, a jump just after a
+ *  ledge or just before landing, wall slide and wall jump, run, dash, dropping through one-way platforms and ground pound. */
 class Platformer(p: JsonMap) : Component(p) {
-    private var coyote = 0.0; private var jumps = 0; private var rising = false
+    private var coyote = 0.0; private var airUsed = 0; private var rising = false; private var buffer = 0.0; private var facing = 1.0
+    private var dashT = 0.0; private var dashCd = 0.0; private var dashDir = 1.0; private var airDash = 0; private var gs0 = 1.0
+    private var wallLock = 0.0; private var pounding = false; private var wasDown = false; private var lastTap = -9.0
+    private var lastKey: Key? = null; private var lastKeyT = -9.0; private var lastWall = 0; private var wallMem = 0.0; private var bodyMax = 0.0
+    var running = false; private set
+    var sliding = false; private set
+    val dashing get() = dashT > 0
+    private val airJumps get() = max(n("airJumps").roundToInt(), if (on("doubleJump")) 1 else 0)
+    /** A quick burst sideways that ignores gravity (scripts can call it too). */
+    fun dash(e: GameObject, g: PocketGame, dir: Double): Boolean {
+        val b = e.body ?: return false
+        if (dashCd > 0 || dashing) return false
+        if (!b.grounded && airDash >= n("airDashes", 1.0).roundToInt()) return false
+        if (!b.grounded) airDash++
+        dashDir = if (dir == 0.0) facing else sign(dir); dashT = n("dashTime", 0.15).let { if (it > 0) it else 0.15 }; dashCd = n("dashCooldown", 0.5) + dashT
+        gs0 = b.gravityScale; b.gravityScale = 0.0; b.vy = 0.0; pounding = false
+        if (p["dashTrail"] != false) g.burst(e.x, e.y, Color.White, 10)
+        g.buzz()
+        return true
+    }
+    private fun endDash(e: GameObject) { if (!dashing) return; dashT = 0.0; e.body?.let { it.gravityScale = gs0; it.vx *= 0.5 } }
     override fun start(e: GameObject, g: PocketGame) {
-        e.ensureBody("dynamic")
+        e.ensureBody("dynamic"); bodyMax = e.body!!.maxFall // (a Rigidbody's own max fall speed)
         if (g.gravity == 0.0) g.gravity = 1600.0
         if (g.settings["controls"] == null) g.wantJoystick()
+        runDashButtons(g, s("runWith", "off").let { if (it == "action") it else "off" }, s("dashWith", "off").let { if (it == "action") it else "off" })
     }
     override fun update(e: GameObject, dt: Double, g: PocketGame) {
-        val a = g.axis(); val b = e.ensureBody("dynamic"); val speed = slowed(e, n("speed", 240.0)); val accel = n("accel")
-        val ctl = if (b.grounded) 1.0 else n("airControl", 1.0).coerceIn(0.0, 1.0)
-        val want = a.x * speed
-        b.vx = if (accel > 0) b.vx + (want - b.vx).coerceIn(-accel * ctl * dt, accel * ctl * dt) else b.vx + (want - b.vx) * ctl
-        if (b.grounded) { coyote = 0.12; jumps = 0 } else coyote -= dt
-        if ("jump" in g.pressed && (coyote > 0 || (on("doubleJump") && jumps < 2))) {
-            b.vy = -n("jump", 620.0); coyote = 0.0; jumps = if (jumps == 0) 1 else jumps + 1; rising = true
-            g.sfx("jump")
+        val a = g.axis(); val b = e.ensureBody("dynamic"); val accel = n("accel"); val keys = g.keys; val kd = g.keysDown
+        if (a.x != 0f) facing = sign(a.x.toDouble())
+        // run
+        val shift = shiftHeld(g); val rw = s("runWith", "off")
+        running = when (rw) { "edge" -> abs(a.x) > 0.9f || shift; "action" -> g.isDown("action") || shift; "always" -> !shift; else -> shift && rw != "off" }
+        val speed = slowed(e, n("speed", 240.0)) * (if (running) n("runSpeed", 1.6) else 1.0)
+        // dash
+        dashCd -= dt
+        val dw = s("dashWith", "off")
+        if (dw != "off") {
+            var go = 0.0
+            if (Key.X in kd || Key.K in kd) go = facing
+            if (dw == "action" && ("action" in g.pressed || "virt:action" in g.pressed)) go = facing
+            if (dw == "swipe") { if (g.swiped("left")) go = -1.0 else if (g.swiped("right")) go = 1.0 }
+            if (dw == "doubletap") {
+                if (g.taps.isNotEmpty()) { if (g.time - lastTap < 0.3) { go = facing; lastTap = -9.0 } else lastTap = g.time }
+                for ((k, d) in listOf(Key.DirectionLeft to -1.0, Key.A to -1.0, Key.DirectionRight to 1.0, Key.D to 1.0)) if (k in kd) {
+                    if (lastKey == k && g.time - lastKeyT < 0.3) { go = d; lastKey = null } else { lastKey = k; lastKeyT = g.time }
+                }
+            }
+            if (go != 0.0) dash(e, g, go)
         }
-        if (rising && p["variableJump"] != false && g.hasButton("jump") && !g.isDown("jump") && b.vy < 0) { b.vy *= 0.5; rising = false } // let go early: a short hop
+        if (dashing) {
+            dashT -= dt; b.vx = dashDir * n("dashSpeed", 800.0); b.vy = 0.0
+            if (dashT <= 0) { dashT = 0.0001; endDash(e) }
+        } else if (wallLock > 0) wallLock -= dt // just sprang off a wall: the push holds for a moment
+        else {
+            val ctl = if (b.grounded) 1.0 else n("airControl", 1.0).coerceIn(0.0, 1.0)
+            val want = a.x * speed
+            if (!pounding) b.vx = if (accel > 0) b.vx + (want - b.vx).coerceIn(-accel * ctl * dt, accel * ctl * dt) else b.vx + (want - b.vx) * ctl
+        }
+        if (b.grounded) {
+            coyote = n("coyoteTime", 0.12); airUsed = 0; airDash = 0
+            if (pounding) { pounding = false; g.shake = max(g.shake, 10.0); g.burst(e.x, e.y + e.half.h, Color.White, 14); g.buzz(true) }
+        } else coyote -= dt
+        // down: drop through a one-way platform, or a ground pound in the air
+        val downNow = a.y > 0.6f || Key.S in keys || Key.DirectionDown in keys
+        val downHit = (downNow && !wasDown) || "swipe:down" in g.pressed; wasDown = downNow
+        if (downHit) {
+            if (b.grounded && p["dropThrough"] != false && b.groundedOn?.body?.oneWay == true) { b.dropUntil = g.time + 0.25; b.grounded = false; coyote = 0.0; e.y += 2 }
+            else if (!b.grounded && on("groundPound") && !dashing) { pounding = true; b.vx = 0.0 }
+        }
+        if (pounding) b.vy = n("poundSpeed", 1400.0)
+        // jump (with a buffer: pressed a little early still counts)
+        if (g.jumpPressed()) buffer = max(n("jumpBuffer", 0.12), dt * 1.5)
+        if (b.wall != 0) { lastWall = b.wall; wallMem = 0.1 } else wallMem -= dt // (it only touches while pressing in: remember the wall for a moment)
+        val wall = if (!b.grounded && wallMem > 0) lastWall else 0
+        if (buffer > 0) {
+            var did = ""
+            if (coyote > 0) did = "ground"
+            else if (wall != 0 && on("wallJump")) { did = "wall"; b.vx = -wall * n("wallJumpPush", 320.0); facing = -wall.toDouble(); wallLock = 0.18; airUsed = 0 }
+            else if (airUsed < airJumps) { did = "air"; airUsed++ }
+            if (did.isNotEmpty()) {
+                endDash(e); pounding = false
+                b.vy = -n("jump", 620.0); coyote = 0.0; buffer = 0.0; rising = true
+                g.sfx("jump")
+            }
+        }
+        buffer -= dt
+        // let go of the jump button early for a shorter hop
+        val hasBtn = g.hasButton("jump") || g.noTapJump || keys.isNotEmpty()
+        if (rising && p["variableJump"] != false && hasBtn && !g.isDown("jump") && b.vy < 0) { b.vy *= 0.5; rising = false }
         if (b.vy >= 0) rising = false
-        if (p["faceDirection"] != false) faceX(e, a.x.toDouble())
+        // wall slide: falling while touching a wall goes slowly (held on until you push away)
+        if (wall != 0 && on("wallSlide") && b.vy > 0 && !pounding && !dashing && wallLock <= 0 && a.x * wall >= 0) {
+            val sl = n("wallSlideSpeed", 120.0).let { if (it > 0) it else 120.0 }
+            if (b.vy > sl) b.vy = sl
+            b.maxFall = sl // (the physics keeps it there after gravity)
+            if (b.vx * wall < 40) b.vx = wall * 40.0
+            facing = -wall.toDouble(); sliding = true
+        } else { sliding = false; b.maxFall = if (pounding) 0.0 else if (n("maxFall") > 0) n("maxFall") else bodyMax }
+        if (n("maxFall") > 0 && b.vy > n("maxFall") && !pounding) b.vy = n("maxFall")
+        if (p["faceDirection"] != false && (a.x != 0f || dashing || wallLock > 0)) faceX(e, facing)
         if (e.y > g.viewH + 600) g.hurt(e, s("onFall", "respawn"))
     }
 }
 
-/** Character Controller 2D: one of many ways to move (top-down, side to side, platformer, runner, flappy, car, spaceship, tank, tap to move, follow the finger). */
+// ---- Character Controller 2D: how the player moves (the movement type) and how you control it (the control scheme) ----
+/** The platformer's extra moves (and run & dash, which top-down movement has too) the controller hands to Platformer / Move. */
+private val CONTROLLER_EXTRAS = listOf("doubleJump", "airJumps", "coyoteTime", "jumpBuffer", "maxFall", "wallSlide", "wallSlideSpeed", "wallJump", "wallJumpPush",
+    "runWith", "runSpeed", "dashWith", "dashSpeed", "dashTime", "dashCooldown", "airDashes", "dashTrail", "dropThrough", "groundPound", "poundSpeed")
+private val JUMPY = setOf("platformer", "jetpack"); private val TURNY = setOf("car", "spaceship", "tank")
+
+/** Sets up the screen for a control scheme: which joystick, D-pad, arrows or buttons show (for this play). */
+fun controlScheme(g: PocketGame, sch: String, mode: String) {
+    val st = g.settings; val jumpy = mode in JUMPY
+    st["joystick"] = false; st["controls"] = "none"; g.noTapJump = false
+    when (sch) {
+        // (tilt: this runtime reads no motion sensor, so a joystick, the same as the engine on a computer)
+        "joystick", "fixedStick", "tilt" -> { st["joystick"] = true; st["controls"] = "joystick"; st["joystickMode"] = if (sch == "fixedStick") "fixed" else if (st["joystickMode"] == "fixed") "floating" else (st["joystickMode"] ?: "floating") }
+        "dpad", "arrows" -> st["controls"] = sch
+        "sides", "toward" -> g.noTapJump = true // the fingers steer: a tap isn't a jump
+        "swipe" -> g.noTapJump = jumpy // (a tap jumps when the finger lifts, so a swipe doesn't)
+    }
+    st["jumpButton"] = jumpy && sch in setOf("joystick", "fixedStick", "dpad", "arrows", "tilt")
+    if (mode == "jetpack" && st["jumpButton"] == true && strOf(st["jumpLabel"], "JUMP") == "JUMP") st["jumpLabel"] = "FLY"
+    g.layoutButtons()
+}
+/** A swipe scheme's direction (it keeps going until the next swipe). */
+class SchemeState { var dx = 0.0; var dy = 0.0; var head: Double? = null; var go = false }
+/** Each frame: turns the fingers into the same joystick push and jump the movement already understands (touch sides, hold where to go, swipe). */
+fun steerScheme(e: GameObject, g: PocketGame, sch: String, mode: String, m: SchemeState) {
+    val w = g.screen.width.toDouble(); val h = g.screen.height.toDouble(); val jumpy = mode in JUMPY; val turny = mode in TURNY
+    val free = g.pointers.values.filter { it.role == "free" }
+    val newDowns = g.downs.filter { it.role == "free" }
+    val quickTaps = g.ups.filter { it.role == "free" && g.time - it.t0 < 0.35 && (it.at - it.start).getDistance() < 20f } // (a tap, when the finger lifts)
+    fun steerTo(ang: Double, d: Double) { var t = ang - e.rz * DEG; t = atan2(sin(t), cos(t)); g.extraX += (t * 2).coerceIn(-1.0, 1.0); if (d > 30) g.extraY -= if (abs(t) < 1.2) 1.0 else 0.35 }
+    when (sch) {
+        "sides" -> {
+            var l = false; var r = false; var u = false; var dn = false
+            for (q in free) {
+                val x = q.at.x.toDouble(); val y = q.at.y.toDouble()
+                if (jumpy) { if (x > w / 2) g.virtHeld.add("jump") else if (x < w / 4) l = true else r = true }
+                else if (turny || mode == "sideToSide") { if (x < w / 2) l = true else r = true }
+                else { if (x < w / 3) l = true else if (x > w * 2 / 3) r = true; if (y < h / 3) u = true else if (y > h * 2 / 3) dn = true } // top-down: nine zones, like a big D-pad
+            }
+            if (turny) { if (l && r) g.extraY -= 1 else if (l || r) { g.extraX += if (r) 1.0 else -1.0; if (mode != "tank") g.extraY -= 1 } }
+            else {
+                g.extraX += (if (r) 1.0 else 0.0) - (if (l) 1.0 else 0.0)
+                if (!jumpy && mode != "sideToSide") g.extraY += (if (dn) 1.0 else 0.0) - (if (u) 1.0 else 0.0)
+            }
+            if (jumpy && newDowns.any { it.at.x > w / 2 }) g.pressed.add("virt:jump")
+        }
+        "toward" -> {
+            val o = g.toScreen(e.x, e.y)
+            free.firstOrNull()?.let { q ->
+                val dx = (q.at.x - o.x).toDouble(); val dy = (q.at.y - o.y).toDouble(); val d = hypot(dx, dy)
+                if (jumpy) { if (abs(dx) > 18) g.extraX += (dx / 60).coerceIn(-1.0, 1.0); if (dy < -50) g.virtHeld.add("jump") }
+                else if (turny) steerTo(atan2(dy, dx), d)
+                else if (d > 12) { val k = min(1.0, d / 70); g.extraX += dx / d * k; if (mode != "sideToSide") g.extraY += dy / d * k }
+            }
+            if (mode == "platformer" && newDowns.any { it.at.y < o.y - 50 }) g.pressed.add("virt:jump") // touch above it: jump
+        }
+        "swipe" -> {
+            for ((k, v) in listOf("left" to (-1.0 to 0.0), "right" to (1.0 to 0.0), "up" to (0.0 to -1.0), "down" to (0.0 to 1.0))) {
+                if (!g.swiped(k)) continue
+                if (jumpy || mode == "sideToSide") { if (v.first != 0.0) m.dx = v.first else if (k == "down") m.dx = 0.0 else if (jumpy) g.pressed.add("virt:jump") } // (a swipe up jumps)
+                else if (turny) { m.head = atan2(v.second, v.first); m.go = true }
+                else { m.dx = v.first; m.dy = v.second }
+            }
+            if (quickTaps.isNotEmpty()) { if (jumpy) g.pressed.add("virt:jump") else { m.dx = 0.0; m.dy = 0.0; m.go = false } } // a tap jumps, or stops it
+            if (turny) { val hd = m.head; if (m.go && hd != null) steerTo(hd, 100.0) }
+            else { g.extraX += m.dx; g.extraY += m.dy }
+        }
+    }
+}
+
+/** Character Controller 2D: one of many ways to move (top-down, side to side, platformer, runner, flappy, car, spaceship, tank, tap to move, follow the finger,
+ *  grid steps, jetpack, lanes, slingshot), and one of many ways to control it (joystick, fixed joystick, D-pad, arrows, touching the sides, holding where to go,
+ *  swipes, tilt, keys only). */
 class Controller2D(p: JsonMap) : Component(p) {
     private val mode = s("mode", "topdown8")
+    private val sch = s("input", "auto")
+    private val custom = sch != "auto" && mode !in setOf("runner", "flappy", "tapToMove", "followFinger", "grid", "lanes", "slingshot")
+    private val extras: Map<String, Any?> = CONTROLLER_EXTRAS.filter { p.containsKey(it) }.associateWith { p[it] }
+    private val moveCtl = if (custom) "joystick" else "both" // a chosen control scheme steers on its own (no dragging the player as well)
     private val inner: Component? = when (mode) {
-        "topdown8" -> Move(mapOf("speed" to (p["speed"] ?: 240.0), "control" to "both", "axes" to "all", "keepInView" to (p["keepInView"] ?: true)))
-        "sideToSide" -> Move(mapOf("speed" to (p["speed"] ?: 240.0), "control" to "both", "axes" to "horizontal", "keepInView" to (p["keepInView"] ?: true)))
-        "platformer" -> Platformer(mapOf("speed" to (p["speed"] ?: 240.0), "jump" to (p["jump"] ?: 620.0), "onFall" to (p["onFall"] ?: "respawn")))
+        "topdown8" -> Move(extras + mapOf("speed" to (p["speed"] ?: 240.0), "control" to moveCtl, "axes" to "all", "keepInView" to (p["keepInView"] ?: true), "face2D" to (if (on("faceMove")) "rotate" else "none")))
+        "sideToSide" -> Move(extras + mapOf("speed" to (p["speed"] ?: 240.0), "control" to moveCtl, "axes" to "horizontal", "keepInView" to (p["keepInView"] ?: true)))
+        "platformer" -> Platformer(extras + mapOf("speed" to (p["speed"] ?: 240.0), "jump" to (p["jump"] ?: 620.0), "onFall" to (p["onFall"] ?: "respawn")))
+        "lanes" -> SwipeLanes(mapOf("distance" to n("laneWidth", 110.0), "lanes" to n("lanes", 3.0), "jump" to 0.0))
         "grid" -> GridStep(mapOf("tile" to (p["tile"] ?: 40.0)))
         else -> null
     }
+    private val scheme = SchemeState()
     private var heading = 0.0; private var speed = 0.0; private var target: Offset? = null
+    private var fuel = 1.0; private var pullId: Long? = null; private var pullAt = Offset.Zero; private var aim: (DrawScope.() -> Unit)? = null
     override fun start(e: GameObject, g: PocketGame) {
-        inner?.let { if (mode != "grid") g.wantJoystick(); if (mode == "platformer") g.wantButton("jump"); it.start(e, g); return }
-        val gravity = mode == "runner" || mode == "flappy"
+        scheme.dx = 0.0; scheme.dy = 0.0; scheme.go = false
+        inner?.let {
+            if (custom) controlScheme(g, sch, mode)
+            else { if (mode != "grid" && mode != "lanes") g.wantJoystick(); if (mode == "platformer") g.wantButton("jump") }
+            it.start(e, g); return
+        }
+        val gravity = mode == "runner" || mode == "flappy" || mode == "jetpack" || (mode == "slingshot" && p["slingGravity"] != false)
         val b = e.ensureBody("dynamic")
         b.gravityScale = if (gravity) 1.0 else 0.0
         if (gravity && g.gravity == 0.0) g.gravity = 1600.0
-        heading = e.rz * DEG
+        heading = e.rz * DEG; fuel = 1.0; pullId = null
         if (e.data["respawn"] == null) e.data["respawn"] = Offset(e.x.toFloat(), e.y.toFloat())
-        if (mode in listOf("topdown4", "car", "spaceship", "tank")) g.wantJoystick()
-        if (mode == "runner") g.wantButton("jump")
+        if (mode == "slingshot") {
+            aim?.let { g.overlays.remove(it) }
+            val f: DrawScope.() -> Unit = { // the aim: dots the way it will fly (longer for a harder pull), and a line back to the finger
+                if (pullId != null && !e.dead) {
+                    val v = aimVec(e, g); val o = g.toScreen(e.x, e.y); val k = hypot(v.first, v.second) / n("launch", 1000.0)
+                    if (k >= 0.05) {
+                        val grav = if (p["slingGravity"] == false) 0.0 else (if (g.gravity == 0.0) 1600.0 else g.gravity) * (e.body?.gravityScale ?: 1.0); val z = g.zoom
+                        for (i in 1..14) {
+                            val t = i * 0.045
+                            val at = Offset((o.x + v.first * t * z).toFloat(), (o.y + (v.second * t + 0.5 * grav * t * t) * z).toFloat())
+                            drawCircle(Color.White.copy(alpha = ((1 - i / 16f) * 0.9f)), 3.2f - i * 0.12f, at)
+                        }
+                        drawLine(Color.White.copy(alpha = 0.5f), o, pullAt, strokeWidth = 2f)
+                    }
+                }
+            }
+            aim = f; g.overlays.add(f)
+        }
+        if (custom) controlScheme(g, sch, mode)
+        else {
+            if (mode in listOf("topdown4", "car", "spaceship", "tank", "jetpack")) g.wantJoystick()
+            if (mode == "runner" || mode == "jetpack") { g.wantButton("jump"); if (mode == "jetpack" && strOf(g.settings["jumpLabel"], "JUMP") == "JUMP") { g.settings["jumpLabel"] = "FLY"; g.layoutButtons() } }
+        }
+    }
+    override fun gone(e: GameObject, g: PocketGame) { aim?.let { g.overlays.remove(it) } }
+    /** The launch speed for the pull so far: away from the finger, stronger the further you pull (up to "Pull for full power"). */
+    private fun aimVec(e: GameObject, g: PocketGame): Pair<Double, Double> {
+        if (pullId == null) return 0.0 to 0.0
+        val o = g.toScreen(e.x, e.y); val dx = (o.x - pullAt.x).toDouble(); val dy = (o.y - pullAt.y).toDouble(); val l = hypot(dx, dy)
+        if (l < 1) return 0.0 to 0.0
+        val k = min(1.0, l / max(20.0, n("pull", 160.0))) * n("launch", 1000.0)
+        return dx / l * k to dy / l * k
     }
     private fun keep(e: GameObject, g: PocketGame) { if (p["keepInView"] != false) keepIn(e, g) }
     private fun face(e: GameObject, vx: Double, vy: Double) { if (on("faceMove") && hypot(vx, vy) > 5) e.rz = atan2(vy, vx) / DEG }
     override fun update(e: GameObject, dt: Double, g: PocketGame) {
+        if (custom && g.state == "play") steerScheme(e, g, sch, mode, scheme)
         inner?.let { it.update(e, dt, g); return }
         val a = g.axis(); val ax = a.x.toDouble(); val ay = a.y.toDouble(); val b = e.ensureBody("dynamic"); val sp = slowed(e, n("speed", 240.0)); val damp = max(0.0, 1 - n("friction", 2.0) * dt)
         val turn = n("turn", 200.0) * DEG; val accel = n("accel", 600.0)
-        val jumpNow = "tap" in g.pressed || "btn:jump" in g.pressed || "jump" in g.pressed
+        val jumpNow = "tap" in g.pressed || "btn:jump" in g.pressed || g.jumpPressed()
         when (mode) {
             "topdown4" -> {
                 var x = ax; var y = ay
                 if (abs(x) > abs(y)) y = 0.0 else x = 0.0
                 b.vx = sign(x) * (if (abs(x) > 0.3) sp else 0.0); b.vy = sign(y) * (if (abs(y) > 0.3) sp else 0.0)
+                if (!custom) { var dx = g.dragDelta.x.toDouble(); var dy = g.dragDelta.y.toDouble(); if (abs(dx) > abs(dy)) dy = 0.0 else dx = 0.0; e.x += dx / g.zoom; e.y += dy / g.zoom }
                 face(e, b.vx, b.vy); keep(e, g)
             }
             "runner" -> {
@@ -1126,7 +1388,7 @@ class Controller2D(p: JsonMap) : Component(p) {
             }
             "spaceship" -> {
                 heading += ax * turn * dt
-                val thrust = max(0.0, -ay) + (if (g.pointers.values.any { it.role == "free" }) 1.0 else 0.0)
+                val thrust = max(0.0, -ay) + (if (!custom && g.stick == null && g.pointers.values.any { it.role == "free" }) 1.0 else 0.0)
                 b.vx = b.vx * damp + cos(heading) * thrust * accel * dt; b.vy = b.vy * damp + sin(heading) * thrust * accel * dt
                 val v = hypot(b.vx, b.vy)
                 if (v > sp) { b.vx *= sp / v; b.vy *= sp / v }
@@ -1146,6 +1408,38 @@ class Controller2D(p: JsonMap) : Component(p) {
                 val f = g.pointers.values.firstOrNull { it.role == "free" }
                 if (f != null) { val w = g.toWorld(f.at); val k = min(1.0, dt * (sp / 20)); b.vx = (w.x - e.x) * k / max(dt, 1e-3); b.vy = (w.y - e.y) * k / max(dt, 1e-3) } else { b.vx = 0.0; b.vy = 0.0 }
                 keep(e, g)
+            }
+            "jetpack" -> {
+                b.vx += (ax * sp - b.vx) * min(1.0, dt * 10)
+                val hold = g.isDown("jump") || (!g.hasButton("jump") && !custom && g.pointers.values.any { it.role == "free" })
+                val tank = n("fuel"); val grav = if (g.gravity == 0.0) 1600.0 else g.gravity
+                if (b.grounded) fuel = min(1.0, fuel + dt / max(0.5, tank * 0.5))
+                if (hold && (tank <= 0 || fuel > 0)) {
+                    b.vy = max(b.vy - grav * 2.1 * dt, -n("jump", 620.0) * 0.75)
+                    if (tank > 0) fuel = max(0.0, fuel - dt / tank)
+                    if (Random.nextDouble() < dt * 30) g.burst(e.x, e.y + e.half.h, Color(0xFFFFB347), 2, 0.4)
+                }
+                if (tank > 0) g.setVar("fuel", (fuel * 100).roundToInt().toDouble())
+                if (p["keepInView"] != false && e.y < g.viewBounds.top) { e.y = g.viewBounds.top; b.vy = max(0.0, b.vy) }
+                faceX(e, ax)
+                if (e.y > g.viewBounds.bottom + 300) g.hurt(e, s("onFall", "respawn"))
+            }
+            "slingshot" -> {
+                val noGrav = p["slingGravity"] == false
+                val still = hypot(b.vx, b.vy) < 25 && (noGrav || b.grounded || b.gravityScale == 0.0)
+                if (noGrav) { val k = max(0.0, 1 - n("friction", 1.2).let { if (it > 0) it else 1.2 } * dt); b.vx *= k; b.vy *= k } // rolling to a stop (golf)
+                val id = pullId
+                if (id == null) {
+                    val d = g.downs.firstOrNull { it.role == "free" }
+                    if (d != null && (!on("waitStop", true) || still)) {
+                        val o = g.toScreen(e.x, e.y); val r = max(30.0, max(e.half.w, e.half.h) * g.zoom * 1.6)
+                        if (s("grab", "anywhere") != "object" || (d.at - o).getDistance() < r) { pullId = d.id; pullAt = d.at }
+                    }
+                } else {
+                    val q = g.pointers[id]
+                    if (q != null) { pullAt = q.at; if (!noGrav && still) { b.vx = 0.0; b.vy = 0.0 } }
+                    else { val v = aimVec(e, g); pullId = null; if (hypot(v.first, v.second) > n("launch", 1000.0) * 0.05) { b.vx = v.first; b.vy = v.second; g.sfx("jump"); g.buzz() } }
+                }
             }
         }
     }
@@ -2673,10 +2967,13 @@ private fun DrawScope.drawGame(g: PocketGame, measurer: TextMeasurer) {
 private fun DrawScope.drawControls(g: PocketGame, measurer: TextMeasurer) {
     val st = g.stick
     if (st != null) {
-        val r = (50.0 * g.uiK).toFloat(); val d = st.at - st.start; val k = if (d.getDistance() > r) d / d.getDistance() * r else d
-        drawCircle(Color(0x33FFFFFF), r, st.start)
-        drawCircle(Color(0x55FFFFFF), r, st.start, style = Stroke(2f))
-        drawCircle(Color(0x88FFFFFF), r * 0.45f, st.start + k)
+        val r = (50.0 * g.uiK).toFloat(); val base = g.stickBase ?: st.start; val d = st.at - base; val k = if (d.getDistance() > r) d / d.getDistance() * r else d
+        drawCircle(Color(0x33FFFFFF), r, base)
+        drawCircle(Color(0x55FFFFFF), r, base, style = Stroke(2f))
+        drawCircle(Color(0x88FFFFFF), r * 0.45f, base + k)
+    } else if (g.settings["joystick"] == true && g.settings["joystickMode"] == "fixed") { // a fixed joystick always shows in its corner
+        val r = (50.0 * g.uiK).toFloat(); val at = Offset(g.safeLeft + 30f + r, g.screen.height - g.safeBottom - 30f - r)
+        drawCircle(Color(0x22FFFFFF), r, at); drawCircle(Color(0x44FFFFFF), r, at, style = Stroke(2f)); drawCircle(Color(0x55FFFFFF), r * 0.45f, at)
     } else if (g.settings["joystick"] == true && g.time < 4) {
         drawCircle(Color.White.copy(alpha = (0.12 * (1 - g.time / 4)).toFloat()), (50 * g.uiK).toFloat(), Offset(g.safeLeft + 90f, g.screen.height - g.safeBottom - 110f))
     }

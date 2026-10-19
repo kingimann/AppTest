@@ -350,6 +350,9 @@ Ready-made prefabs: Smart Enemy, Talking NPC, Inventory Key, Rain, Day & Night, 
   - **Filter** button next to search: Player, Logic, Physics, UI or Templates only. Search also matches tags and components.
   - Selecting an object in the Scene scrolls the Hierarchy to it, opening its folder, group or parent.
   - **Folders** (long-press → Put in Folder…), collapsible, with rename / hide all / remove.
+  - **Select several:** the tick button or *Select Several…* in a long-press menu. Then tap objects in the Scene to tick them, drag a box across empty space to tick everything inside, and drag a ticked object to move them all; ticked objects get a dashed outline.
+  - **Swipe a row left** for Hide, Copy and Delete. The **Hide UI** chip hides the game's UI in the Scene while you edit the world (the game keeps it).
+- **Project panel:** a **This game** tab (levels, objects by kind, scripts, favorites, recent, My Prefabs, imported pictures and sounds, data, items, quests, dialogues), a star to favorite any asset, a Recent list, search that finds your game's own objects, levels and scripts first, and folders and sorting for My Prefabs.
   - **Select** (the tick button next to search): tick several objects (tapping a ×N group ticks all its copies), then **Duplicate**, **Group** (puts them in a new parent so they move together), **Hide / Show**, **Folder** or **Delete** them at once. **All** ticks everything shown.
   - **Getting started** is a one-line strip with the next step (tap to see all steps).
   - Bring to front / send to back; a lock button on locked objects.
@@ -1008,7 +1011,7 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 ### Character Controller 2D
 
 - One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle), Grid steps, Jetpack (hold to fly up, with fuel), Lanes (swipe between lanes) and Slingshot (pull back and let go, with an aim line). Only the settings that matter for the chosen type are shown, with a tip for each.
-- **Controls:** best for the movement, a joystick (floating or fixed), a D-pad, ◀ ▶ buttons, touching the sides of the screen, holding where it should go, swipes, tilt or keyboard only. Space jumps, Shift runs, and X / K dash on a keyboard.
+- **Controls:** best for the movement, a joystick (floating or fixed), a D-pad, ◀ ▶ buttons, touching the sides of the screen, holding where it should go, swipes, tilt or keyboard only. Space jumps, Shift runs, X / K dash and J / Enter fire on a keyboard. **Game controllers** (Bluetooth or USB) steer with the left stick or D-pad: A jumps, B fires, X dashes, RB runs; *Game Settings › Keyboard & Controller* changes the keys and buttons (`pad:a`, `pad:start`…, also usable in Key pressed triggers).
 - **Platformer moves** (Platformer and the platformer type): air jumps, coyote time, jump buffer, max fall speed, wall slide and wall jump, run, dash (Fire, double tap or swipe; dashes in the air), down to drop through one-way platforms, and ground pound. These fire the *dash*, *wallJump*, *airJump* and *groundPound* events.
 
 ### Progress bars and in-game loading screens

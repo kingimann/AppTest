@@ -1022,7 +1022,7 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
       phone.replaceChildren(h('div', { class: 'npv-empty' }, 'Building the game…'));
       let src = await html(fresh); fresh = false;
       window.__pkPreviewBridge = onMessage;
-      const inject = (p) => `<script>window.__pkPlatform=${JSON.stringify(p)};window.ReactNativeWebView={postMessage:function(s){try{parent.__pkPreviewBridge(s)}catch(e){}}};${bridge.replace(/ true;$/, '')}</script>`;
+      const inject = (p) => `<script>window.__pkPlatform=${JSON.stringify(p)};window.__pkSafe=${JSON.stringify(p === 'ios' ? { top: 0, right: 0, bottom: 20, left: 0 } : { top: 0, right: 0, bottom: 0, left: 0 })};window.ReactNativeWebView={postMessage:function(s){try{parent.__pkPreviewBridge(s)}catch(e){}}};${bridge.replace(/ true;$/, '')}</script>`;
       url = { android: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('android'))], { type: 'text/html' })), ios: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('ios'))], { type: 'text/html' })) };
       src = null;
     }

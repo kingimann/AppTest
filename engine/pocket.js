@@ -25218,7 +25218,8 @@ export class Engine {
     if (this.canvas) { this.canvas.width = Math.round(this.width * this.dpr); this.canvas.height = Math.round(this.height * this.dpr); }
     if (this.uiCanvas) { this.uiCanvas.width = Math.round(this.width * this.uiDpr); this.uiCanvas.height = Math.round(this.height * this.uiDpr); }
     const cs = getComputedStyle(this.safeProbe);
-    this.deviceSafe = { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
+    const fake = typeof window.__pkSafe === 'object' && window.__pkSafe; // a phone preview in an iframe says its own notch / home bar (Safari on iPhone gives an iframe the real phone's)
+    this.deviceSafe = fake ? { top: +fake.top || 0, right: +fake.right || 0, bottom: +fake.bottom || 0, left: +fake.left || 0 } : { top: parseFloat(cs.paddingTop) || 0, right: parseFloat(cs.paddingRight) || 0, bottom: parseFloat(cs.paddingBottom) || 0, left: parseFloat(cs.paddingLeft) || 0 };
     this.updateSafe();
     const orient = this.width > this.height ? 'landscape' : 'portrait';
     if (this.orient && orient !== this.orient && !this.editing) this.scene?.emit('orientation', orient);

@@ -2,7 +2,7 @@
 // web view. Pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and data
 // collections become native code; anything else is left as a placeholder with a TODO. The runtime (state, data,
 // building blocks) is a fixed file (editor/native/…); the pages are generated from the project.
-import { appModel, PALETTES, iconFor, barIcons } from './appmodel.js';
+import { appModel, PALETTES, iconFor, barIcons, todoFor } from './appmodel.js';
 import { NAV_ART } from './navart.js';
 import { dartName, FLUTTER_VERSIONS } from './flutter.js';
 
@@ -45,6 +45,8 @@ function names(model) {
 // =============================================================================================================
 
 function dartValue(v) { return lit(v) ?? (v == null ? 'null' : ds(v)); }
+/** Named arguments that differ from the runtime's defaults: [[name, value, default]] → ", name: value…" (strings written with str). */
+export const optArgs = (pairs, eq, str, num = (v) => String(v)) => pairs.filter(([, v, d]) => v != null && v !== d).map(([k, v]) => `, ${k}${eq}${typeof v === 'string' ? str(v) : typeof v === 'number' ? num(v, k) : v}`).join(''); // (num gets the name too: Kotlin's Int / Double / Float)
 
 function dartElement(x, ind) {
   const pad = ' '.repeat(ind);
@@ -84,6 +86,18 @@ function dartElement(x, ind) {
     case 'people': return `People(collection: ${ds(x.collection)}${x.profilePage ? `, profilePage: ${ds(x.profilePage)}` : ''})`;
     case 'achievements': return 'const Achievements()';
     case 'trending': return `Trending(collection: ${ds(x.collection)}${x.searchVar ? `, searchVar: ${ds(x.searchVar)}` : ''})`;
+    case 'chart': return `PChart(data: const [${x.data.map((d) => `(${ds(d.label)}, ${ds(d.value)})`).join(', ')}]${optArgs([['chart', x.chart, 'columns'], ['track', x.track, ''], ['every', x.every, 1], ['points', x.points, 30], ['title', x.title, ''], ['max', x.max, 0], ['values', x.values, true], ['labels', x.labels, true], ['grid', x.grid, true], ['color', x.color, '#4fa3ff'], ['text', x.text, ''], ['bg', x.bg, ''], ['height', x.h, 200]], ': ', ds)})`;
+    case 'carousel': return `Carousel(${ds(x.var)}, const [\n${x.items.map((i) => `${pad}  CarouselItem(${ds(i.name)}, ${ds(i.icon)}, ${ds(i.value)}${i.lock ? `, lock: ${ds(i.lock)}` : ''}${i.desc ? `, desc: ${ds(i.desc)}` : ''}),`).join('\n')}\n${pad}]${optArgs([['cardWidth', x.cardWidth, 0.55], ['arrows', x.arrows, true], ['dots', x.dots, true], ['loop', x.loop, false], ['message', x.message, ''], ['card', x.card, '@card'], ['text', x.text, ''], ['accent', x.accent, '@accent'], ['height', x.h, 220]], ': ', ds)})`;
+    case 'pager': return `Pager(${ds(x.var)}, pages: [\n${x.children.map((c) => pad + '  ' + dartElement(c, ind + 2)).join(',\n')},\n${pad}]${optArgs([['dots', x.dots, true], ['dotColor', x.dotColor, '@accent'], ['loop', x.loop, false], ['auto', x.auto, 0], ['message', x.message, 'slide'], ['height', x.h, 320]], ': ', ds)})`;
+    case 'photogrid': return `PhotoGrid(${optArgs([['collection', x.collection, 'Posts'], ['field', x.field, 'media'], ['filter', x.filter, ''], ['columns', x.columns, 3], ['gap', x.gap, 2], ['radius', x.radius, 0], ['openPage', x.openPage, ''], ['message', x.message, '']], ': ', ds).slice(2)})`;
+    case 'like': return `LikeButton(${ds(x.var)}${optArgs([['countVar', x.countVar, 'likes'], ['icon', x.icon, 'heart'], ['message', x.message, ''], ['on', x.on, '#f91880'], ['off', x.off, '@sub'], ['text', x.text, '@sub']], ': ', ds)})`;
+    case 'ticker': return `Ticker(${ds(x.text)}${optArgs([['speed', x.speed, 60], ['direction', x.direction, 'left'], ['gap', x.gap, 60], ['size', x.size, 15], ['bg', x.bg, ''], ['color', x.color, ''], ['accent', x.accent, '#ffd23d'], ['height', x.h, 36]], ': ', ds)})`;
+    case 'timer': return `PTimer(${optArgs([['seconds', x.seconds, 30], ['countUp', x.countUp, false], ['look', x.look, 'ring'], ['format', x.format, 'seconds'], ['autoStart', x.autoStart, true], ['message', x.message, 'timer'], ['endMessage', x.endMessage, ''], ['endAction', x.endAction, 'nothing else'], ['warnAt', x.warnAt, 5], ['variable', x.var, ''], ['color', x.color, '@accent'], ['warn', x.warn, '#ff4d5e'], ['track', x.track, '@line'], ['text', x.text, ''], ['size', x.size, 120]], ': ', ds).slice(2)})`;
+    case 'skeleton': return `Skeleton(${optArgs([['layout', x.layout, 'avatar + lines'], ['lines', x.lines, 3], ['doneVar', x.doneVar, ''], ['radius', x.radius, 8]], ': ', ds).slice(2)})`;
+    case 'colors': return `ColorSwatches(${ds(x.var)}, const [${x.colors.map(ds).join(', ')}]${optArgs([['columns', x.columns, 5], ['shape', x.shape, 'circle'], ['gap', x.gap, 10], ['ring', x.ring, '@text'], ['message', x.message, '']], ': ', ds)})`;
+    case 'keypad': return `Keypad(${ds(x.var)}${optArgs([['maxLength', x.maxLength, 4], ['mask', x.mask, false], ['answer', x.answer, ''], ['rightMessage', x.rightMessage, ''], ['wrongMessage', x.wrongMessage, ''], ['enterMessage', x.enterMessage, ''], ['autoEnter', x.autoEnter, true], ['display', x.display, true], ['keyStyle', x.keyStyle, 'round'], ['keyColor', x.keyColor, '@field'], ['text', x.text, ''], ['accent', x.accent, '@good'], ['displayBg', x.displayBg, '']], ': ', ds)})`;
+    case 'selector': return `Selector(${ds(x.var)}, const [${x.options.map(ds).join(', ')}]${x.wrap ? '' : ', wrap: false'})`;
+    case 'overlay': return `PPopup(${optArgs([['mode', x.mode, 'popup'], ['openOn', x.openOn, 'popup'], ['closeOn', x.closeOn, 'close'], ['startOpen', x.startOpen, false], ['autoClose', x.autoClose, 0], ['tapCloses', x.tapCloses, false], ['dim', x.dim, true], ['handle', x.handle, true]], ': ', ds).slice(2)}, child: ${dartElement(x.box, ind + 2)})`;
     default: return `TodoBox(${ds(x.name)}, ${ds(x.type)}) /* TODO: build the ${x.type} natively */`;
   }
 }
@@ -157,7 +171,7 @@ Future<void> main() async {
     collections: const [${model.collections.map((c) => `\n      Collection(${ds(c.name)}, [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n    ' : ''}],
     bar: ${dartBar(model)},
     nav: ${dartNav(model)},
-    menu: ${dartMenu(model)},
+    menu: ${dartMenu(model)},${model.notify ? `\n    notify: const NotifyStyle(${optArgs([['listen', model.notify.listen, 'notify'], ['position', model.notify.position, 'top'], ['look', model.notify.look, 'card'], ['seconds', model.notify.seconds, 3], ['max', model.notify.max, 3], ['bg', model.notify.bg, '#1e2235'], ['text', model.notify.text, '#ffffff'], ['accent', model.notify.accent, '#ffd23d']], ': ', ds).slice(2)}),` : ''}
     stats: const [${model.stats.map((s) => `\n      Stat(${ds(s.var)}, ${ds(s.collection)}, ${ds(s.how)}${s.field && s.field !== 'field' ? `, field: ${ds(s.field)}` : ''}${s.filter ? `, filter: ${ds(s.filter)}` : ''}${s.format === 'money' ? ', money: true' : ''}),`).join('')}${model.stats.length ? '\n    ' : ''}],
   );
   await app.load();
@@ -208,7 +222,8 @@ Future<void> main() async {
 }
 
 function nativeReadme(model, o, kind) {
-  const todo = model.todo.length ? `\n## Still to build\n\nThese parts of your app have no native version yet. Each shows a placeholder (search the code for \`TODO\`):\n\n${[...new Map(model.todo.map((t) => [t.name, t])).values()].map((t) => `- **${t.name}** (${t.type})`).join('\n')}\n` : '';
+  const parts = todoFor(model, kind === 'flutter' ? 'flutter' : 'swift');
+  const todo = parts.length ? `\n## Still to build\n\nThese parts of your app have no native version yet. Each shows a placeholder (search the code for \`TODO\`):\n\n${[...new Map(parts.map((t) => [t.name, t])).values()].map((t) => `- **${t.name}** (${t.type})`).join('\n')}\n` : '';
   const flutter = kind === 'flutter';
   return `# ${model.name} (native ${flutter ? 'Flutter' : 'SwiftUI'} code)
 

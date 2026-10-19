@@ -2461,6 +2461,84 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--card)); border-color: var(--accent); }
 .npv-todo { border: 2px dashed var(--line); border-radius: 16px; padding: 18px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
 .npv-todo small { color: var(--sub); }
+/* more components (Flutter and Kotlin): chart, carousel, swipe pages, photo grid, like, ticker, timer, skeleton, swatches, keypad, option picker, popups, notifications */
+.npv-chart { border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.npv-chart > b { font-size: 16px; font-weight: 800; }
+.npv-chartsvg { display: block; overflow: visible; }
+.npv-carousel { position: relative; overflow: hidden; display: flex; flex-direction: column; flex: none; }
+.npv-cards { display: flex; flex: 1; min-height: 0; transition: transform .28s cubic-bezier(.2,.8,.2,1); }
+.npv-ccard { flex: 0 0 var(--cw); box-sizing: border-box; margin: 0; border: 2.5px solid transparent; border-radius: 20px; padding: 14px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 4px; transform: scale(.86); transition: transform .22s, border-color .22s; cursor: pointer; }
+.npv-ccard.on { transform: none; border-color: var(--ac); }
+.npv-ccard.locked > * { opacity: .5; }
+.npv-ccard .npv-cic { font-size: 46px; line-height: 1.1; }
+.npv-ccard b { font-size: 17px; font-weight: 800; }
+.npv-ccard small { opacity: .7; font-size: 13px; }
+.npv-carr { position: absolute; top: calc(50% - 30px); width: 40px; height: 40px; border: 0; background: none; color: var(--text); font-size: 30px; cursor: pointer; }
+.npv-carr.l { left: 0; } .npv-carr.r { right: 0; }
+.npv-dots { display: flex; justify-content: center; gap: 6px; padding-top: 10px; flex: none; }
+.npv-dots i { width: 7px; height: 7px; border-radius: 4px; background: var(--ac, var(--accent)); opacity: .3; transition: width .2s, opacity .2s; cursor: pointer; }
+.npv-carousel .npv-dots i { background: var(--line); opacity: 1; }
+.npv-dots i.on { width: 18px; opacity: 1; }
+.npv-carousel .npv-dots i.on { background: var(--ac); }
+.npv-pager { overflow: hidden; display: flex; flex-direction: column; flex: none; touch-action: pan-y; user-select: none; }
+.npv-pages { display: flex; flex: 1; min-height: 0; transition: transform .32s cubic-bezier(.2,.8,.2,1); }
+.npv-pg { flex: 0 0 100%; display: flex; flex-direction: column; justify-content: center; padding: 0 4px; box-sizing: border-box; }
+.npv-photos { display: grid; }
+.npv-ph { aspect-ratio: 1; border: 0; padding: 0; overflow: hidden; display: flex; align-items: center; justify-content: center; font-size: 36px; cursor: pointer; }
+.npv-ph img { width: 100%; height: 100%; object-fit: cover; }
+.npv-like { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 6px 8px; border-radius: 20px; cursor: pointer; font: inherit; }
+.npv-like.on svg { animation: npvPop .3s cubic-bezier(.3,1.6,.5,1); }
+@keyframes npvPop { 0% { transform: scale(1.5); } 100% { transform: none; } }
+.npv-ticker { overflow: hidden; display: flex; align-items: center; white-space: nowrap; font-weight: 700; flex: none; margin: 0 -16px; }
+.npv-trun { display: inline-flex; animation: npvTick 10s linear infinite; }
+.npv-trun.rev { animation-direction: reverse; }
+.npv-tline i { font-style: normal; white-space: pre; }
+@keyframes npvTick { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.npv-timerw { display: flex; justify-content: center; }
+.npv-timer { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-variant-numeric: tabular-nums; }
+.npv-timer b { font-weight: 900; }
+.npv-timer.ring { position: relative; }
+.npv-timer.ring svg { position: absolute; inset: 0; }
+.npv-timer.bar { align-self: stretch; width: 100%; }
+.npv-timer.pill { flex-direction: row; padding: 8px 16px; border-radius: 30px; }
+.npv-timer.warn { animation: npvPulse .5s ease-in-out infinite alternate; }
+@keyframes npvPulse { to { transform: scale(1.06); } }
+.npv-skel { display: flex; flex-direction: column; gap: 8px; }
+.npv-skrow { display: flex; gap: 12px; align-items: flex-start; }
+.npv-sklines { flex: 1; display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.npv-sk { display: block; height: 12px; background: color-mix(in srgb, var(--text) 8%, transparent); animation: npvShim 1.1s ease-in-out infinite alternate; }
+@keyframes npvShim { to { background: color-mix(in srgb, var(--text) 16%, transparent); } }
+.npv-swatches { display: grid; }
+.npv-sw { aspect-ratio: 1; border: 1px solid var(--line); cursor: pointer; color: #fff; font-size: 18px; font-weight: 800; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.npv-keypad { align-self: center; width: 100%; max-width: 300px; display: flex; flex-direction: column; gap: 8px; }
+.npv-kdisp { text-align: center; font-size: 26px; font-weight: 800; letter-spacing: 2px; padding: 14px; border-radius: 14px; white-space: pre; }
+.npv-keys { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.npv-keys button { aspect-ratio: 1.5; border: 0; border-radius: 16px; font: 700 24px/1 inherit; cursor: pointer; }
+.npv-keypad.round .npv-keys button { aspect-ratio: 1; border-radius: 50%; }
+.npv-keypad.flat .npv-keys button { border-radius: 6px; }
+.npv-selector { display: flex; align-items: center; background: var(--field); border-radius: 14px; }
+.npv-selector button { width: 48px; height: 48px; border: 0; background: none; color: var(--text); font-size: 28px; cursor: pointer; }
+.npv-selector button:disabled { opacity: .3; }
+.npv-selector b { flex: 1; text-align: center; font-size: 17px; font-weight: 800; }
+.npv-poplayer { position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; padding: 20px; animation: npvFade .2s; }
+.npv-poplayer.dim { background: rgba(0,0,0,.5); }
+.npv-poplayer.sheet { align-items: flex-end; padding: 0; }
+.npv-pop { width: 100%; animation: npvPopIn .25s cubic-bezier(.3,1.4,.5,1); }
+.npv-poplayer.sheet .npv-pop { background: var(--card); border-radius: 22px 22px 0 0; padding: 8px 16px 24px; animation: npvUp .3s cubic-bezier(.2,.8,.2,1); }
+.npv-grab { display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 4px auto 12px; }
+@keyframes npvFade { from { opacity: 0; } } @keyframes npvPopIn { from { transform: scale(.85); opacity: 0; } } @keyframes npvUp { from { transform: translateY(100%); } }
+.npv-toasts { position: absolute; left: 12px; right: 12px; top: 34px; z-index: 40; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; }
+.npv-toasts.bottom { top: auto; bottom: 96px; } .npv-toasts.center { top: 40%; } .npv-toasts.top-right { align-items: flex-end; }
+.npv-toasts.banner { left: 0; right: 0; }
+.npv-toast { pointer-events: auto; display: flex; align-items: center; gap: 10px; max-width: 100%; box-sizing: border-box; background: var(--tbg); color: var(--tfg); padding: 12px 14px; border-radius: 16px; box-shadow: 0 6px 18px rgba(0,0,0,.25); animation: npvDrop .26s cubic-bezier(.3,1.4,.5,1); cursor: pointer; }
+.npv-toasts.pill .npv-toast { border-radius: 30px; padding: 10px 18px; }
+.npv-toasts.banner .npv-toast { width: 100%; border-radius: 0; }
+.npv-toasts.achievement .npv-toast { border: 2px solid var(--tac); }
+.npv-toasts.achievement .npv-toast b { color: var(--tac); }
+.npv-toast .npv-tic { font-size: 24px; }
+.npv-toast div { display: flex; flex-direction: column; }
+.npv-toast b { font-weight: 800; font-size: 15px; } .npv-toast small { opacity: .8; font-size: 13px; }
+@keyframes npvDrop { from { transform: translateY(-24px); opacity: 0; } }
 .npv-fab { position: absolute; right: 18px; bottom: 22px; width: 58px; height: 58px; border-radius: 50%; border: 0; background: var(--accent); color: var(--onAccent); font-size: 30px; cursor: pointer; box-shadow: 0 6px 16px rgba(0,0,0,.3); }
 .npv-phone.material .npv-fab { border-radius: 18px; }
 .npv-tabs { display: flex; background: var(--card); border-top: 1px solid var(--line); padding: 6px 4px 14px; flex: none; }

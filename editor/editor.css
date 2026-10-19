@@ -2807,3 +2807,17 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 /* the game phone is sized in real pixels, never zoomed or scaled: Safari on iPhone tells a scaled iframe's page its on-screen size, so the game only filled part of the phone */
 .npv-phone.game { --z: var(--npv-zoom, 1); zoom: 1; width: calc(360px * var(--z)); height: calc(720px * var(--z)); border-width: calc(10px * var(--z)); border-radius: calc(36px * var(--z)); }
 .npv-phone.game .npv-status, .npv-phone.game .npv-home { zoom: var(--z); }
+
+/* full-screen test (▶ Test): the app or game fills the screen like Play in the scene, under a slim bar */
+.npv.testing { position: fixed; inset: 0; z-index: 950; background: #000; }
+.npv.testing > .npv-head, .npv.testing .npv-code, .npv.testing .npv-keys, .npv.testing .npv-log, .npv.testing .npv-note, .npv.testing .npv-status, .npv.testing .npv-home { display: none !important; }
+.npv-tbar { flex: none; display: flex; align-items: center; gap: 6px; padding: calc(env(safe-area-inset-top) + 6px) max(8px, env(safe-area-inset-right)) 6px max(8px, env(safe-area-inset-left)); background: var(--g1, #1b1d22); border-bottom: 1px solid var(--g0, #2a2f38); overflow-x: auto; scrollbar-width: none; }
+.npv-tbar::-webkit-scrollbar { display: none; }
+.npv-tbar > * { flex: none; }
+.npv-tbar .npv-btn { min-height: 38px; }
+.npv-tbar .npv-done { font-weight: 700; }
+.npv.testing .npv-body, .npv.testing .npv-app { flex: 1; min-height: 0; display: flex; padding: 0 !important; margin: 0; gap: 0; overflow: hidden; }
+.npv.testing .npv-phone, .npv.testing .npv-phone.game { zoom: 1 !important; transform: none !important; flex: 1; width: 100% !important; height: 100% !important; max-width: none; margin: 0 !important; border: 0 !important; border-radius: 0 !important; box-shadow: none; }
+.npv.testing .npv-phone:not(.game) { padding-bottom: env(safe-area-inset-bottom); }
+.npv-testbtn { flex: none; }
+.npv.testing[data-view="code"] .npv-app { display: flex; }

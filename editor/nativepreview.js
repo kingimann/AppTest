@@ -73,6 +73,27 @@ function placer(root, host, redraw) {
   return { place, button };
 }
 
+/** The space the real phone keeps clear (notch, home bar), measured here: the full-screen test passes it on to the game. */
+function deviceInsets() {
+  const p = h('div', { style: 'position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);' });
+  document.body.append(p); const c = getComputedStyle(p), r = { top: parseFloat(c.paddingTop) || 0, right: parseFloat(c.paddingRight) || 0, bottom: parseFloat(c.paddingBottom) || 0, left: parseFloat(c.paddingLeft) || 0 }; p.remove(); return r;
+}
+/** Full-screen test: the app or game fills the whole screen (like Play in the scene), with a slim bar to switch platform and go back. */
+function tester(root, redraw) {
+  const bar = h('div', { class: 'npv-tbar' });
+  let home = null; // where the preview was (docked in the scene view, or full screen)
+  const on = () => root.classList.contains('testing');
+  const set = (yes) => {
+    if (yes === on()) return;
+    if (yes) { home = root.parentNode; document.body.append(root); root.prepend(bar); } else { bar.remove(); home?.append(root); }
+    root.classList.toggle('testing', yes); redraw();
+  };
+  const button = () => h('button', { class: 'npv-btn primary npv-testbtn', title: 'Try it full screen, the way it runs on a phone', onclick: () => set(true) }, '▶ Test');
+  /** Fills the bar: Done first, then what the preview passes (platform, native or web view, Back, Restart). */
+  const draw = (...items) => { if (on()) bar.replaceChildren(h('button', { class: 'npv-btn npv-done', onclick: () => set(false) }, '✕ Done'), ...items.filter(Boolean)); };
+  return { on, set, button, draw };
+}
+
 /** The app's state, with the same rules as the native runtimes. */
 function makeApp(model) {
   const A = { vars: { ...model.vars }, data: {}, tab: 0, stacks: model.tabs.length ? model.tabs.map(() => []) : [[]], openCollection: null, openId: null, roots: {} };
@@ -190,10 +211,12 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   const body = h('div', { class: 'npv-body' }, h('div', { class: 'npv-app' }, phone, h('div', { class: 'npv-note' })), codeBox);
   const root = h('div', { class: 'npv', role: 'dialog', 'aria-label': 'Native app preview' }, head, body);
   const zoom = zoomer(root, body.firstChild, phone), where = placer(root, host, () => drawAll());
+  const test = tester(root, () => drawAll());
 
   function drawHead() {
     head.replaceChildren(
       h('div', { class: 'npv-title' }, h('b', {}, 'Native app'), h('small', {}, `${model.pages.length} pages · ${model.collections.length} data collection${model.collections.length === 1 ? '' : 's'}`)),
+      test.button(),
       seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI'], ['rn', 'React Native']], kind, (k) => { kind = k; codeFiles = null; drawAll(); }),
       seg([['app', 'App'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
       h('div', { class: 'npv-acts' },
@@ -204,6 +227,8 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
         where.button(),
         h('button', { class: 'npv-btn', 'aria-label': 'Close', onclick: close }, '✕')),
     );
+    test.draw(seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI'], ['rn', 'React Native']], kind, (k) => { kind = k; codeFiles = null; drawAll(); }),
+      h('button', { class: 'npv-btn', 'aria-label': 'Reset', title: 'Start again with the sample data', onclick: () => refresh(true) }, '↺'));
   }
 
   // ---------- the app ----------
@@ -898,7 +923,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   }
   let soon = 0;
   const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 250); };
-  const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) close(); };
+  const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) (test.on() ? test.set(false) : close()); };
   let onClose = null;
   function close() { clearTimeout(soon); clearInterval(clock); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); onClose?.(); }
   addEventListener('keydown', onKey);
@@ -923,6 +948,9 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
   const head = h('div', { class: 'npv-head' }), keys = h('div', { class: 'npv-keys' });
   const root = h('div', { class: 'npv', role: 'dialog', 'aria-label': 'Native game preview' }, head, h('div', { class: 'npv-body' }, h('div', { class: 'npv-app' }, phone, keys, logBox), codeBox));
   const zoom = zoomer(root, root.querySelector('.npv-app'), phone), where = placer(root, host, () => drawAll());
+  const test = tester(root, () => { setSafe(); drawAll(); });
+  /** What the game keeps clear: the preview phone's own home bar, or (full screen) the real phone's, below the test bar. The game reads it as window.__pkSafe. */
+  const setSafe = () => { const d = deviceInsets(); window.__pkPreviewSafe = test.on() ? { top: 0, right: d.right, bottom: d.bottom, left: d.left } : platform() === 'ios' ? { top: 0, right: 0, bottom: 20, left: 0 } : { top: 0, right: 0, bottom: 0, left: 0 }; };
   const platform = () => (kind === 'swift' ? 'ios' : 'android');
   const label = () => ({ flutter: 'Flutter', kotlin: 'Kotlin', swift: 'Xcode (Swift)' }[kind]);
   const seg = (items, cur, pick) => h('div', { class: 'npv-seg', role: 'tablist' }, items.map(([k, l]) => h('button', { class: k === cur ? 'on' : '', role: 'tab', 'aria-selected': String(k === cur), 'data-k': k, onclick: () => pick(k) }, l)));
@@ -935,6 +963,7 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
   function drawHead() {
     head.replaceChildren(
       h('div', { class: 'npv-title' }, h('b', {}, 'Native game'), h('small', {}, nativeNow() ? `${game.name || 'Game'}, drawn by ${kind === 'kotlin' ? 'Compose' : 'Flutter'} (no web view)` : `${game.name || 'Game'} in a ${platform() === 'ios' ? 'WKWebView' : 'WebView'}`)),
+      test.button(),
       seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'Xcode']], kind, (k) => { kind = k; codeFiles = null; perm = 'prompt'; start(); }),
       report?.ok && kind !== 'swift' && seg([['native', 'Native code'], ['webview', 'Web view']], mode, (k) => { mode = k; codeFiles = null; start(); }),
       seg([['app', 'Game'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
@@ -944,6 +973,10 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
         h('button', { class: 'npv-btn primary', onclick: () => download(kind, nativeNow() ? 'native' : 'webview') }, '⬇ Download'),
         where.button(),
         h('button', { class: 'npv-btn', 'aria-label': 'Close', onclick: close }, '✕')));
+    test.draw(seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'Xcode']], kind, (k) => { kind = k; codeFiles = null; perm = 'prompt'; start(); }),
+      report?.ok && kind !== 'swift' && seg([['native', 'Native'], ['webview', 'Web']], mode, (k) => { mode = k; codeFiles = null; start(); }),
+      platform() === 'android' && h('button', { class: 'npv-btn', 'aria-label': 'Back', title: 'Android Back', onclick: () => { note('Back button'); try { win()?.__pkBack?.(); } catch { /* reloading */ } } }, '◁'),
+      h('button', { class: 'npv-btn', 'aria-label': 'Restart', title: 'Build the game again and restart it', onclick: () => refresh() }, '↺'));
   }
   function drawLog() {
     if (nativeNow()) { // the native code: what it covers, and what has no native version yet
@@ -1018,11 +1051,12 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
     closed = false; overlay(null); drawHead(); drawLog();
     const ios = platform() === 'ios';
     phone.className = 'npv-phone game ' + (ios ? 'ios' : 'material');
+    setSafe();
     if (!url) {
       phone.replaceChildren(h('div', { class: 'npv-empty' }, 'Building the game…'));
       let src = await html(fresh); fresh = false;
       window.__pkPreviewBridge = onMessage;
-      const inject = (p) => `<script>window.__pkPlatform=${JSON.stringify(p)};window.__pkSafe=${JSON.stringify(p === 'ios' ? { top: 0, right: 0, bottom: 20, left: 0 } : { top: 0, right: 0, bottom: 0, left: 0 })};window.ReactNativeWebView={postMessage:function(s){try{parent.__pkPreviewBridge(s)}catch(e){}}};${bridge.replace(/ true;$/, '')}</script>`;
+      const inject = (p) => `<script>window.__pkPlatform=${JSON.stringify(p)};Object.defineProperty(window,'__pkSafe',{get:function(){try{return parent.__pkPreviewSafe}catch(e){return null}}});window.ReactNativeWebView={postMessage:function(s){try{parent.__pkPreviewBridge(s)}catch(e){}}};${bridge.replace(/ true;$/, '')}</script>`;
       url = { android: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('android'))], { type: 'text/html' })), ios: URL.createObjectURL(new Blob([src.replace(/<head[^>]*>/i, (m) => m + inject('ios'))], { type: 'text/html' })) };
       src = null;
     }
@@ -1054,7 +1088,7 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
   function refresh() { if (url) { URL.revokeObjectURL(url.android); URL.revokeObjectURL(url.ios); } url = ''; fresh = true; codeFiles = null; start(); }
   let soon = 0, onClose = null;
   const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 1500); };
-  const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) close(); };
+  const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) (test.on() ? test.set(false) : close()); };
   function close() { clearTimeout(soon); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); if (window.__pkPreviewBridge === onMessage) delete window.__pkPreviewBridge; if (url) { URL.revokeObjectURL(url.android); URL.revokeObjectURL(url.ios); } onClose?.(); }
   addEventListener('keydown', onKey);
   root.dataset.view = view;

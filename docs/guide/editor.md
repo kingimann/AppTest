@@ -221,13 +221,17 @@ Errors never freeze the game: an error in a component, node or script is logged 
 
 ## Play mode
 
-**▶ Play** runs the game from what's in the editor. The play bar has:
+**▶ Play** runs the game from what's in the editor. The play bar is slim and keeps to what you use most:
 
-- **Stop**, **Pause** and **Step** (one frame while paused).
-- **Inspect:** pause without the PAUSED screen, tap any object (even spawned ones) to see and change its live position, velocity and components.
-- **Stats:** FPS, objects, bodies, state, time and variables.
+- **■ Stop** and **Pause**; **Step** (one frame) shows while paused.
 - **Console** with a red count for errors.
-- **⋮:** put the bar above or below the game, floating, or as a small button.
+- **⋮** has the rest:
+  - **Inspect:** pause without the PAUSED screen, tap any object (even spawned ones) to see and change its live position, velocity and components.
+  - **Stats:** FPS, objects, bodies, state, time and variables.
+  - **Screenshot** for the store listing, and **Preview** (standalone, phone window or on a phone).
+  - Where the bar goes: above or below the game, floating, or a small button.
+
+While Inspect or Stats is on, its button shows in the bar so you can turn it off.
 
 ## Levels
 

@@ -8077,7 +8077,7 @@ hideUiBtn.addEventListener('click', () => { const on = !EP.hideUI; setEP('hideUI
 cleanBtn.before(hideUiBtn); setHideUI(!!EP.hideUI);
 $('#playBtn').append(icon('play'), h('span', {}, 'Play')); $('#pauseBtn').append(icon('pause'));
 { const pv = h('button', { class: 'tb', id: 'previewBtn', title: 'Preview: standalone, phone window or on a phone' }, icon('phone')); $('#pauseBtn').after(pv); pv.addEventListener('click', () => openPreviewMenu(pv)); }
-$('#pbPlay').append(icon('play')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
+$('#pbPlay').append(icon('stop')); $('#pbPause').append(icon('pause')); $('#pbLog').append(icon('terminal'));
 $('#pbStep').append(icon('step')); $('#pbInspect').append(icon('target')); $('#pbStats').append(icon('stats'));
 $('#pbStep').addEventListener('click', () => { if (!playing || !engine.paused) return; engine.stepFrames = 1; buzz(4); setTimeout(() => { if (inspectId) renderInspectCard(); }, 60); });
 $('#pbInspect').addEventListener('click', () => setInspecting(!engine.inspecting));
@@ -8102,7 +8102,12 @@ function applyPlayDock() {
   requestAnimationFrame(() => { engine.resize(); engine.layoutButtons(); });
 }
 $('#pbDock').append(icon('more')); $('#pbHandle').append(icon('more'));
-$('#pbDock').addEventListener('click', (ev) => { if (pbDragged) return; popMenu(ev.currentTarget, [{ cap: 'Play bar' }, ...PB_DOCKS.map(([k, l]) => ({ icon: pbDock() === k ? 'check' : 'square', label: l, fn: () => { store.set('pocket.editor.playDock', k); pbOpen = false; applyPlayDock(); toast(PB_DOCKS.find((q) => q[0] === k)[2]); } }))]); });
+$('#pbDock').addEventListener('click', (ev) => { if (pbDragged) return; const at = ev.currentTarget; popMenu(at, [ // the tools you use less often live here (one that's on also shows in the bar, to turn it off)
+  { icon: 'target', label: engine.inspecting ? 'Stop inspecting' : 'Inspect: pause and tap an object', fn: () => setInspecting(!engine.inspecting) },
+  { icon: 'stats', label: $('#playStats').hidden ? 'Stats' : 'Hide stats', fn: toggleStats },
+  { icon: 'camera', label: 'Screenshot for the store listing', fn: captureShot },
+  { icon: 'phone', label: 'Preview: standalone, phone window or on a phone…', fn: () => setTimeout(() => openPreviewMenu(at), 0) },
+  { cap: 'Play bar' }, ...PB_DOCKS.map(([k, l]) => ({ icon: pbDock() === k ? 'check' : 'square', label: l, fn: () => { store.set('pocket.editor.playDock', k); pbOpen = false; applyPlayDock(); toast(PB_DOCKS.find((q) => q[0] === k)[2]); } }))]); });
 $('#pbHandle').addEventListener('click', () => { if (pbDragged) return; pbOpen = !pbOpen; applyPlayDock(); });
 let pbDragged = false;
 for (const grip of [$('#pbDock'), $('#pbHandle')]) grip.addEventListener('pointerdown', (e) => { // floating / small button: drag it out of the way

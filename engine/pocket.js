@@ -299,7 +299,8 @@ export function colliderBody(c) {
   const KNOWN = ['circle', 'sphere', 'box', 'capsule', 'polygon', 'edge', 'cylinder'];
   const pts = Array.isArray(c.points) && c.points.length >= 2, sized = c.w || c.h || c.r || c.d || pts, shape = KNOWN.includes(c.shape) ? c.shape : 'box';
   const out = { shape: sized && (shape !== 'polygon' && shape !== 'edge' || pts) ? shape : 'auto', sensor: !!c.trigger };
-  for (const k of ['w', 'h', 'd', 'r', 'ox', 'oy', 'oz', 'bounce', 'friction', 'layer', 'oneWay']) if (c[k] !== undefined && c[k] !== '') out[k] = c[k];
+  for (const k of ['w', 'h', 'd', 'r', 'ox', 'oy', 'oz', 'bounce', 'friction', 'layer', 'oneWay', 'ignore', 'conveyor', 'launch', 'debug']) if (c[k] !== undefined && c[k] !== '') out[k] = c[k];
+  if (+c.hitPct > 0 && +c.hitPct !== 100) out.hitScale = +c.hitPct / 100;
   if (pts) out.points = c.points.map((q) => [+q[0] || 0, +q[1] || 0]);
   return out;
 }
@@ -387,6 +388,8 @@ export class Entity {
   /** Half-extents used for physics & picking. Planar 2D entities have infinite depth. */
   extents() {
     const x = this.rawExtents();
+    const k = +this.body?.hitScale; // a collider's Hitbox size: forgiving (smaller) or generous (bigger) hits, the look unchanged
+    if (k > 0 && k !== 1 && !x.tiles && !x.voxel) { if (x.r) x.r *= k; x.hx *= k; x.hy *= k; if (Number.isFinite(x.hz)) x.hz *= k; if (x.half) x.half *= k; if (x.pts) x.pts = x.pts.map(([a, b]) => [a * k, b * k]); }
     if (x.kind && x.rot) { const c = Math.abs(Math.cos(x.rot)), n = Math.abs(Math.sin(x.rot)); x.bx = c * x.hx + n * x.hy; x.by = n * x.hx + c * x.hy; return x; }
     if (x.swap) { const t = x.hx; x.hx = x.hy; x.hy = t; delete x.swap; }
     if (x.rot) { const c = Math.abs(Math.cos(x.rot)), n = Math.abs(Math.sin(x.rot)); x.bx = c * x.hx + n * x.hy; x.by = n * x.hx + c * x.hy; }
@@ -2028,6 +2031,12 @@ export class Physics {
           B.ex = b.extents();
         }
       }
+    }
+    // surfaces: conveyor belts carry what stands on them, bounce pads launch it
+    for (const e of list) {
+      const b = e.body, q = b.type === 'dynamic' && b.grounded ? b.groundedOn?.body : null; if (!q) continue;
+      if (+q.conveyor) e.x += +q.conveyor * dt;
+      if (+q.launch && gd) { b.vel.y = -Math.abs(+q.launch) * gd; b.grounded = false; if (!b._launched || scene.time - b._launched > 0.2) { b._launched = scene.time; scene.emit?.('launch', e, b.groundedOn); scene.engine?.audio?.sfx?.('jump'); } }
     }
     // contacts that ended this step
     for (const [key, [a, b]] of this.contacts) if (!now.has(key)) { separate(a, b); separate(b, a); }
@@ -3941,6 +3950,37 @@ function drawRadius2D(e) {
   if (!r) return 0; // (nothing sized: don't guess)
   return r * Math.max(Math.abs(e.sx) || 1, Math.abs(e.sy) || 1) + 40;
 }
+/** Shape Renderer extras that only change how it's drawn: opacity, flip, turn, blend mode, colour adjust (hue, brightness, saturation), outline corners and a looping animation. Returns true if it saved the canvas (the caller restores). */
+function shapeLook(ctx, s, time) {
+  const num = (v) => v != null && v !== '' && Number.isFinite(+v);
+  const anim = s.anim && s.anim !== 'none' && s.anim !== 'shimmer';
+  if (!(anim || (num(s.opacity) && +s.opacity < 1) || (s.blend && s.blend !== 'normal') || s.flipX || s.flipY || +s.rot || +s.hue || (num(s.bright) && +s.bright !== 100) || (num(s.sat) && +s.sat !== 100) || s.lineJoin)) return false;
+  ctx.save();
+  const T = (time || 0) * Math.max(0.05, +s.animSpeed || 1);
+  let a = num(s.opacity) ? clamp(+s.opacity, 0, 1) : 1, rot = +s.rot || 0, k = 1, dy = 0, hue = +s.hue || 0;
+  switch (s.anim) {
+    case 'pulse': k = 1 + Math.sin(T * 4) * 0.08; break;
+    case 'blink': a *= 0.3 + 0.7 * (Math.sin(T * 6) * 0.5 + 0.5); break;
+    case 'spin': rot += (T * 180) % 360; break;
+    case 'wobble': rot += Math.sin(T * 5) * 9; break;
+    case 'float': dy = Math.sin(T * 2.5) * 5; break;
+    case 'rainbow': hue += (T * 120) % 360; break;
+    default: break;
+  }
+  if (dy) ctx.translate(0, dy);
+  if (rot) ctx.rotate(rot * DEG);
+  if (k !== 1) ctx.scale(k, k);
+  if (s.flipX || s.flipY) ctx.scale(s.flipX ? -1 : 1, s.flipY ? -1 : 1);
+  ctx.globalAlpha *= a;
+  if (s.blend && s.blend !== 'normal') ctx.globalCompositeOperation = { add: 'lighter', multiply: 'multiply', screen: 'screen', overlay: 'overlay', darken: 'darken', lighten: 'lighten' }[s.blend] || 'source-over';
+  const f = [];
+  if (hue) f.push(`hue-rotate(${Math.round(hue)}deg)`);
+  if (num(s.bright) && +s.bright !== 100) f.push(`brightness(${+s.bright}%)`);
+  if (num(s.sat) && +s.sat !== 100) f.push(`saturate(${+s.sat}%)`);
+  if (f.length && 'filter' in ctx) ctx.filter = f.join(' ');
+  if (s.lineJoin) { ctx.lineJoin = s.lineJoin; ctx.lineCap = s.lineJoin === 'round' ? 'round' : 'butt'; }
+  return true;
+}
 function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
@@ -3954,6 +3994,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
   ctx.globalAlpha = alpha;
   const s = e.shape;
   if (s) {
+    const looked = shapeLook(ctx, s, time);
     if (s.shadow) { ctx.shadowColor = s.shadow; ctx.shadowBlur = s.shadowBlur ?? 10; ctx.shadowOffsetX = s.shadowX || 0; ctx.shadowOffsetY = s.shadowY ?? 4; }
     else if (s.glow) { ctx.shadowColor = s.stroke || s.fill; ctx.shadowBlur = s.glow; }
     let P2 = null; // (a custom shape is a Path2D)
@@ -3962,10 +4003,16 @@ function drawEntity2DRaw(ctx, e, vars, time) {
       case 'circle': ctx.arc(0, 0, s.r, 0, Math.PI * 2); break;
       case 'triangle': ctx.moveTo(0, -s.h / 2); ctx.lineTo(s.w / 2, s.h / 2); ctx.lineTo(-s.w / 2, s.h / 2); ctx.closePath(); break;
       case 'star': {
-        for (let i = 0; i < 10; i++) {
-          const a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? s.w * 0.2 : s.w / 2;
+        const n = clamp(Math.round(+s.starPoints || 5), 3, 24), inr = clamp(+(s.inner ?? 0.4) || 0.4, 0.1, 0.95);
+        for (let i = 0; i < n * 2; i++) {
+          const a = -Math.PI / 2 + i * Math.PI / n, r = i % 2 ? s.w / 2 * inr : s.w / 2;
           ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r * (s.h / s.w));
         }
+        ctx.closePath(); break;
+      }
+      case 'ngon': { // a regular polygon with any number of sides
+        const n = clamp(Math.round(+s.sides || 6), 3, 24);
+        for (let i = 0; i < n; i++) { const a = -Math.PI / 2 + i / n * Math.PI * 2; ctx.lineTo(Math.cos(a) * s.w / 2, Math.sin(a) * s.h / 2); }
         ctx.closePath(); break;
       }
       case 'polygon': (s.points || []).forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py))); ctx.closePath(); break;
@@ -4017,6 +4064,12 @@ function drawEntity2DRaw(ctx, e, vars, time) {
         else if (s.pattern === 'checks') { for (let yy = y0, r = 0; yy < y0 + bh; yy += g, r++) for (let xx = x0 + (r % 2) * g; xx < x0 + bw; xx += g * 2) ctx.fillRect(xx, yy, g, g); }
         ctx.restore(); trace();
       }
+      if (s.anim === 'shimmer' && s.fill) { // a band of light that sweeps across the shape
+        const sp = Math.max(0.05, +s.animSpeed || 1), ph = ((time * sp * 0.6) % 1.6) - 0.3, x = -bw / 2 + ph * bw;
+        ctx.save(); (P2 ? ctx.clip(P2, rule) : ctx.clip(rule));
+        const g = ctx.createLinearGradient(x - bw * 0.25, 0, x + bw * 0.25, 0); g.addColorStop(0, 'rgba(255,255,255,0)'); g.addColorStop(0.5, 'rgba(255,255,255,0.45)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = g; ctx.fillRect(-bw / 2, -bh / 2, bw, bh); ctx.restore(); trace();
+      }
       if (s.inner) { // an inner shadow: pressed in, or soft (neumorphic)
         const ib = s.innerBlur ?? 12, far = 4000; ctx.save(); (P2 ? ctx.clip(P2, rule) : ctx.clip(rule));
         const M = ctx.getTransform(), k = Math.hypot(M.a, M.b) || 1; // (shadow offsets are in screen pixels, not in the shape's units)
@@ -4031,6 +4084,7 @@ function drawEntity2DRaw(ctx, e, vars, time) {
       }
     }
     ctx.shadowBlur = 0; ctx.shadowOffsetX = 0; ctx.shadowOffsetY = 0;
+    if (looked) ctx.restore();
   }
   if (e.sprite && e.sprite.src) {
     const img = spriteImage(e.sprite);
@@ -4114,10 +4168,19 @@ export class Renderer2D {
     for (const e of scene.entities) { const L = e.data._line; if (L && !e.dead) { ctx.strokeStyle = L[6]; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(L[0], L[1]); ctx.lineTo(L[3], L[4]); ctx.stroke(); } }
     // skip what's off the screen (a generous margin: shadows, glows, badges, a camera roll or shake)
     const a = (c.roll ? Math.SQRT2 : 1), HW = engine.width / 2 / z * a + sk, HH = engine.height / 2 / z * a + sk, cx = c.x, cy = c.y;
-    for (const e of scene.entities) if (e.visible && !e.ui && !e.dead && !e._parentHidden) {
+    const ord = (q) => +(q.shape?.order ?? q.sprite?.order ?? 0) || 0, ys = scene.settings?.ySort;
+    let drawn = scene.entities; // Order in layer (Shape Renderer / Image), then (top-down depth) lower on screen in front; the list order otherwise
+    if (ys || drawn.some((q) => q.shape?.order || q.sprite?.order)) drawn = drawn.slice().sort((p, q) => ord(p) - ord(q) || (ys && !p.tiles && !q.tiles ? p.y - q.y : 0));
+    for (const e of drawn) if (e.visible && !e.ui && !e.dead && !e._parentHidden) {
       const R = drawRadius2D(e);
       if (R > 0 && !engine.noCull && (Math.abs(e.x - cx) > HW + R || Math.abs(e.y - cy) > HH + R)) continue;
       drawEntity2D(ctx, e, scene.vars, scene.time);
+      if (e.body?.debug && !engine.editing) { // the collider's Show while playing: its outline, to tune hits
+        const x = e.extents(), ox = e.x + (x.ox || 0), oy = e.y + (x.oy || 0);
+        ctx.save(); ctx.strokeStyle = e.body.sensor ? '#ffd23d' : '#36f07a'; ctx.lineWidth = 1.5 / z; ctx.setLineDash([4 / z, 3 / z]); ctx.beginPath();
+        if (x.sphere) ctx.arc(ox, oy, x.r, 0, Math.PI * 2); else if (x.pts) { x.pts.forEach(([px, py], i) => (i ? ctx.lineTo(ox + px, oy + py) : ctx.moveTo(ox + px, oy + py))); if (x.kind !== 'edge') ctx.closePath(); } else ctx.rect(ox - x.hx, oy - x.hy, x.hx * 2, x.hy * 2);
+        ctx.stroke(); ctx.restore();
+      }
     }
     for (const p of scene.particles) {
       ctx.globalAlpha = Math.max(0, p.life) * (p.alpha ?? 1);

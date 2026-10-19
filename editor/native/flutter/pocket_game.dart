@@ -102,6 +102,17 @@ double _bounce(double t) {
 // Objects in the game
 // ---------------------------------------------------------------------------------------------------------------
 
+/// A Collider component's settings as body settings (sizes left out = fit the visible shape), like the engine's colliderBody.
+Map<String, dynamic>? colliderBody(Map<String, dynamic>? c) {
+  if (c == null) return null;
+  const known = ['circle', 'box', 'capsule', 'polygon', 'edge'];
+  final pts = c['points'] is List && (c['points'] as List).length >= 2, sized = numOf(c['w']) != 0 || numOf(c['h']) != 0 || numOf(c['r']) != 0 || pts, shape = known.contains(c['shape']) ? '${c['shape']}' : 'box';
+  final out = <String, dynamic>{'shape': sized && ((shape != 'polygon' && shape != 'edge') || pts) ? shape : 'auto', 'sensor': onOf(c['trigger'])};
+  for (final k in ['w', 'h', 'r', 'ox', 'oy', 'bounce', 'friction', 'layer', 'oneWay', 'ignore', 'conveyor', 'launch', 'debug']) { final v = c[k]; if (v != null && v != '') out[k] = v; }
+  final hp = numOf(c['hitPct']); if (hp > 0 && hp != 100) out['hitScale'] = hp / 100;
+  return out;
+}
+
 /// A physics body: dynamic ones fall and are pushed out of solid ones; static and kinematic ones are the ground,
 /// walls and moving platforms; sensors only notice touches.
 class Body {
@@ -114,7 +125,12 @@ class Body {
     lockX = onOf(j['lockX']); lockY = onOf(j['lockY']);
     shape = strOf(j['shape'], 'auto'); w = numOf(j['w']); h = numOf(j['h']); r = numOf(j['r']); ox = numOf(j['ox']); oy = numOf(j['oy']);
     ignore = tagList(j['ignore']);
+    conveyor = numOf(j['conveyor']); launch = numOf(j['launch']); debug = onOf(j['debug']);
+    final hs = numOf(j['hitScale'], 1); hitScale = hs > 0 ? hs : 1;
   }
+  /// Surfaces (a collider's settings): a conveyor belt's speed (+ right), a bounce pad's launch speed; its hitbox size; show it while playing.
+  double conveyor = 0, launch = 0, hitScale = 1, launchedAt = -9;
+  bool debug = false;
   late String type, shape;
   late bool sensor, oneWay, lockX, lockY;
   late double gravityScale, bounce, friction, drag, maxFall, maxSpeed, vx, vy, w, h, r, ox, oy;
@@ -159,8 +175,8 @@ class GameObject {
     text = tx == null ? null : {...tx};
     sprite = (json['sprite'] as Map?)?.cast<String, dynamic>();
     bar = (json['bar'] as Map?)?.cast<String, dynamic>();
-    final b = (json['body'] as Map?)?.cast<String, dynamic>();
-    if (b != null) body = Body(b);
+    final b = (json['body'] as Map?)?.cast<String, dynamic>(), col = colliderBody((json['collider'] as Map?)?.cast<String, dynamic>());
+    if (b != null || col != null) body = Body({...(b ?? const {'type': 'static'}), ...?col}); // a collider alone makes a solid (static) object
     home = Offset(this.x, this.y);
     lx = this.x; ly = this.y; lrz = this.rz;
     for (final raw in (json['behaviors'] as List? ?? const [])) {
@@ -208,8 +224,10 @@ class GameObject {
     return b;
   }
 
+  /// Half its width and height for touching (the collider's Hitbox size applied).
+  Size get half { final h = lookHalf, k = body?.hitScale ?? 1; return k == 1 ? h : Size(h.width * k, h.height * k); }
   /// Half its width and height (a circle: its radius both ways), scaled.
-  Size get half {
+  Size get lookHalf {
     final b = body;
     if (b != null && b.shape != 'auto') {
       if (b.shape == 'circle') { final r = (b.r > 0 ? b.r : 10.0) * math.max(sx.abs(), sy.abs()); return Size(r, r); }
@@ -767,6 +785,13 @@ class PocketGame extends ChangeNotifier {
           } else if (!(gd != 0 && ny * gd > 0.5) && !ba.isDynamic && nx.abs() > 0.5) { bc.wall = nx > 0 ? -1 : 1; }
         }
       }
+    }
+    // surfaces: conveyor belts carry what stands on them, bounce pads launch it
+    for (final e in list) {
+      final b = e.body!, q = b.isDynamic && b.grounded ? b.groundedOn?.body : null;
+      if (q == null) continue;
+      if (q.conveyor != 0) e.x += q.conveyor * dt;
+      if (q.launch != 0 && gd != 0) { b.vy = -q.launch.abs() * gd; b.grounded = false; if (time - b.launchedAt > 0.2) { b.launchedAt = time; send('launch'); } }
     }
     for (final e in list) { final b = e.body!; if (!b.isDynamic) { b.px = e.x; b.py = e.y; } }
   }
@@ -3536,6 +3561,71 @@ class _Card extends StatelessWidget {
       );
 }
 
+/// The world objects in the order they're drawn: layer, then Order in layer (Shape Renderer / Image), then (Game Settings ›
+/// top-down depth) lower on screen in front, then the list order.
+List<GameObject> drawOrder(PocketGame g) {
+  final ySort = onOf(g.settings['ySort']);
+  double ord(GameObject o) => numOf(o.shape?['order'] ?? o.sprite?['order']);
+  final listed = g.objects.where((o) => !o.ui && o.shown && !o.dead).toList(), at = {for (var i = 0; i < listed.length; i++) listed[i]: i};
+  return listed..sort((a, b) {
+    var c = a.layer.compareTo(b.layer); if (c != 0) return c;
+    c = ord(a).compareTo(ord(b)); if (c != 0) return c;
+    if (ySort && a.json['tiles'] == null && b.json['tiles'] == null) { c = a.y.compareTo(b.y); if (c != 0) return c; }
+    return at[a]!.compareTo(at[b]!); // (a stable sort)
+  });
+}
+
+/// Shape Renderer looks that only change how it's drawn: opacity, flip, turn, blend mode, colour adjust (hue, brightness,
+/// saturation) and a looping animation (pulse, blink, spin, wobble, float, rainbow; shimmer is drawn with the fill).
+class ShapeLook {
+  ShapeLook({this.alpha = 1, this.rot = 0, this.k = 1, this.dy = 0, this.flipX = false, this.flipY = false, this.blend, this.filter});
+  final double alpha, rot, k, dy;
+  final bool flipX, flipY;
+  final BlendMode? blend;
+  final ColorFilter? filter;
+}
+
+/// A colour matrix for a hue turn (degrees), brightness and saturation (percent, 100 = as is), like CSS filters.
+ColorFilter? colorAdjust(double hue, double bright, double sat) {
+  if (hue == 0 && bright == 100 && sat == 100) return null;
+  List<double> mul(List<double> a, List<double> b) => [ // 4x5 colour matrices (as 5x5 with an implicit last row)
+    for (var r = 0; r < 4; r++) for (var c = 0; c < 5; c++) a[r * 5] * b[c] + a[r * 5 + 1] * b[5 + c] + a[r * 5 + 2] * b[10 + c] + a[r * 5 + 3] * b[15 + c] + (c == 4 ? a[r * 5 + 4] : 0),
+  ];
+  var m = <double>[1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0];
+  if (sat != 100) {
+    final s = sat / 100;
+    m = mul([0.213 + 0.787 * s, 0.715 - 0.715 * s, 0.072 - 0.072 * s, 0, 0, 0.213 - 0.213 * s, 0.715 + 0.285 * s, 0.072 - 0.072 * s, 0, 0, 0.213 - 0.213 * s, 0.715 - 0.715 * s, 0.072 + 0.928 * s, 0, 0, 0, 0, 0, 1, 0], m);
+  }
+  if (hue != 0) {
+    final a = hue * math.pi / 180, c = math.cos(a), n = math.sin(a);
+    m = mul([0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928, 0, 0,
+      0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.140, 0.072 - c * 0.072 - n * 0.283, 0, 0,
+      0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072, 0, 0, 0, 0, 0, 1, 0], m);
+  }
+  if (bright != 100) { final b = bright / 100; m = mul([b, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, b, 0, 0, 0, 0, 0, 1, 0], m); }
+  return ColorFilter.matrix(m);
+}
+
+/// The looks for a shape at this time, or null when it has none (drawn as it is).
+ShapeLook? shapeLook(Map<String, dynamic> s, double time) {
+  bool has(String k) => s[k] != null && s[k] != '' && double.tryParse('${s[k]}') != null;
+  final anim = strOf(s['anim']), animated = anim.isNotEmpty && anim != 'none' && anim != 'shimmer';
+  final bright = has('bright') ? numOf(s['bright']) : 100.0, sat = has('sat') ? numOf(s['sat']) : 100.0, blend = strOf(s['blend']);
+  if (!(animated || (has('opacity') && numOf(s['opacity']) < 1) || (blend.isNotEmpty && blend != 'normal') || onOf(s['flipX']) || onOf(s['flipY']) || numOf(s['rot']) != 0 || numOf(s['hue']) != 0 || bright != 100 || sat != 100)) return null;
+  final t = time * math.max(0.05, numOf(s['animSpeed'], 1));
+  var a = has('opacity') ? numOf(s['opacity']).clamp(0.0, 1.0) : 1.0, rot = numOf(s['rot']), k = 1.0, dy = 0.0, hue = numOf(s['hue']);
+  switch (anim) {
+    case 'pulse': k = 1 + math.sin(t * 4) * 0.08;
+    case 'blink': a *= 0.3 + 0.7 * (math.sin(t * 6) * 0.5 + 0.5);
+    case 'spin': rot += (t * 180) % 360;
+    case 'wobble': rot += math.sin(t * 5) * 9;
+    case 'float': dy = math.sin(t * 2.5) * 5;
+    case 'rainbow': hue += (t * 120) % 360;
+  }
+  const modes = {'add': BlendMode.plus, 'screen': BlendMode.screen, 'multiply': BlendMode.multiply, 'overlay': BlendMode.overlay, 'darken': BlendMode.darken, 'lighten': BlendMode.lighten};
+  return ShapeLook(alpha: a, rot: rot, k: k, dy: dy, flipX: onOf(s['flipX']), flipY: onOf(s['flipY']), blend: modes[blend], filter: colorAdjust(hue, bright, sat));
+}
+
 /// Draws the game: the background, the objects in layer order (shapes, emoji, pictures, text, bars), particles,
 /// darkness at night, then the HUD for the screen being shown, the touch controls and floating text.
 class GamePainter extends CustomPainter {
@@ -3551,10 +3641,16 @@ class GamePainter extends CustomPainter {
     canvas.translate(size.width / 2 + sh.dx, size.height / 2 + sh.dy);
     canvas.scale(z);
     canvas.translate(-g.camX, -g.camY);
-    final world = g.objects.where((o) => !o.ui && o.shown && !o.dead).toList()..sort((a, b) => a.layer.compareTo(b.layer));
+    final world = drawOrder(g);
     for (final o in world) {
       if (o.invuln > 0 && (o.invuln * 10).floor().isOdd) continue; // (blinks while it can't be hurt)
-      _drawObject(canvas, o, Offset(o.x, o.y), 1, o.half);
+      _drawObject(canvas, o, Offset(o.x, o.y), 1, o.lookHalf);
+      final bd = o.body;
+      if (bd != null && bd.debug) { // the collider's Show while playing: a dashed outline (green solid, yellow trigger)
+        final h = o.half, c = Offset(o.x + bd.ox, o.y + bd.oy), paint = Paint()..color = bd.sensor ? const Color(0xFFFFD23D) : const Color(0xFF36F07A)..style = PaintingStyle.stroke..strokeWidth = 1.5 / z;
+        final path = o.round ? (Path()..addOval(Rect.fromCircle(center: c, radius: h.width))) : (Path()..addRect(Rect.fromCenter(center: c, width: h.width * 2, height: h.height * 2)));
+        for (final m in path.computeMetrics()) { for (var d = 0.0; d < m.length; d += 7 / z) { canvas.drawPath(m.extractPath(d, math.min(d + 4 / z, m.length)), paint); } }
+      }
     }
     for (final f in g.worldOverlays) { f(canvas); }
     for (final p in g.particles) {
@@ -3668,6 +3764,21 @@ class GamePainter extends CustomPainter {
   }
 
   void _drawShape(Canvas canvas, GameObject o, Map<String, dynamic> s, double w, double h, bool flash, double alpha) {
+    final look = shapeLook(s, g.time);
+    if (look == null) return _drawShape0(canvas, o, s, w, h, flash, alpha, null);
+    canvas.save();
+    if (look.dy != 0) canvas.translate(0, look.dy);
+    if (look.rot != 0) canvas.rotate(look.rot * math.pi / 180);
+    if (look.k != 1) canvas.scale(look.k);
+    if (look.flipX || look.flipY) canvas.scale(look.flipX ? -1 : 1, look.flipY ? -1 : 1);
+    final layer = look.blend != null || look.filter != null;
+    if (layer) canvas.saveLayer(null, Paint()..blendMode = look.blend ?? BlendMode.srcOver..colorFilter = look.filter);
+    _drawShape0(canvas, o, s, w, h, flash, alpha * look.alpha, look);
+    if (layer) canvas.restore();
+    canvas.restore();
+  }
+
+  void _drawShape0(Canvas canvas, GameObject o, Map<String, dynamic> s, double w, double h, bool flash, double alpha, ShapeLook? look) {
     final type = '${s['type'] ?? 'rect'}', r = math.min(w, h) / 2;
     if (type == 'emoji') {
       canvas.save();
@@ -3683,7 +3794,7 @@ class GamePainter extends CustomPainter {
       case 'circle': path.addOval(Rect.fromCircle(center: Offset.zero, radius: r));
       case 'ring': path.addOval(Rect.fromCircle(center: Offset.zero, radius: r)); path.addOval(Rect.fromCircle(center: Offset.zero, radius: r * (1 - numOf(s['thickness'], 0.3)).clamp(0.1, 0.95))); path.fillType = PathFillType.evenOdd;
       case 'star':
-        final n = numOf(s['points'], 5).toInt().clamp(3, 12), inner = numOf(s['inner'], 0.45);
+        final n = numOf(s['starPoints'], s['points'] is num ? numOf(s['points']) : 5).round().clamp(3, 24), inner = numOf(s['inner'], 0.4).clamp(0.1, 0.95);
         for (var i = 0; i < n * 2; i++) {
           final a = -math.pi / 2 + i * math.pi / n, rr = i.isEven ? 1.0 : inner;
           final pt = Offset(math.cos(a) * w / 2 * rr, math.sin(a) * h / 2 * rr);
@@ -3694,6 +3805,8 @@ class GamePainter extends CustomPainter {
       case 'ellipse': path.addOval(Rect.fromCenter(center: Offset.zero, width: w, height: h));
       case 'diamond': poly([[0, -1], [1, 0], [0, 1], [-1, 0]]);
       case 'hexagon': poly([for (var i = 0; i < 6; i++) [math.cos(i * math.pi / 3), math.sin(i * math.pi / 3)]]);
+      case 'ngon': { final n = numOf(s['sides'], 6).round().clamp(3, 24); poly([for (var i = 0; i < n; i++) [math.cos(-math.pi / 2 + i * 2 * math.pi / n), math.sin(-math.pi / 2 + i * 2 * math.pi / n)]]); }
+      case 'octagon': poly([for (var i = 0; i < 8; i++) [math.cos(-math.pi / 2 + i * 2 * math.pi / 8), math.sin(-math.pi / 2 + i * 2 * math.pi / 8)]]);
       case 'pentagon': poly([for (var i = 0; i < 5; i++) [math.cos(-math.pi / 2 + i * 2 * math.pi / 5), math.sin(-math.pi / 2 + i * 2 * math.pi / 5)]]);
       case 'cross': { const t = 0.34; poly([[-t, -1], [t, -1], [t, -t], [1, -t], [1, t], [t, t], [t, 1], [-t, 1], [-t, t], [-1, t], [-1, -t], [-t, -t]]); }
       case 'arrow': poly([[-1, -0.35], [0.2, -0.35], [0.2, -1], [1, 0], [0.2, 1], [0.2, 0.35], [-1, 0.35]]);
@@ -3713,8 +3826,18 @@ class GamePainter extends CustomPainter {
       final paint = Paint()..color = fill.withValues(alpha: fill.a * alpha);
       if (fill2 != null && !flash) paint.shader = LinearGradient(colors: [fill.withValues(alpha: fill.a * alpha), fill2.withValues(alpha: fill2.a * alpha)], begin: Alignment.topCenter, end: Alignment.bottomCenter).createShader(Rect.fromCenter(center: Offset.zero, width: w, height: h));
       canvas.drawPath(path, paint);
+      if (s['anim'] == 'shimmer' && !flash) { // a band of light that sweeps across the shape
+        final ph = ((g.time * math.max(0.05, numOf(s['animSpeed'], 1)) * 0.6) % 1.6) - 0.3, x = -w / 2 + ph * w;
+        canvas.save(); canvas.clipPath(path);
+        canvas.drawRect(Rect.fromCenter(center: Offset.zero, width: w, height: h), Paint()..shader = LinearGradient(colors: [const Color(0x00FFFFFF), Color.fromRGBO(255, 255, 255, 0.45 * alpha), const Color(0x00FFFFFF)]).createShader(Rect.fromLTRB(x - w * 0.25, -h / 2, x + w * 0.25, h / 2)));
+        canvas.restore();
+      }
     }
-    if (stroke != null) canvas.drawPath(path, Paint()..color = stroke.withValues(alpha: stroke.a * alpha)..style = PaintingStyle.stroke..strokeWidth = numOf(s['lineWidth'], 2));
+    if (stroke != null) {
+      final join = strOf(s['lineJoin']), sp = Paint()..color = stroke.withValues(alpha: stroke.a * alpha)..style = PaintingStyle.stroke..strokeWidth = numOf(s['lineWidth'], 2);
+      if (join == 'round') { sp.strokeJoin = StrokeJoin.round; sp.strokeCap = StrokeCap.round; } else if (join == 'bevel') { sp.strokeJoin = StrokeJoin.bevel; }
+      canvas.drawPath(path, sp);
+    }
     if (s['emoji'] != null) {
       final tp = TextPainter(text: TextSpan(text: '${s['emoji']}', style: TextStyle(fontSize: math.min(w, h) * 0.8)), textDirection: TextDirection.ltr)..layout();
       tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2));

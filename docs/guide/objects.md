@@ -123,6 +123,25 @@ shape: { type: 'emoji', emoji: '🐱', w: 48, h: 48 }
 
 Shapes can also have a gradient fill, a soft shadow and dashed outlines (set in the Shape Renderer card).
 
+The Shape Renderer has more under its folds:
+
+- **Opacity:** 0 (invisible) to 1.
+- **Colour, flip, order & blend:**
+  - Flip left ↔ right or upside down.
+  - Turn the shape without turning the object.
+  - Hue shift, brightness and saturation (0 = grey).
+  - **Order in layer:** a higher number draws in front, without moving it in the Hierarchy. Images have this too.
+  - Blend mode: Add for glowing light, Multiply for shadows and tints, also Screen, Overlay, Darken and Lighten.
+  - Round or cut outline corners.
+- **Animated look:**
+  - Pulse, blink, spin, wobble, float, rainbow colours, or a shimmer that sweeps a shine across.
+  - It has a speed setting, and only the look moves: the collider stays put.
+- **Shapes:**
+  - A star can have 3–24 points and a point depth.
+  - **Polygon (any sides)** has 3–24 sides.
+
+**Game Settings › Environment › Lower objects draw in front** gives top-down games depth: a character below a tree is drawn over it.
+
 ### Sprite (image)
 
 ```js

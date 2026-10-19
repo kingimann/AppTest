@@ -66,6 +66,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -193,6 +199,22 @@ data class Bounds(val left: Double, val top: Double, val right: Double, val bott
 // Objects in the game
 // ---------------------------------------------------------------------------------------------------------------
 
+/** A collider component's shape as body settings (sizes left out = fit the visible shape), like the engine's colliderBody. */
+fun colliderBody(c: JsonMap?): Map<String, Any?>? {
+    if (c == null) return null
+    val pts = (c["points"] as? List<*>).orEmpty().mapNotNull { q -> (q as? List<*>)?.takeIf { it.size >= 2 }?.let { numOf(it[0]) to numOf(it[1]) } }
+    val shape = strOf(c["shape"], "box")
+    val out = mutableMapOf<String, Any?>("sensor" to onOf(c["trigger"]))
+    val sized = numOf(c["w"]) > 0 || numOf(c["h"]) > 0 || numOf(c["r"]) > 0 || pts.size >= 2
+    if (!sized) out["shape"] = "auto"
+    else if (shape == "circle" && numOf(c["r"]) > 0) { out["shape"] = "circle"; out["r"] = numOf(c["r"]) }
+    else if (pts.size >= 2) { out["shape"] = "box"; out["w"] = max(1.0, pts.maxOf { abs(it.first) } * 2); out["h"] = max(1.0, pts.maxOf { abs(it.second) } * 2) } // (polygons and edges: the box around them)
+    else { out["shape"] = "box"; out["w"] = numOf(c["w"], 20.0); out["h"] = numOf(c["h"], 20.0) }
+    for (k in listOf("ox", "oy", "bounce", "friction", "oneWay", "ignore", "conveyor", "launch", "debug")) { val v = c[k]; if (v != null && v != "") out[k] = v }
+    val pct = numOf(c["hitPct"]); if (pct > 0 && pct != 100.0) out["hitScale"] = pct / 100
+    return out
+}
+
 /** A physics body: dynamic ones fall and are pushed out of solid ones; static and kinematic ones are the ground,
  *  walls and moving platforms; sensors only notice touches. */
 class Body(j: JsonMap) {
@@ -204,6 +226,9 @@ class Body(j: JsonMap) {
     var lockX = onOf(j["lockX"]); var lockY = onOf(j["lockY"])
     var shape = strOf(j["shape"], "auto"); var w = numOf(j["w"]); var h = numOf(j["h"]); var r = numOf(j["r"]); var ox = numOf(j["ox"]); var oy = numOf(j["oy"])
     var ignore = tagList(j["ignore"])
+    /** A collider's Hitbox size (1 = the shape), a conveyor belt's speed (+ right), a bounce pad's launch speed, and a dashed outline in play. */
+    var hitScale = numOf(j["hitScale"], 1.0); var conveyor = numOf(j["conveyor"]); var launch = numOf(j["launch"]); var debug = onOf(j["debug"])
+    var launched = -9.0
     var grounded = false; var wasGrounded = false
     /** How hard it landed this frame (speed), 0 if it didn't. */
     var landed = 0.0
@@ -242,7 +267,10 @@ class GameObject(val json: JsonMap, game: PocketGame, x: Double? = null, y: Doub
     var text: MMap? = json["text"].asMap()?.toMutableMap()
     var sprite: JsonMap? = json["sprite"].asMap()
     val bar = json["bar"].asMap()
-    var body: Body? = json["body"].asMap()?.let { Body(it) }
+    var body: Body? = run { // a body, and/or a Collider component (alone it makes a solid, unmoving object)
+        val b = json["body"].asMap(); val col = colliderBody(json["collider"].asMap())
+        if (b == null && col == null) null else Body((if (b == null) mapOf<String, Any?>("type" to "static") else emptyMap()) + (b ?: emptyMap()) + (col ?: emptyMap()))
+    }
     var home = Offset(this.x.toFloat(), this.y.toFloat())
     /** Its place inside its parent (children follow their parent). */
     var lx = this.x; var ly = this.y; var lrz = this.rz
@@ -276,8 +304,10 @@ class GameObject(val json: JsonMap, game: PocketGame, x: Double? = null, y: Doub
         return b
     }
 
+    /** Half its width and height for touching and physics: the drawn size times the collider's Hitbox size. */
+    val half: Half get() { val r = rawHalf; val k = body?.hitScale ?: 1.0; return if (k > 0 && k != 1.0) Half(r.w * k, r.h * k) else r }
     /** Half its width and height (a circle: its radius both ways), scaled. */
-    val half: Half get() {
+    val rawHalf: Half get() {
         val b = body
         if (b != null && b.shape != "auto") {
             if (b.shape == "circle") { val r = (if (b.r > 0) b.r else 10.0) * max(abs(sx), abs(sy)); return Half(r, r) }
@@ -785,6 +815,12 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
                     val fr = max(ba.friction, bc.friction); if (fr > 0) bc.vx *= max(0.0, 1 - fr * dt * 10)
                 } else if (gd != 0.0 && ny * gd > 0.5) bc.ceiling = true else if (!ba.isDynamic && abs(nx) > 0.5) bc.wall = -sign(nx).toInt()
             }
+        }
+        for (e in list) { // surfaces: conveyor belts carry what stands on them, bounce pads launch it
+            val b = e.body!!; if (!b.isDynamic || !b.grounded) continue
+            val q = b.groundedOn?.body ?: continue
+            if (q.conveyor != 0.0) e.x += q.conveyor * dt
+            if (q.launch != 0.0 && gd != 0.0) { b.vy = -abs(q.launch) * gd; b.grounded = false; if (time - b.launched > 0.2) { b.launched = time; send("launch"); sfx("jump") } }
         }
         for (e in list) { val b = e.body!!; if (!b.isDynamic) { b.px = e.x; b.py = e.y } }
     }
@@ -3048,19 +3084,32 @@ private fun GameCard(title: String, sub: String, button: String, onTap: () -> Un
     }
 }
 
+/** The world objects in drawing order: Order in layer (Shape Renderer / Image), then layer, then (Lower objects in front, top-down depth) lower on screen in front; the list order otherwise. */
+fun PocketGame.drawOrder(): List<GameObject> {
+    val ys = settings["ySort"] == true
+    fun order(o: GameObject) = numOf(o.shape?.get("order") ?: o.sprite?.get("order"))
+    return objects.filter { !it.ui && it.shown && !it.dead }.sortedWith(compareBy<GameObject>({ order(it) }, { it.layer }, { if (ys && it.json["tiles"] == null) it.y else 0.0 }))
+}
+
 /** Draws the game: the background, the objects in layer order (shapes, emoji, pictures, text, bars), particles,
  *  darkness at night, then the HUD for the screen being shown, the touch controls and floating text. */
 private fun DrawScope.drawGame(g: PocketGame, measurer: TextMeasurer) {
     drawRect(g.background)
     val z = g.zoom.toFloat()
     val sh = if (g.shake > 0) Offset(((Random.nextDouble() - 0.5) * g.shake).toFloat(), ((Random.nextDouble() - 0.5) * g.shake).toFloat()) else Offset.Zero
-    val world = g.objects.filter { !it.ui && it.shown && !it.dead }.sortedBy { it.layer }
+    val world = g.drawOrder()
     translate(size.width / 2 + sh.x, size.height / 2 + sh.y) {
         scale(z, z, pivot = Offset.Zero) {
             translate(-g.camX.toFloat(), -g.camY.toFloat()) {
                 for (o in world) {
                     if (o.invuln > 0 && floor(o.invuln * 10).toInt() % 2 == 1) continue // (blinks while it can't be hurt)
-                    drawObject(g, o, Offset(o.x.toFloat(), o.y.toFloat()), 1f, o.half, measurer)
+                    drawObject(g, o, Offset(o.x.toFloat(), o.y.toFloat()), 1f, o.rawHalf, measurer)
+                    val ob = o.body
+                    if (ob != null && ob.debug) { // the collider's Show while playing: its outline (green solid, yellow trigger)
+                        val hh = o.half; val c = Offset((o.x + ob.ox * abs(o.sx)).toFloat(), (o.y + ob.oy * abs(o.sy)).toFloat())
+                        val st = Stroke(1.5f / z, pathEffect = PathEffect.dashPathEffect(floatArrayOf(4f / z, 3f / z))); val col = if (ob.sensor) Color(0xFFFFD23D) else Color(0xFF36F07A)
+                        if (o.round) drawCircle(col, hh.w.toFloat(), c, style = st) else drawRect(col, Offset(c.x - hh.w.toFloat(), c.y - hh.h.toFloat()), Size((hh.w * 2).toFloat(), (hh.h * 2).toFloat()), style = st)
+                    }
                 }
                 for (f in g.worldOverlays.toList()) f()
                 for (p in g.particles) {
@@ -3141,7 +3190,12 @@ private fun DrawScope.drawObject(g: PocketGame, o: GameObject, at: Offset, k: Fl
         rotate((o.rz + fx.rz).toFloat(), pivot = Offset.Zero) {
             scale(sign(o.sx).toFloat().let { if (it == 0f) 1f else it } * k * bump * fx.sx.toFloat(), sign(o.sy).toFloat().let { if (it == 0f) 1f else it } * k * bump * fx.sy.toFloat(), pivot = Offset.Zero) { // (the size is in half: stretched HUD objects fill their row)
                 val s = o.shape
-                if (s != null) drawShape(o, s, w, h, flash > 0, alpha, measurer)
+                if (s != null) {
+                    val L = shapeLook(s, g.time)
+                    translate(0f, L.dy) { rotate(L.rot, pivot = Offset.Zero) { scale(L.k * L.flipX, L.k * L.flipY, pivot = Offset.Zero) {
+                        drawShape(o, s, w, h, flash > 0, alpha * L.alpha, measurer, L, g.time)
+                    } } }
+                }
                 val sp = o.sprite
                 if (sp != null && s == null && sp["src"]?.toString()?.isNotEmpty() == true) // (pictures: a placeholder box; the web build draws the picture)
                     drawRoundRect(Color.White.copy(alpha = 0.25f * alpha), Offset(-w / 2, -h / 2), Size(w, h), CornerRadius(8f))
@@ -3167,7 +3221,40 @@ private fun DrawScope.drawObject(g: PocketGame, o: GameObject, at: Offset, k: Fl
     }
 }
 
-private fun DrawScope.drawShape(o: GameObject, s: JsonMap, w: Float, h: Float, flash: Boolean, alpha: Float, measurer: TextMeasurer) {
+/** Shape Renderer extras that only change how it's drawn (the engine's shapeLook): opacity, flip, turn, blend mode, colour adjust and a looping animation. */
+class ShapeLook(val alpha: Float, val rot: Float, val k: Float, val dy: Float, val flipX: Float, val flipY: Float, val cf: ColorFilter?, val bm: BlendMode, val join: StrokeJoin, val cap: StrokeCap)
+fun shapeLook(s: JsonMap, time: Double): ShapeLook {
+    fun has(k: String) = s[k] != null && s[k] != "" && numOf(s[k], Double.NaN).let { !it.isNaN() }
+    val T = time * max(0.05, numOf(s["animSpeed"], 1.0))
+    var a = if (has("opacity")) numOf(s["opacity"]).coerceIn(0.0, 1.0) else 1.0
+    var rot = numOf(s["rot"]); var k = 1.0; var dy = 0.0; var hue = numOf(s["hue"])
+    when (strOf(s["anim"])) {
+        "pulse" -> k = 1 + sin(T * 4) * 0.08
+        "blink" -> a *= 0.3 + 0.7 * (sin(T * 6) * 0.5 + 0.5)
+        "spin" -> rot += (T * 180) % 360
+        "wobble" -> rot += sin(T * 5) * 9
+        "float" -> dy = sin(T * 2.5) * 5
+        "rainbow" -> hue += (T * 120) % 360
+    }
+    val bright = if (has("bright")) numOf(s["bright"]) / 100 else 1.0; val sat = if (has("sat")) numOf(s["sat"]) / 100 else 1.0
+    val cf = if (hue != 0.0 || bright != 1.0 || sat != 1.0) ColorFilter.colorMatrix(ColorMatrix(colourAdjust(hue, bright, sat))) else null
+    val bm = when (strOf(s["blend"])) { "add" -> BlendMode.Plus; "screen" -> BlendMode.Screen; "multiply" -> BlendMode.Multiply; "overlay" -> BlendMode.Overlay; "darken" -> BlendMode.Darken; "lighten" -> BlendMode.Lighten; else -> BlendMode.SrcOver }
+    val join = when (strOf(s["lineJoin"])) { "round" -> StrokeJoin.Round; "bevel" -> StrokeJoin.Bevel; else -> StrokeJoin.Miter }
+    return ShapeLook(a.toFloat(), rot.toFloat(), k.toFloat(), dy.toFloat(), if (s["flipX"] == true) -1f else 1f, if (s["flipY"] == true) -1f else 1f, cf, bm, join, if (join == StrokeJoin.Round) StrokeCap.Round else StrokeCap.Butt)
+}
+/** CSS hue-rotate(deg), then brightness, then saturate as one 4×5 colour matrix (alpha unchanged). */
+fun colourAdjust(deg: Double, bright: Double, sat: Double): FloatArray {
+    val c = cos(deg * PI / 180); val n = sin(deg * PI / 180)
+    val H = doubleArrayOf(0.213 + c * 0.787 - n * 0.213, 0.715 - c * 0.715 - n * 0.715, 0.072 - c * 0.072 + n * 0.928,
+        0.213 - c * 0.213 + n * 0.143, 0.715 + c * 0.285 + n * 0.140, 0.072 - c * 0.072 - n * 0.283,
+        0.213 - c * 0.213 - n * 0.787, 0.715 - c * 0.715 + n * 0.715, 0.072 + c * 0.928 + n * 0.072)
+    val S = doubleArrayOf(0.213 + 0.787 * sat, 0.715 - 0.715 * sat, 0.072 - 0.072 * sat, 0.213 - 0.213 * sat, 0.715 + 0.285 * sat, 0.072 - 0.072 * sat, 0.213 - 0.213 * sat, 0.715 - 0.715 * sat, 0.072 + 0.928 * sat)
+    val M = DoubleArray(9) // S × (bright × H)
+    for (i in 0 until 3) for (j in 0 until 3) { var v = 0.0; for (q in 0 until 3) v += S[i * 3 + q] * H[q * 3 + j] * bright; M[i * 3 + j] = v }
+    return floatArrayOf(M[0].toFloat(), M[1].toFloat(), M[2].toFloat(), 0f, 0f, M[3].toFloat(), M[4].toFloat(), M[5].toFloat(), 0f, 0f, M[6].toFloat(), M[7].toFloat(), M[8].toFloat(), 0f, 0f, 0f, 0f, 0f, 1f, 0f)
+}
+private fun DrawScope.drawShape(o: GameObject, s: JsonMap, w: Float, h: Float, flash: Boolean, alpha: Float, measurer: TextMeasurer, look: ShapeLook? = null, time: Double = 0.0) {
+    val cf = look?.cf; val bm = look?.bm ?: BlendMode.SrcOver
     val type = s["type"]?.toString() ?: "rect"; val r = min(w, h) / 2
     if (type == "emoji") {
         val t = measurer.measure(strOf(s["emoji"], "⭐"), TextStyle(fontSize = (h * 0.92f / density).sp, color = Color.Black.copy(alpha = alpha)))
@@ -3180,7 +3267,7 @@ private fun DrawScope.drawShape(o: GameObject, s: JsonMap, w: Float, h: Float, f
         "circle" -> path.addOval(Rect(Offset.Zero, r))
         "ring" -> { path.addOval(Rect(Offset.Zero, r)); path.addOval(Rect(Offset.Zero, r * (1 - numOf(s["thickness"], 0.3)).coerceIn(0.1, 0.95).toFloat())); path.fillType = PathFillType.EvenOdd }
         "star" -> {
-            val nPts = numOf(s["points"], 5.0).toInt().coerceIn(3, 12); val inner = numOf(s["inner"], 0.45)
+            val nPts = numOf(s["starPoints"], 5.0).roundToInt().coerceIn(3, 24); val inner = numOf(s["inner"], 0.4).coerceIn(0.1, 0.95)
             for (i in 0 until nPts * 2) { val a = -PI / 2 + i * PI / nPts; val rr = if (i % 2 == 0) 1.0 else inner; val x = (cos(a) * w / 2 * rr).toFloat(); val y = (sin(a) * h / 2 * rr).toFloat(); if (i == 0) path.moveTo(x, y) else path.lineTo(x, y) }
             path.close()
         }
@@ -3189,6 +3276,7 @@ private fun DrawScope.drawShape(o: GameObject, s: JsonMap, w: Float, h: Float, f
         "diamond" -> poly(listOf(0.0 to -1.0, 1.0 to 0.0, 0.0 to 1.0, -1.0 to 0.0))
         "hexagon" -> poly((0 until 6).map { cos(it * PI / 3) to sin(it * PI / 3) })
         "pentagon" -> poly((0 until 5).map { cos(-PI / 2 + it * 2 * PI / 5) to sin(-PI / 2 + it * 2 * PI / 5) })
+        "ngon" -> { val nSides = numOf(s["sides"], 6.0).roundToInt().coerceIn(3, 24); poly((0 until nSides).map { cos(-PI / 2 + it * 2 * PI / nSides) to sin(-PI / 2 + it * 2 * PI / nSides) }) } // a regular polygon with any number of sides
         "cross" -> { val t = 0.34; poly(listOf(-t to -1.0, t to -1.0, t to -t, 1.0 to -t, 1.0 to t, t to t, t to 1.0, -t to 1.0, -t to t, -1.0 to t, -1.0 to -t, -t to -t)) }
         "arrow" -> poly(listOf(-1.0 to -0.35, 0.2 to -0.35, 0.2 to -1.0, 1.0 to 0.0, 0.2 to 1.0, 0.2 to 0.35, -1.0 to 0.35))
         "capsule", "pill" -> path.addRoundRect(RoundRect(Rect(Offset(-w / 2, -h / 2), Size(w, h)), CornerRadius(r)))
@@ -3201,17 +3289,21 @@ private fun DrawScope.drawShape(o: GameObject, s: JsonMap, w: Float, h: Float, f
         else -> { val cr = numOf(s["radius"]).toFloat().coerceIn(0f, min(w, h) / 2); path.addRoundRect(RoundRect(Rect(Offset(-w / 2, -h / 2), Size(w, h)), CornerRadius(cr))) }
     }
     val fill = if (flash) Color.White else parseColor(s["fill"]); val fill2 = parseColor(s["fill2"]); val stroke = parseColor(s["stroke"]); val glow = numOf(s["glow"]).toFloat()
-    if (s["shadow"] == true && fill != null) translate(0f, 4f) { drawPath(path, Color.Black.copy(alpha = 0.25f * alpha)) }
+    if (s["shadow"] == true && fill != null) translate(0f, 4f) { drawPath(path, Color.Black.copy(alpha = 0.25f * alpha), blendMode = bm) }
     val glowCol = fill ?: stroke
     if (glow > 0 && glowCol != null) for (i in 3 downTo 1) { // (a soft glow: a few faint, bigger copies)
         val gk = 1 + glow / max(w, h) * i * 0.5f
-        scale(gk, gk, pivot = Offset.Zero) { drawPath(path, glowCol.copy(alpha = 0.12f * alpha)) }
+        scale(gk, gk, pivot = Offset.Zero) { drawPath(path, glowCol.copy(alpha = 0.12f * alpha), colorFilter = cf, blendMode = bm) }
     }
     if (fill != null) {
-        if (fill2 != null && !flash) drawPath(path, Brush.verticalGradient(listOf(fill.copy(alpha = fill.alpha * alpha), fill2.copy(alpha = fill2.alpha * alpha)), -h / 2, h / 2))
-        else drawPath(path, fill.copy(alpha = fill.alpha * alpha))
+        if (fill2 != null && !flash) drawPath(path, Brush.verticalGradient(listOf(fill.copy(alpha = fill.alpha * alpha), fill2.copy(alpha = fill2.alpha * alpha)), -h / 2, h / 2), colorFilter = cf, blendMode = bm)
+        else drawPath(path, fill.copy(alpha = fill.alpha * alpha), colorFilter = cf, blendMode = bm)
+        if (s["anim"] == "shimmer") clipPath(path) { // a band of light that sweeps across the shape
+            val ph = ((time * max(0.05, numOf(s["animSpeed"], 1.0)) * 0.6) % 1.6) - 0.3; val x = (-w / 2 + ph * w).toFloat()
+            drawRect(Brush.horizontalGradient(listOf(Color.White.copy(alpha = 0f), Color.White.copy(alpha = 0.45f * alpha), Color.White.copy(alpha = 0f)), x - w * 0.25f, x + w * 0.25f), Offset(-w / 2, -h / 2), Size(w, h))
+        }
     }
-    if (stroke != null) drawPath(path, stroke.copy(alpha = stroke.alpha * alpha), style = Stroke(numOf(s["lineWidth"], 2.0).toFloat()))
+    if (stroke != null) drawPath(path, stroke.copy(alpha = stroke.alpha * alpha), style = Stroke(numOf(s["lineWidth"], 2.0).toFloat(), join = look?.join ?: StrokeJoin.Miter, cap = look?.cap ?: StrokeCap.Butt), colorFilter = cf, blendMode = bm)
     if (s["emoji"] != null) {
         val t = measurer.measure(s["emoji"].toString(), TextStyle(fontSize = (min(w, h) * 0.8f / density).sp))
         drawText(t, topLeft = Offset(-t.size.width / 2f, -t.size.height / 2f))

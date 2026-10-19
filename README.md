@@ -1535,6 +1535,8 @@ Children store `parent: '<id>'` and their `x / y / z / rotation / scale` are rel
 - **Less to scroll:**
   - Rarely used settings fold away, and a fold opens by itself (with a dot) when something in it is set:
     - Shape: **More looks** (outline width, dashes, gradient, shadow, glow).
+    - Shape: **opacity**, **flip**, turn, **hue / brightness / saturation**, **order in layer** (images too), **blend modes** (add, screen, multiply, overlay…), round outline corners, an **animated look** (pulse, blink, spin, wobble, float, rainbow, shimmer), star points and depth, and polygons with any number of sides. Game Settings can draw lower objects in front (top-down depth).
+    - 2D colliders: friction and bounciness, a **hitbox size %** (forgiving hits), pass-through tags, **conveyor belts**, **bounce pads** (launch event), and showing the hitbox while playing.
     - Text: **Style**, **Wrapping**, **Outline / shadow / glow**, **Numbers and fitting**, **Label box** and **Animation**.
     - Components with a long list: the extra settings go in **More settings**.
   - Descriptions show two lines; tap to read the rest.

@@ -799,7 +799,10 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
 // =============================================================================================================
 
 /** opts: { game, html() → Promise<string> (the native build), bridge (the window.Capacitor bridge script), products, files(kind), download(kind), toast } */
-export function openGamePreview({ game, html, bridge, products = [], files, download, toast = () => {}, host = null }) {
+export function openGamePreview({ game, html, bridge, products = [], files, download, toast = () => {}, host = null, report = null }) {
+  // native: Flutter and Kotlin write the game as native code (no web view) when it's 2D; the web view projects are still there
+  let mode = report?.ok ? 'native' : 'webview';
+  const nativeNow = () => mode === 'native' && kind !== 'swift';
   let fresh = false, kind = 'flutter', view = 'app', codeFiles = null, codeSel = '', page = null, url = '', perm = 'prompt', owned = new Set(), sheet = null, closed = false;
   const log = [];
   const phone = h('div', { class: 'npv-phone game' }), codeBox = h('div', { class: 'npv-code' }), logBox = h('div', { class: 'npv-log', 'aria-live': 'polite' });
@@ -817,17 +820,24 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
 
   function drawHead() {
     head.replaceChildren(
-      h('div', { class: 'npv-title' }, h('b', {}, 'Native game'), h('small', {}, `${game.name || 'Game'} in a ${platform() === 'ios' ? 'WKWebView' : 'WebView'}`)),
+      h('div', { class: 'npv-title' }, h('b', {}, 'Native game'), h('small', {}, nativeNow() ? `${game.name || 'Game'}, drawn by ${kind === 'kotlin' ? 'Compose' : 'Flutter'} (no web view)` : `${game.name || 'Game'} in a ${platform() === 'ios' ? 'WKWebView' : 'WebView'}`)),
       seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'Xcode']], kind, (k) => { kind = k; codeFiles = null; perm = 'prompt'; start(); }),
+      report?.ok && kind !== 'swift' && seg([['native', 'Native code'], ['webview', 'Web view']], mode, (k) => { mode = k; codeFiles = null; start(); }),
       seg([['app', 'Game'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
       h('div', { class: 'npv-acts' },
         zoom.controls,
         h('button', { class: 'npv-btn', title: 'Build the game again from the project and restart it', onclick: () => refresh() }, '↺ Restart'),
-        h('button', { class: 'npv-btn primary', onclick: () => download(kind) }, '⬇ Download'),
+        h('button', { class: 'npv-btn primary', onclick: () => download(kind, nativeNow() ? 'native' : 'webview') }, '⬇ Download'),
         where.button(),
         h('button', { class: 'npv-btn', 'aria-label': 'Close', onclick: close }, '✕')));
   }
   function drawLog() {
+    if (nativeNow()) { // the native code: what it covers, and what has no native version yet
+      const gaps = [...(report.missing || []).map((m) => `${m.type} (${m.names.slice(0, 3).join(', ')}${m.names.length > 3 ? '…' : ''})`), ...(report.sprites ? ['pictures (drawn as their shape)'] : []), ...(report.levels ? [`levels after the first (${report.levels})`] : [])];
+      logBox.replaceChildren(h('b', {}, 'Native code'), h('div', { class: 'npv-logl muted' }, `The download draws the game with ${kind === 'kotlin' ? 'Compose' : 'Flutter'} and runs it in ${kind === 'kotlin' ? 'Kotlin' : 'Dart'}: no web view. The phone here plays the same game with the same rules.`),
+        gaps.length ? h('div', { class: 'npv-logl', 'data-gaps': '' }, 'No native version yet: ' + gaps.join(', ') + '. Choose Web view to keep them.') : h('div', { class: 'npv-logl', 'data-gaps': '' }, 'Everything in this game has a native version.'));
+      return;
+    }
     logBox.replaceChildren(h('b', {}, 'Native calls'), ...(log.length ? log.map((l) => h('div', { class: 'npv-logl' }, h('small', {}, l.at), ' ', l.t)) : [h('div', { class: 'npv-logl muted' }, `Haptics, notifications${hasStore() ? ', purchases' : ''} and Back show up here, the way the ${label()} project answers them.`)]));
   }
   function overlay(el) { phone.querySelector('.npv-over')?.remove(); if (el) phone.append(h('div', { class: 'npv-over' }, el)); }
@@ -914,7 +924,7 @@ export function openGamePreview({ game, html, bridge, products = [], files, down
   async function drawCode() {
     if (!codeFiles) {
       codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Writing the project…'));
-      try { codeFiles = (await files(kind)).filter((f) => typeof f.data === 'string'); } catch (err) { codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Could not write the project: ' + err.message)); return; }
+      try { codeFiles = (await files(kind, nativeNow() ? 'native' : 'webview')).filter((f) => typeof f.data === 'string'); } catch (err) { codeBox.replaceChildren(h('div', { class: 'npv-empty' }, 'Could not write the project: ' + err.message)); return; }
       codeSel = (codeFiles.find((f) => /main\.dart$|GameBridge\.kt$|GameApp\.swift$/.test(f.name)) || codeFiles[0])?.name || '';
     }
     const f = codeFiles.find((x) => x.name === codeSel) || codeFiles[0], short = (n) => n.split('/').slice(1).join('/');

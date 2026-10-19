@@ -140,7 +140,7 @@ The app's ID is \`${o.appId}\` (app.json).
 - \`pocket.js\`: the runtime — the state (variables and data, saved on the phone), the page stack on each tab, and the building blocks.
 
 Change anything: from now on the code is yours.
-${todo.length ? `\n## To build\n\nThese parts have no native version yet; they're placeholders (\`TodoBox\`) in the pages:\n\n${todo.map((t) => `- ${t.name} (${t.type})`).join('\n')}\n` : ''}`;
+${todo.length ? `\n## To build\n\nThese parts have no native version yet. Each is drawn as its card (shape, colours, text and what's inside) without its own behaviour, or as a placeholder (\`TodoBox\`) when it has no card:\n\n${todo.map((t) => `- ${t.name} (${t.type})`).join('\n')}\n` : ''}`;
 }
 
 /** The React Native (Expo) project's files. o: { name, appId, version, slug }; runtime: the text of editor/native/rn/pocket.js. */

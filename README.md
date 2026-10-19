@@ -1007,7 +1007,9 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 
 ### Character Controller 2D
 
-- One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle) and Grid steps. Only the settings that matter for the chosen type are shown, with a tip for each.
+- One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle), Grid steps, Jetpack (hold to fly up, with fuel), Lanes (swipe between lanes) and Slingshot (pull back and let go, with an aim line). Only the settings that matter for the chosen type are shown, with a tip for each.
+- **Controls:** best for the movement, a joystick (floating or fixed), a D-pad, ◀ ▶ buttons, touching the sides of the screen, holding where it should go, swipes, tilt or keyboard only. Space jumps, Shift runs, and X / K dash on a keyboard.
+- **Platformer moves** (Platformer and the platformer type): air jumps, coyote time, jump buffer, max fall speed, wall slide and wall jump, run, dash (Fire, double tap or swipe; dashes in the air), down to drop through one-way platforms, and ground pound. These fire the *dash*, *wallJump*, *airJump* and *groundPound* events.
 
 ### Progress bars and in-game loading screens
 

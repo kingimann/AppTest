@@ -30,7 +30,7 @@ import * as CM from './codemagic.js';
 import { expoFiles, BRIDGE } from './expo.js';
 import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
 import { flutterNativeFiles, swiftNativeFiles, nativeReadme, dartElement, swiftElement } from './nativecode.js';
-import { appModel } from './appmodel.js';
+import { appModel, hudModel } from './appmodel.js';
 import { kotlinNativeFiles, kotlinGameFiles, kElement } from './kotlincode.js';
 import { reactNativeFiles, rnElement } from './rncode.js';
 import { PREFABS_2D, PREFABS_3D, OBJECTS_2D, OBJECTS_3D } from './presets.js';
@@ -4367,8 +4367,9 @@ function nativeBadges(box) {
   if (root.settings?.app || is3D()) return;
   for (const c of box.querySelectorAll(':scope > .comp[data-key^="b"]')) {
     const type = (c.dataset.key || '').replace(/^b\d+/, ''); if (!Behaviors[type]) continue;
-    const ok = NATIVE_GAME_COMPONENTS.has(type);
-    c.querySelector('.comp-h .t')?.append(h('span', { class: 'nat-chip ' + (ok ? 'ok' : 'no'), title: ok ? 'The native Flutter and Kotlin game has this component' : 'Not in the native Flutter / Kotlin game yet: it works in the web view projects' }, ok ? 'native' : 'web view only'));
+    const widget = !NATIVE_GAME_COMPONENTS.has(type) && /^ui|^data/.test(type) && !!selectedId && hudModel(project || root, NATIVE_GAME_COMPONENTS).some((x) => x.id === selectedId);
+    const ok = NATIVE_GAME_COMPONENTS.has(type) || widget;
+    c.querySelector('.comp-h .t')?.append(h('span', { class: 'nat-chip ' + (ok ? 'ok' : 'no'), title: widget ? 'The native Flutter and Kotlin game draws it with the native app widget' : ok ? 'The native Flutter and Kotlin game has this component' : 'Not in the native Flutter / Kotlin game yet: it works in the web view projects' }, ok ? 'native' : 'web view only'));
   }
 }
 /** A row of chips, one per component (or Game Settings section), that stays at the top of the Inspector: tap one to jump there. */
@@ -7304,7 +7305,7 @@ async function gameFilesFor(kind, so, html, icon) {
 async function nativeGameFiles(kind, so, game, icon) {
   const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });
   if (kind === 'kotlin') return kotlinGameNativeFiles(game, { ...so, slug: slug(so.name) }, { runtime: await (await get('./native/kotlin/Pocket.kt')).text(), gameRuntime: await (await get('./native/kotlin/PocketGame.kt')).text(), wrapper: await kotlinWrapper(), icon });
-  return flutterGameFiles(game, so, { runtime: await (await get('./native/flutter/pocket_game.dart')).text(), icon });
+  return flutterGameFiles(game, so, { runtime: await (await get('./native/flutter/pocket_game.dart')).text(), appRuntime: await (await get('./native/flutter/pocket.dart')).text(), icon });
 }
 async function exportNativeGame(kind) {
   const so = nativeOpts(), label = kind === 'kotlin' ? 'Kotlin' : 'Flutter';

@@ -121,13 +121,11 @@ function elementOf(e, kids, todo, ctx = {}) {
 /** Where an element sits on its page, top to bottom (anchors at the bottom come last). */
 const orderOf = (e) => { const a = e.anchor || 'center', g = a.startsWith('top') ? 0 : a.startsWith('bottom') ? 2 : 1, hx = a.endsWith('left') ? 0 : a.endsWith('right') ? 2 : 1; return g * 100000 + (+e.y || 0) + hx * 0.01 + (+e.x || 0) / PAGE_W * 0.001; }; // (top to bottom; in a row, left to right)
 
-/** game: the project JSON (as saved). */
-export function appModel(game) {
-  const ents = game.entities || [], byParent = new Map(), todo = [], ctx = { levels: (game.levels || []).length };
+/** The model of an object and everything inside it (elementOf for each, with where each sits in its card). */
+function treeBuilder(game, todo, ctx) {
+  const ents = game.entities || [], byParent = new Map();
   for (const e of ents) { const k = e.parent || ''; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(e); }
   const kidsOf = (e) => (byParent.get(e.id) || []).slice().sort((a, b) => orderOf(a) - orderOf(b));
-  const beh = (e, t) => (e.behaviors || []).find((b) => b.type === t);
-  const P = (b) => (b ? b.params || b : {});
   /** Where a thing sits in its card: the anchor (0, ½ or 1 of the width / height), the offset from it, its size, and how its text lines up. */
   const pinOf = (e) => { const a = e.anchor || 'center', sh = e.shape || {};
     return { fx: /left$/.test(a) ? 0 : /right$/.test(a) ? 1 : 0.5, fy: /^top/.test(a) ? 0 : /^bottom/.test(a) ? 1 : 0.5, x: +e.x || 0, y: +e.y || 0,
@@ -138,7 +136,32 @@ export function appModel(game) {
     if (e.row != null && e.row !== '') { const cells = kids.filter((k) => k.pin.m >= 0); cells.forEach((k, i) => { k.pin.cell = i; k.pin.cells = cells.length; }); } // the cells of a row
     const x = elementOf(e, kids, todo, ctx); if (x) { x.pin = pinOf(e); x.src = e.id; if (x.box) x.box.src = e.id; } return x; // (src: the object it's made from, so the native preview can pick it for editing)
   };
+  return { kidsOf, build };
+}
 
+/** A game's HUD objects that native app widgets can draw (sliders, toggles, charts, carousels, a shop…), for the native game
+ *  export: [{ id, el }]. skip: component types the native game runtime already has (its own version wins). */
+export function hudModel(game, skip = new Set()) {
+  const todo = [], ctx = { levels: (game.levels || []).length }, { build } = treeBuilder(game, todo, ctx), out = [];
+  const isTpl = new Set((game.entities || []).filter((e) => e.template).map((e) => e.id));
+  for (const e of game.entities || []) {
+    if (!e.ui || e.template || isTpl.has(e.parent)) continue;
+    const types = (e.behaviors || []).map((b) => b.type).filter((t) => /^ui|^data/.test(t));
+    if (!types.some((t) => !skip.has(t))) continue; // (all its parts already native in the game runtime)
+    const el = build(e);
+    if (!el || ['todo', 'box', 'text', 'space', 'image', 'button'].includes(el.kind)) continue;
+    const inside = []; const walk = (id) => { for (const k of game.entities || []) if (k.parent === id) { inside.push(k.id); walk(k.id); } }; walk(e.id);
+    out.push({ id: e.id, el, inside }); // (inside: its children, drawn by the widget too)
+  }
+  return out;
+}
+
+/** game: the project JSON (as saved). */
+export function appModel(game) {
+  const ents = game.entities || [], todo = [], ctx = { levels: (game.levels || []).length };
+  const { kidsOf, build } = treeBuilder(game, todo, ctx);
+  const beh = (e, t) => (e.behaviors || []).find((b) => b.type === t);
+  const P = (b) => (b ? b.params || b : {});
   const bar = ents.map((e) => beh(e, 'uiAppBar')).find(Boolean), barP = P(bar);
   const titles = {}; for (const line of String(barP.titles || '').split('\n')) { const m = line.match(/^\s*([^=]+?)\s*=\s*(.+?)\s*$/); if (m) titles[m[1]] = m[2]; }
   const nav = ents.map((e) => beh(e, 'uiBottomNav')).find(Boolean), navP = P(nav);

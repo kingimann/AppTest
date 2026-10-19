@@ -188,6 +188,8 @@ The version comes from **App** in Build Settings and the build number from the F
 
 ## Native Preview for games
 
+**▶ Test** (in the Native Preview and the Native App Preview) plays the game or app **full screen**, the way it fills a phone, like Play in the scene. A slim bar at the top has **✕ Done**, **Flutter / Kotlin / Xcode** (SwiftUI and React Native for apps), **Native / Web** for games, the Android **◁** Back key and **↺** to restart. Esc goes back too.
+
 **File › Native Preview…**, the phone button in the scene toolbar, or *Preview it* in Build Settings › Flutter project runs your **game** in a phone right in the scene view (sized to fit; **⤢** for full screen; it rebuilds the game a moment after you edit, and **↺ Restart** rebuilds it now), inside a web view the way the native projects host it, and lets you read each project's code. Pick **Flutter**, **Kotlin** or **Xcode** at the top:
 
 - the game sees a native Android (Flutter, Kotlin) or iOS (Xcode) app, just as it will on the phone;

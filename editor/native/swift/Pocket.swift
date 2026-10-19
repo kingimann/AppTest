@@ -1,6 +1,7 @@
 // Pocket runtime for SwiftUI: the app's state (variables, data collections, the opened record, navigation)
 // and the building blocks the pages use (PocketPage, RecordList, RecordForm, PButton…). Made by Pocket Engine's
 // native export; the pages in App/Pages/ are yours to change, and so is this file.
+import Combine
 import SwiftUI
 
 // MARK: - Values and data definitions
@@ -216,6 +217,10 @@ struct Palette {
         if let col = c[t] { return col }
         let h = v.replacingOccurrences(of: "#", with: "")
         if h.count == 6, let n = UInt32(h, radix: 16) { return Color(hex: n) }
+        if v.hasPrefix("rgb") { // rgba(255,255,255,0.1)
+            let parts = v.components(separatedBy: CharacterSet(charactersIn: "0123456789.").inverted).filter { !$0.isEmpty }.compactMap { Double($0) }
+            if parts.count >= 3 { return Color(red: parts[0] / 255, green: parts[1] / 255, blue: parts[2] / 255).opacity(parts.count > 3 ? parts[3] : 1) }
+        }
         return nil
     }
     var bg: Color { c["bg"]! }
@@ -242,6 +247,8 @@ final class AppState: ObservableObject {
     let bar: BarStyle, nav: NavStyle
     /// The Side Menu (nil: the app has none), and whether it's open.
     let menu: SideMenuStyle?
+    /// Pop-up notifications ("notify Title|text|icon"); nil: the app has none.
+    let notify: NotifyStyle?
     @Published var menuOpen = false
     var menuOn: Bool { menu != nil && bar.left != "none" && bar.left != "back" }
     /// The page on screen.
@@ -253,8 +260,8 @@ final class AppState: ObservableObject {
     @Published var openCollection: String? = nil
     @Published var openId: String? = nil
 
-    init(name: String, home: String, themeSetting: String = "follow the phone", light: Palette, dark: Palette, vars: [String: Val], tabs: [NavTab], collections: [Collection], stats: [Stat], bar: BarStyle = BarStyle(), nav: NavStyle = NavStyle(), menu: SideMenuStyle? = nil) {
-        self.name = name; self.home = home; self.themeSetting = themeSetting; self.light = light; self.dark = dark; self.bar = bar; self.nav = nav; self.menu = menu
+    init(name: String, home: String, themeSetting: String = "follow the phone", light: Palette, dark: Palette, vars: [String: Val], tabs: [NavTab], collections: [Collection], stats: [Stat], bar: BarStyle = BarStyle(), nav: NavStyle = NavStyle(), menu: SideMenuStyle? = nil, notify: NotifyStyle? = nil) {
+        self.name = name; self.home = home; self.themeSetting = themeSetting; self.light = light; self.dark = dark; self.bar = bar; self.nav = nav; self.menu = menu; self.notify = notify
         self.tabs = tabs; self.collections = collections; self.stats = stats; self.vars = vars
         paths = Array(repeating: [], count: max(1, tabs.count))
         load()
@@ -446,10 +453,32 @@ final class AppState: ObservableObject {
     }
     func back() { if !paths[tab].isEmpty { paths[tab].removeLast() } }
 
+    // MARK: messages
+    /// The app's messages (a button's "message" action, App Bar buttons, Side Menu rows): popups, timers and swipe pages hear them with .onReceive.
+    let messages = PassthroughSubject<String, Never>()
+    /// The pop-up notifications on screen now.
+    @Published var toasts: [Toast] = []
+    func send(_ message: String) {
+        let m = fill(message).trimmingCharacters(in: .whitespaces)
+        guard !m.isEmpty else { return }
+        messages.send(m)
+        guard let n = notify, m == n.listen || m.hasPrefix(n.listen + " ") else { return }
+        let parts = m.dropFirst(n.listen.count).trimmingCharacters(in: .whitespaces).components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
+        let icon = parts.count > 2 && !parts[2].isEmpty ? parts[2] : (n.look == "achievement" ? "🏆" : "")
+        let t = Toast(title: parts[0], text: parts.count > 1 ? parts[1] : "", icon: icon)
+        toasts.append(t)
+        if toasts.count > n.max { toasts.removeFirst(toasts.count - n.max) }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(n.seconds * 1_000_000_000))
+            self.toasts.removeAll { $0.id == t.id }
+        }
+    }
+
     /// What a button does (the same words as the button's Action in Pocket Engine).
     func run(_ action: String, _ value: Val = .s(""), _ amount: Double = 1) {
         let v = value.text
         switch action {
+        case "message": send(v)
         case "go to page": go(v)
         case "go back": back()
         case "set variable": set(v, .n(amount))
@@ -506,6 +535,7 @@ struct PocketRoot: View {
             }
         }
         if app.menuOpen && app.menu != nil { PocketDrawer().transition(.move(edge: app.menu?.side == "right" ? .trailing : .leading)) }
+        if app.notify != nil { ToastLayer() } // (pop-up notifications over every page)
         }
         .animation(.easeOut(duration: 0.25), value: app.menuOpen)
         .tint(app.light.resolve(app.nav.active) ?? app.light.accent)
@@ -526,7 +556,7 @@ struct PocketDrawer: View {
             Button {
                 if it.kind == "toggle" { app.set(it.to, .b(!(app.get(it.to)?.isOn ?? false))) }
                 else if it.kind == "page" { close(); app.go(it.to) }
-                else { close(); print("TODO: the Side Menu sends \"\(it.to)\"") }
+                else { close(); app.send(it.to.hasPrefix("msg:") ? String(it.to.dropFirst(4)) : it.to) }
             } label: {
                 HStack(spacing: 14) {
                     if !it.icon.isEmpty { BarIcon(name: it.icon, size: 22) }
@@ -674,7 +704,7 @@ struct PocketBar: ViewModifier {
                         Button {
                             if a.does.contains("dark mode") { app.set("darkMode", .b(scheme != .dark)) }
                             else if a.does.hasPrefix("page:") { app.go(String(a.does.dropFirst(5))) }
-                            else { print("TODO: the App Bar button sends \"\(a.does)\"") }
+                            else { app.send(a.does) }
                         } label: {
                             BarIcon(name: a.icon == "theme" ? (scheme == .dark ? "sun" : "moon") : a.icon, size: b.circles == "plain" ? 22 : 18).foregroundColor(ic)
                                 .frame(width: 34, height: 34)
@@ -1911,5 +1941,617 @@ struct Trending: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - More components: charts, carousels, swipe pages, timers, keypads, popups, notifications…
+
+/// How pop-up notifications look and where they show.
+struct NotifyStyle {
+    var listen = "notify", position = "top", look = "card"
+    var seconds: Double = 3
+    var max = 3
+    var bg = "#1e2235", text = "#ffffff", accent = "#ffd23d"
+}
+
+struct Toast: Identifiable, Equatable {
+    let id = UUID()
+    let title: String, text: String, icon: String
+}
+
+/// The notifications on screen, stacked at the top (or bottom, or centre).
+struct ToastLayer: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var body: some View {
+        let p = app.palette(scheme), n = app.notify ?? NotifyStyle()
+        let bg = p.resolve(n.bg) ?? p.card, fg = p.resolve(n.text) ?? p.text, ac = p.resolve(n.accent) ?? p.accent
+        let pill = n.look == "pill", banner = n.look == "banner"
+        VStack(spacing: 8) {
+            if n.position == "bottom" || n.position == "center" { Spacer() }
+            ForEach(app.toasts) { t in
+                HStack(spacing: 10) {
+                    if !t.icon.isEmpty { Text(t.icon).font(.system(size: pill ? 18 : 24)) }
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !t.title.isEmpty { Text(t.title).font(.system(size: 15, weight: .heavy)).foregroundColor(n.look == "achievement" ? ac : fg) }
+                        if !t.text.isEmpty && !pill { Text(t.text).font(.system(size: 13)).foregroundColor(fg.opacity(0.8)) }
+                    }
+                }
+                .padding(.horizontal, pill ? 18 : 14).padding(.vertical, pill ? 10 : 12)
+                .frame(maxWidth: banner ? .infinity : nil)
+                .background(RoundedRectangle(cornerRadius: banner ? 0 : pill ? 30 : 16).fill(bg).shadow(color: .black.opacity(0.2), radius: 9, y: 5))
+                .overlay(RoundedRectangle(cornerRadius: pill ? 30 : 16).stroke(n.look == "achievement" ? ac : .clear, lineWidth: 2))
+                .onTapGesture { app.toasts.removeAll { $0.id == t.id } }
+                .transition(.move(edge: n.position == "bottom" ? .bottom : .top).combined(with: .opacity))
+            }
+            if n.position != "bottom" { Spacer() }
+        }
+        .padding(.horizontal, banner ? 0 : 12).padding(.top, 8).padding(.bottom, n.position == "bottom" ? 96 : 0)
+        .frame(maxWidth: .infinity, alignment: n.position == "top right" ? .trailing : .center)
+        .animation(.spring(response: 0.3, dampingFraction: 0.75), value: app.toasts)
+    }
+}
+
+private let moreColors: [UInt32] = [0xFF6B8B, 0xFFC94D, 0x3CCF7A, 0x8E6BF2, 0x22B8C9, 0xFF9F43, 0xE0559B]
+private func num1(_ v: Double) -> String { v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+
+/// A bar, column, line, area, pie, donut or radar chart: from label | value lines ({variables} work), or a variable tracked over time.
+struct PChart: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let data: [(String, String)]
+    var chart = "columns", track = ""
+    var every: Double = 1
+    var points = 30
+    var title = ""
+    var max: Double = 0
+    var values = true, labels = true, grid = true
+    var color = "@accent", text = "", bg = ""
+    var height: CGFloat = 200
+    @State private var history: [Double] = []
+    init(data: [(String, String)], chart: String = "columns", track: String = "", every: Double = 1, points: Int = 30, title: String = "", max: Double = 0, values: Bool = true, labels: Bool = true, grid: Bool = true, color: String = "@accent", text: String = "", bg: String = "", height: CGFloat = 200) {
+        self.data = data; self.chart = chart; self.track = track; self.every = every; self.points = points; self.title = title; self.max = max
+        self.values = values; self.labels = labels; self.grid = grid; self.color = color; self.text = text; self.bg = bg; self.height = height
+    }
+    var body: some View {
+        let p = app.palette(scheme), fg = p.resolve(text) ?? p.text, c = p.resolve(color) ?? p.accent
+        let items: [(String, Double)] = track.isEmpty ? data.map { (app.fill($0.0), Double(app.fill($0.1).trimmingCharacters(in: .whitespaces)) ?? 0) } : history.map { ("", $0) }
+        let kind = !track.isEmpty && !["line", "area", "columns", "bars"].contains(chart) ? "line" : chart
+        VStack(alignment: .leading, spacing: 8) {
+            if !title.isEmpty { Text(app.fill(title)).font(.system(size: 16, weight: .heavy)).foregroundColor(fg) }
+            Canvas { ctx, size in draw(&ctx, size, kind, items, c, fg, p.line) }
+                .frame(height: Swift.max(60, height - (title.isEmpty ? 24 : 52)))
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 16).fill(p.resolve(bg) ?? .clear))
+        .task(id: track) {
+            guard !track.isEmpty else { return }
+            while !Task.isCancelled {
+                history.append(app.get(track)?.number ?? 0)
+                if history.count > points { history.removeFirst(history.count - points) }
+                try? await Task.sleep(nanoseconds: UInt64(Swift.max(0.1, every) * 1_000_000_000))
+            }
+        }
+    }
+    private func label(_ ctx: inout GraphicsContext, _ s: String, _ at: CGPoint, _ col: Color, size: CGFloat = 11, bold: Bool = false, anchor: UnitPoint = .center) {
+        guard !s.isEmpty else { return }
+        ctx.draw(Text(s).font(.system(size: size, weight: bold ? .heavy : .semibold)).foregroundColor(col), at: at, anchor: anchor)
+    }
+    private func draw(_ ctx: inout GraphicsContext, _ size: CGSize, _ kind: String, _ items: [(String, Double)], _ c: Color, _ fg: Color, _ line: Color) {
+        guard !items.isEmpty else { return }
+        let n = items.count, W = size.width, H = size.height, sub = fg.opacity(0.75)
+        let top = items.map { $0.1 }.reduce(0, Swift.max), hi = max > 0 ? max : (top <= 0 ? 1 : top * 1.12)
+        func slice(_ i: Int) -> Color { i == 0 ? c : Color(hex: moreColors[(i - 1) % moreColors.count]) }
+        func frac(_ v: Double) -> CGFloat { CGFloat(Swift.min(1, Swift.max(0, v / hi))) }
+        if kind == "pie" || kind == "donut" {
+            let total = items.reduce(0) { $0 + Swift.max(0, $1.1) }
+            guard total > 0 else { return }
+            let r = Swift.min(W, H) / 2 - 4, ctr = CGPoint(x: W / 2, y: H / 2)
+            var a = -Double.pi / 2
+            for (i, it) in items.enumerated() {
+                let sw = Swift.max(0, it.1) / total * Double.pi * 2
+                if kind == "donut" {
+                    let arc = Path { $0.addArc(center: ctr, radius: r * 0.78, startAngle: .radians(a + 0.02), endAngle: .radians(a + Swift.max(0.02, sw - 0.02)), clockwise: false) }
+                    ctx.stroke(arc, with: .color(slice(i)), lineWidth: r * 0.42)
+                } else {
+                    let wedge = Path { $0.move(to: ctr); $0.addArc(center: ctr, radius: r, startAngle: .radians(a), endAngle: .radians(a + sw), clockwise: false); $0.closeSubpath() }
+                    ctx.fill(wedge, with: .color(slice(i)))
+                }
+                if labels && sw > 0.4 {
+                    let m = a + sw / 2, k: CGFloat = kind == "donut" ? 0.78 : 0.62
+                    label(&ctx, it.0, CGPoint(x: ctr.x + CGFloat(cos(m)) * r * k, y: ctr.y + CGFloat(sin(m)) * r * k), .white, bold: true)
+                }
+                a += sw
+            }
+            if kind == "donut" && values { label(&ctx, num1(total), ctr, fg, size: 20, bold: true) }
+            return
+        }
+        if kind == "radar" {
+            let r = Swift.min(W, H) / 2 - (labels ? 18 : 4), ctr = CGPoint(x: W / 2, y: H / 2)
+            func at(_ i: Int, _ k: CGFloat) -> CGPoint { let a = -Double.pi / 2 + Double(i) * Double.pi * 2 / Double(n); return CGPoint(x: ctr.x + CGFloat(cos(a)) * r * k, y: ctr.y + CGFloat(sin(a)) * r * k) }
+            for k in [0.33, 0.66, 1.0] as [CGFloat] where grid || k == 1 { ctx.stroke(Path { $0.addLines((0..<n).map { at($0, k) }); $0.closeSubpath() }, with: .color(line)) }
+            for i in 0..<n { ctx.stroke(Path { $0.move(to: ctr); $0.addLine(to: at(i, 1)) }, with: .color(line)); if labels { label(&ctx, items[i].0, at(i, 1.18), sub) } }
+            let shape = Path { $0.addLines(items.enumerated().map { at($0.offset, frac($0.element.1)) }); $0.closeSubpath() }
+            ctx.fill(shape, with: .color(c.opacity(0.3))); ctx.stroke(shape, with: .color(c), lineWidth: 2.5)
+            return
+        }
+        if kind == "bars" {
+            let lw: CGFloat = labels && items.contains { !$0.0.isEmpty } ? 52 : 0, vw: CGFloat = values ? 34 : 0, row = H / CGFloat(n)
+            for (i, it) in items.enumerated() {
+                let y = row * CGFloat(i) + row * 0.2, bh = row * 0.6, bw = (W - lw - vw) * frac(it.1)
+                ctx.fill(Path(roundedRect: CGRect(x: lw, y: y, width: bw, height: bh), cornerRadius: bh / 3), with: .color(c))
+                if lw > 0 { label(&ctx, it.0, CGPoint(x: lw - 6, y: y + bh / 2), sub, anchor: .trailing) }
+                if values { label(&ctx, num1(it.1), CGPoint(x: lw + bw + 6, y: y + bh / 2), fg, bold: true, anchor: .leading) }
+            }
+            return
+        }
+        let lb: CGFloat = labels && items.contains { !$0.0.isEmpty } ? 18 : 2, tp: CGFloat = values ? 16 : 4, h = H - lb - tp, slot = W / CGFloat(n)
+        func yOf(_ v: Double) -> CGFloat { tp + h * (1 - frac(v)) }
+        if grid { for i in 0...3 { let y = tp + h * CGFloat(i) / 3; ctx.stroke(Path { $0.move(to: CGPoint(x: 0, y: y)); $0.addLine(to: CGPoint(x: W, y: y)) }, with: .color(line)) } }
+        if kind == "line" || kind == "area" {
+            let pts = items.enumerated().map { CGPoint(x: n == 1 ? W / 2 : CGFloat($0.offset) * W / CGFloat(n - 1), y: yOf($0.element.1)) }
+            if kind == "area" { ctx.fill(Path { $0.addLines(pts + [CGPoint(x: pts[n - 1].x, y: tp + h), CGPoint(x: pts[0].x, y: tp + h)]); $0.closeSubpath() }, with: .color(c.opacity(0.25))) }
+            ctx.stroke(Path { $0.addLines(pts) }, with: .color(c), style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round))
+            for (i, pt) in pts.enumerated() {
+                if n <= 14 { ctx.fill(Path(ellipseIn: CGRect(x: pt.x - 3.5, y: pt.y - 3.5, width: 7, height: 7)), with: .color(c)); if values { label(&ctx, num1(items[i].1), CGPoint(x: pt.x, y: pt.y - 11), fg, bold: true) } }
+                if lb > 2 { label(&ctx, items[i].0, CGPoint(x: Swift.min(W - 14, Swift.max(14, pt.x)), y: H - 8), sub) }
+            }
+            return
+        }
+        for (i, it) in items.enumerated() { // columns
+            let x = slot * CGFloat(i) + slot * 0.2, bw = slot * 0.6, y = yOf(it.1)
+            let bh = tp + h - y // (round top corners: a rounded bar, its bottom half squared off; iOS 16)
+            ctx.fill(Path(roundedRect: CGRect(x: x, y: y, width: bw, height: bh), cornerRadius: Swift.min(6, bh / 2)), with: .color(c))
+            ctx.fill(Path(CGRect(x: x, y: y + bh / 2, width: bw, height: bh / 2)), with: .color(c))
+            if values { label(&ctx, num1(it.1), CGPoint(x: x + bw / 2, y: y - 8), fg, bold: true) }
+            if lb > 2 { label(&ctx, it.0, CGPoint(x: x + bw / 2, y: H - 8), sub) }
+        }
+    }
+}
+
+/// One card in a carousel: its name, icon (an emoji), the value it picks, the variable that unlocks it, a line about it.
+struct CarouselItem {
+    let name: String, icon: String, value: String
+    var lock = "", desc = ""
+    init(_ name: String, _ icon: String, _ value: String, lock: String = "", desc: String = "") { self.name = name; self.icon = icon; self.value = value; self.lock = lock; self.desc = desc }
+}
+
+/// Swipe through cards; the one in the middle is picked into a variable (locked cards wait for their variable).
+struct Carousel: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    let items: [CarouselItem]
+    var cardWidth: CGFloat = 0.55
+    var arrows = true, dots = true, loop = false
+    var message = "", card = "@card", text = "", accent = "@accent"
+    var height: CGFloat = 220
+    @State private var i = -1
+    init(_ variable: String, _ items: [CarouselItem], cardWidth: CGFloat = 0.55, arrows: Bool = true, dots: Bool = true, loop: Bool = false, message: String = "", card: String = "@card", text: String = "", accent: String = "@accent", height: CGFloat = 220) {
+        self.variable = variable; self.items = items; self.cardWidth = cardWidth; self.arrows = arrows; self.dots = dots; self.loop = loop; self.message = message; self.card = card; self.text = text; self.accent = accent; self.height = height
+    }
+    func locked(_ x: CarouselItem) -> Bool { !x.lock.isEmpty && !(app.get(x.lock)?.isOn ?? false) }
+    var body: some View {
+        let p = app.palette(scheme), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? p.accent
+        let cur = i >= 0 ? i : Swift.max(0, items.firstIndex { $0.value == app.get(variable)?.text } ?? 0)
+        let sel = Binding<Int>(get: { cur }, set: { j in
+            i = j
+            if items.indices.contains(j), !locked(items[j]), app.get(variable)?.text != items[j].value { app.set(variable, .s(items[j].value)); if !message.isEmpty { app.send(message) } }
+        })
+        VStack(spacing: 10) {
+            GeometryReader { g in
+                let side = g.size.width * (1 - cardWidth) / 2
+                ZStack {
+                    TabView(selection: sel) {
+                        ForEach(items.indices, id: \.self) { k in
+                            let x = items[k]
+                            VStack(spacing: 4) {
+                                Text(locked(x) ? "🔒" : x.icon).font(.system(size: 46))
+                                Text(x.name).font(.system(size: 17, weight: .heavy)).foregroundColor(fg).lineLimit(1)
+                                if !x.desc.isEmpty { Text(app.fill(x.desc)).font(.system(size: 13)).foregroundColor(fg.opacity(0.7)).multilineTextAlignment(.center).lineLimit(2) }
+                            }
+                            .padding(14).frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(RoundedRectangle(cornerRadius: 20).fill(p.resolve(card) ?? p.card))
+                            .overlay(RoundedRectangle(cornerRadius: 20).stroke(k == cur ? ac : .clear, lineWidth: 2.5))
+                            .opacity(locked(x) ? 0.5 : 1)
+                            .padding(.horizontal, side).padding(.vertical, 4)
+                            .tag(k)
+                        }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never))
+                    if arrows {
+                        HStack {
+                            Button { withAnimation { sel.wrappedValue = loop ? (cur - 1 + items.count) % items.count : Swift.max(0, cur - 1) } } label: { Text("‹").font(.system(size: 30)).foregroundColor(fg).frame(width: 40, height: 44) }
+                            Spacer()
+                            Button { withAnimation { sel.wrappedValue = loop ? (cur + 1) % items.count : Swift.min(items.count - 1, cur + 1) } } label: { Text("›").font(.system(size: 30)).foregroundColor(fg).frame(width: 40, height: 44) }
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+            .frame(height: height - (dots ? 22 : 0))
+            if dots { PageDots(count: items.count, index: cur, on: ac, off: p.line) }
+        }
+    }
+}
+
+struct PageDots: View {
+    let count: Int, index: Int, on: Color, off: Color
+    var body: some View {
+        HStack(spacing: 6) { ForEach(0..<count, id: \.self) { k in Capsule().fill(k == index ? on : off).frame(width: k == index ? 18 : 7, height: 7) } }
+            .animation(.easeOut(duration: 0.2), value: index)
+    }
+}
+
+/// Swipe left and right between pages (onboarding, a tour); the page number goes into a variable, and "slide next" / "slide prev" / "slide 2" move it.
+struct Pager: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    var dots = true
+    var dotColor = "@accent"
+    var loop = false
+    var auto: Double = 0
+    var message = "slide"
+    var height: CGFloat = 320
+    let pages: [AnyView]
+    init(_ variable: String, dots: Bool = true, dotColor: String = "@accent", loop: Bool = false, auto: Double = 0, message: String = "slide", height: CGFloat = 320, pages: [AnyView]) {
+        self.variable = variable; self.dots = dots; self.dotColor = dotColor; self.loop = loop; self.auto = auto; self.message = message; self.height = height; self.pages = pages
+    }
+    var current: Int { Swift.min(pages.count - 1, Swift.max(0, Int(app.get(variable)?.number ?? 1) - 1)) }
+    func go(_ j: Int) {
+        let n = pages.count
+        guard n > 0 else { return }
+        let k = loop ? ((j % n) + n) % n : Swift.min(n - 1, Swift.max(0, j))
+        withAnimation { app.set(variable, .n(Double(k + 1))) }
+    }
+    var body: some View {
+        let p = app.palette(scheme), dot = p.resolve(dotColor) ?? p.accent
+        let sel = Binding<Int>(get: { current }, set: { go($0) })
+        VStack(spacing: 8) {
+            TabView(selection: sel) {
+                ForEach(pages.indices, id: \.self) { k in pages[k].frame(maxWidth: .infinity, maxHeight: .infinity).tag(k) }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            if dots { PageDots(count: pages.count, index: current, on: dot, off: dot.opacity(0.3)) }
+        }
+        .frame(height: height)
+        .onReceive(app.messages) { m in
+            if m == message + " next" { go(current + 1) }
+            else if m == message + " prev" || m == message + " back" { go(current - 1) }
+            else if m.hasPrefix(message + " "), let k = Int(m.dropFirst(message.count + 1)) { go(k - 1) }
+        }
+        .task(id: auto) {
+            guard auto > 0 else { return }
+            while !Task.isCancelled { try? await Task.sleep(nanoseconds: UInt64(auto * 1_000_000_000)); if !Task.isCancelled { go(current + 1) } }
+        }
+    }
+}
+
+/// A grid of square pictures from a collection's media field (or emojis); tap one to open it.
+struct PhotoGrid: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var collection = "Posts", field = "media", filter = ""
+    var columns = 3
+    var gap: CGFloat = 2, radius: CGFloat = 0
+    var openPage = "", message = ""
+    init(collection: String = "Posts", field: String = "media", filter: String = "", columns: Int = 3, gap: CGFloat = 2, radius: CGFloat = 0, openPage: String = "", message: String = "") {
+        self.collection = collection; self.field = field; self.filter = filter; self.columns = columns; self.gap = gap; self.radius = radius; self.openPage = openPage; self.message = message
+    }
+    var body: some View {
+        let p = app.palette(scheme), rows = app.query(collection, filter: filter).filter { !mediaList($0.s(field)).isEmpty }
+        if rows.isEmpty { Text("No pictures yet").foregroundColor(p.sub).frame(maxWidth: .infinity).padding(24) }
+        else {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gap), count: Swift.max(1, columns)), spacing: gap) {
+                ForEach(rows.indices, id: \.self) { k in
+                    let r = rows[k]
+                    Color.clear.aspectRatio(1, contentMode: .fit)
+                        .overlay(GeometryReader { g in Tile(media: mediaList(r.s(field))[0], color: colorOf(r, r.s("_id"), p), height: g.size.width) })
+                        .clipShape(RoundedRectangle(cornerRadius: radius))
+                        .contentShape(Rectangle())
+                        .onTapGesture { app.open(collection, r.s("_id")); if !openPage.isEmpty { app.go(openPage) }; if !message.isEmpty { app.send(message) } }
+                }
+            }
+        }
+    }
+}
+
+/// A heart (or thumbs-up, or star) that turns a variable on or off, with a count next to it.
+struct LikeButton: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    var countVar = "likes", icon = "heart", message = ""
+    var on = "#f91880", off = "@sub", text = "@sub"
+    init(_ variable: String, countVar: String = "likes", icon: String = "heart", message: String = "", on: String = "#f91880", off: String = "@sub", text: String = "@sub") {
+        self.variable = variable; self.countVar = countVar; self.icon = icon; self.message = message; self.on = on; self.off = off; self.text = text
+    }
+    var body: some View {
+        let p = app.palette(scheme), liked = app.get(variable)?.isOn ?? false, c = liked ? (p.resolve(on) ?? p.accent) : (p.resolve(off) ?? p.sub)
+        let name = icon == "thumbs up" ? "hand.thumbsup" : icon == "star" ? "star" : "heart"
+        Button {
+            app.set(variable, .b(!liked))
+            if !countVar.isEmpty { app.add(countVar, liked ? -1 : 1) }
+            if !message.isEmpty { app.send(message) }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: liked ? name + ".fill" : name).font(.system(size: 22)).foregroundColor(c).scaleEffect(liked ? 1.1 : 1)
+                    .animation(.spring(response: 0.3, dampingFraction: 0.4), value: liked)
+                if !countVar.isEmpty { Text(compactNum(app.get(countVar)?.number ?? 0)).font(.system(size: 15, weight: .bold)).foregroundColor(liked ? c : (p.resolve(text) ?? p.sub)) }
+            }
+            .padding(.horizontal, 8).padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// Text that scrolls across (several messages separated by |, with {variables}).
+struct Ticker: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let text: String
+    var speed: Double = 60
+    var direction = "left"
+    var gap: CGFloat = 60, size: CGFloat = 15
+    var bg = "", color = "", accent = "#ffd23d"
+    var height: CGFloat = 36
+    init(_ text: String, speed: Double = 60, direction: String = "left", gap: CGFloat = 60, size: CGFloat = 15, bg: String = "", color: String = "", accent: String = "#ffd23d", height: CGFloat = 36) {
+        self.text = text; self.speed = speed; self.direction = direction; self.gap = gap; self.size = size; self.bg = bg; self.color = color; self.accent = accent; self.height = height
+    }
+    var body: some View {
+        let p = app.palette(scheme), fg = p.resolve(color) ?? p.text, ac = p.resolve(accent) ?? p.accent
+        let parts = text.components(separatedBy: "|").map { app.fill($0.trimmingCharacters(in: .whitespaces)) }.filter { !$0.isEmpty }
+        let line = parts.enumerated().reduce(Text("")) { t, e in e.offset == 0 ? t + Text(e.element) : t + Text("   ●   ").foregroundColor(ac) + Text(e.element) }
+        let w = CGFloat(parts.joined(separator: "   ●   ").count) * size * 0.55 + gap // (about how wide the line is)
+        TimelineView(.animation) { tl in
+            let t = CGFloat(tl.date.timeIntervalSinceReferenceDate * speed).truncatingRemainder(dividingBy: w)
+            HStack(spacing: 0) { ForEach(0..<4, id: \.self) { _ in line.font(.system(size: size, weight: .bold)).foregroundColor(fg).lineLimit(1).fixedSize().frame(width: w, alignment: .leading) } }
+                .offset(x: direction == "right" ? t - w : -t)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(height: height).clipped()
+        .background(p.resolve(bg) ?? .clear)
+        .padding(.horizontal, -16)
+    }
+}
+
+/// A countdown (or count-up) as a ring, bar, big digits or a pill: red near the end, then a message. "timer start / pause / reset / restart / add 5" control it.
+struct PTimer: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var seconds: Double = 30
+    var countUp = false
+    var look = "ring", format = "seconds"
+    var autoStart = true
+    var message = "timer", endMessage = "", endAction = "nothing else"
+    var warnAt: Double = 5
+    var variable = "", color = "@accent", warn = "#ff4d5e", track = "@line", text = ""
+    var size: CGFloat = 120
+    init(seconds: Double = 30, countUp: Bool = false, look: String = "ring", format: String = "seconds", autoStart: Bool = true, message: String = "timer", endMessage: String = "", endAction: String = "nothing else", warnAt: Double = 5, variable: String = "", color: String = "@accent", warn: String = "#ff4d5e", track: String = "@line", text: String = "", size: CGFloat = 120) {
+        self.seconds = seconds; self.countUp = countUp; self.look = look; self.format = format; self.autoStart = autoStart; self.message = message; self.endMessage = endMessage; self.endAction = endAction
+        self.warnAt = warnAt; self.variable = variable; self.color = color; self.warn = warn; self.track = track; self.text = text; self.size = size
+    }
+    @State private var t: Double = 0
+    @State private var running: Bool? = nil
+    @State private var done = false
+    @State private var shown = -1
+    private let tick = Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()
+    var body: some View {
+        let p = app.palette(scheme), s = seconds <= 0 ? 1 : seconds, left = countUp ? t : s - t, isRunning = running ?? autoStart
+        let whole = countUp ? Int(left.rounded(.down)) : Int((left - 1e-9).rounded(.up))
+        let label = format == "m:ss" ? "\(whole / 60):" + String(format: "%02d", whole % 60) : format == "seconds.tenths" ? String(format: "%.1f", left) : String(whole)
+        let warnOn = !countUp && left <= warnAt && !done && isRunning
+        let c = warnOn ? (p.resolve(warn) ?? p.danger) : (p.resolve(color) ?? p.accent), frac = CGFloat(Swift.min(1, Swift.max(0, left / s))), tr = p.resolve(track) ?? p.line
+        let digits = Text(label).font(.system(size: size * (look == "digits" ? 0.45 : 0.26), weight: .black).monospacedDigit()).foregroundColor(warnOn ? c : (p.resolve(text) ?? p.text))
+        Group {
+            switch look {
+            case "bar": VStack(spacing: 6) { digits; ProgressView(value: Double(frac)).tint(c).scaleEffect(x: 1, y: 3) }
+            case "digits": digits
+            case "pill": HStack(spacing: 6) { Text("⏱"); digits }.padding(.horizontal, 16).padding(.vertical, 8).background(Capsule().fill(c.opacity(0.16)))
+            default:
+                ZStack {
+                    Circle().stroke(tr, lineWidth: size * 0.08)
+                    Circle().trim(from: 0, to: frac).stroke(c, style: StrokeStyle(lineWidth: size * 0.08, lineCap: .round)).rotationEffect(.degrees(-90))
+                    digits
+                }.frame(width: size, height: size).padding(size * 0.04)
+            }
+        }
+        .scaleEffect(warnOn && Int(t * 2) % 2 == 0 ? 1.06 : 1)
+        .animation(.easeInOut(duration: 0.2), value: warnOn && Int(t * 2) % 2 == 0)
+        .frame(maxWidth: .infinity)
+        .onReceive(tick) { _ in
+            guard isRunning, !done else { return }
+            t = Swift.min(seconds, t + 0.1)
+            if t >= seconds { done = true; if !endMessage.isEmpty { app.send(endMessage) }; if endAction == "restart timer" { t = 0; done = false } }
+            let now = countUp ? Int(t.rounded(.down)) : Int((seconds - t - 1e-9).rounded(.up))
+            if !variable.isEmpty && now != shown { shown = now; app.set(variable, .n(Double(now))) }
+        }
+        .onReceive(app.messages) { m in
+            guard m.hasPrefix(message) else { return }
+            let rest = m.dropFirst(message.count).trimmingCharacters(in: .whitespaces)
+            if rest == "start" || rest == "resume" || rest.isEmpty { running = true }
+            else if rest == "pause" || rest == "stop" { running = false }
+            else if rest == "reset" { t = 0; done = false }
+            else if rest == "restart" { t = 0; done = false; running = true }
+            else if rest.hasPrefix("add "), let by = Double(rest.dropFirst(4).trimmingCharacters(in: .whitespaces)) { t = Swift.max(0, t - by * (countUp ? -1 : 1)) }
+        }
+    }
+}
+
+/// Grey shapes that shimmer while content loads; gone when its variable turns on.
+struct Skeleton: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var layout = "avatar + lines"
+    var lines = 3
+    var doneVar = ""
+    var radius: CGFloat = 8
+    @State private var shine = false
+    init(layout: String = "avatar + lines", lines: Int = 3, doneVar: String = "", radius: CGFloat = 8) { self.layout = layout; self.lines = lines; self.doneVar = doneVar; self.radius = radius }
+    var body: some View {
+        if !doneVar.isEmpty && (app.get(doneVar)?.isOn ?? false) { EmptyView() }
+        else {
+            let p = app.palette(scheme), col = p.text.opacity(shine ? 0.15 : 0.07)
+            Group {
+                switch layout {
+                case "text lines": bars(lines, col)
+                case "card": VStack(spacing: 8) { RoundedRectangle(cornerRadius: radius * 1.5).fill(col).frame(height: 140); bars(Swift.max(1, lines - 1), col) }
+                case "list rows": VStack(spacing: 12) { ForEach(0..<lines, id: \.self) { _ in HStack(spacing: 12) { Circle().fill(col).frame(width: 40, height: 40); bars(2, col) } } }
+                case "picture": RoundedRectangle(cornerRadius: radius * 1.5).fill(col).frame(height: 180)
+                default: HStack(alignment: .top, spacing: 12) { Circle().fill(col).frame(width: 48, height: 48); bars(lines, col) }
+                }
+            }
+            .onAppear { withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { shine = true } }
+        }
+    }
+    func bars(_ n: Int, _ col: Color) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(0..<n, id: \.self) { i in
+                GeometryReader { g in RoundedRectangle(cornerRadius: radius).fill(col).frame(width: g.size.width * (i == n - 1 && n > 1 ? 0.6 : 1)) }.frame(height: 12)
+            }
+        }
+    }
+}
+
+/// Colour swatches: tap one to pick it into a variable.
+struct ColorSwatches: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    let colors: [String]
+    var columns = 5
+    var shape = "circle"
+    var gap: CGFloat = 10
+    var ring = "@text", message = ""
+    init(_ variable: String, _ colors: [String], columns: Int = 5, shape: String = "circle", gap: CGFloat = 10, ring: String = "@text", message: String = "") {
+        self.variable = variable; self.colors = colors; self.columns = columns; self.shape = shape; self.gap = gap; self.ring = ring; self.message = message
+    }
+    var body: some View {
+        let p = app.palette(scheme), cur = (app.get(variable)?.text ?? "").lowercased(), r: CGFloat = shape == "circle" ? 999 : shape == "rounded" ? 12 : 3
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: gap), count: Swift.max(1, columns)), spacing: gap) {
+            ForEach(colors, id: \.self) { c in
+                let on = c.lowercased() == cur
+                RoundedRectangle(cornerRadius: r).fill(p.resolve(c) ?? p.line).aspectRatio(1, contentMode: .fit)
+                    .overlay(RoundedRectangle(cornerRadius: r).stroke(on ? (p.resolve(ring) ?? p.text) : p.line, lineWidth: on ? 3.5 : 1))
+                    .overlay(on ? Image(systemName: "checkmark").font(.system(size: 16, weight: .heavy)).foregroundColor(.white).shadow(radius: 2) : nil)
+                    .onTapGesture { app.set(variable, .s(c)); if !message.isEmpty { app.send(message) } }
+            }
+        }
+    }
+}
+
+/// A number pad for a code, a PIN or an answer: ✓ checks it against the answer and sends the right / wrong message.
+struct Keypad: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    var maxLength = 4
+    var mask = false
+    var answer = "", rightMessage = "", wrongMessage = "", enterMessage = ""
+    var autoEnter = true, display = true
+    var keyStyle = "round", keyColor = "@field", text = "", accent = "@good", displayBg = ""
+    init(_ variable: String, maxLength: Int = 4, mask: Bool = false, answer: String = "", rightMessage: String = "", wrongMessage: String = "", enterMessage: String = "", autoEnter: Bool = true, display: Bool = true, keyStyle: String = "round", keyColor: String = "@field", text: String = "", accent: String = "@good", displayBg: String = "") {
+        self.variable = variable; self.maxLength = maxLength; self.mask = mask; self.answer = answer; self.rightMessage = rightMessage; self.wrongMessage = wrongMessage; self.enterMessage = enterMessage
+        self.autoEnter = autoEnter; self.display = display; self.keyStyle = keyStyle; self.keyColor = keyColor; self.text = text; self.accent = accent; self.displayBg = displayBg
+    }
+    func enter(_ v: String) {
+        if !enterMessage.isEmpty { app.send(enterMessage) }
+        guard !answer.isEmpty else { return }
+        if v == answer { if !rightMessage.isEmpty { app.send(rightMessage) } }
+        else { if !wrongMessage.isEmpty { app.send(wrongMessage) }; app.set(variable, .s("")) }
+    }
+    func press(_ k: String) {
+        let cur = app.get(variable)?.text ?? ""
+        if k == "⌫" { if !cur.isEmpty { app.set(variable, .s(String(cur.dropLast()))) } }
+        else if k == "✓" { enter(cur) }
+        else if cur.count < maxLength { let next = cur + k; app.set(variable, .s(next)); if autoEnter && next.count == maxLength { enter(next) } }
+    }
+    var body: some View {
+        let p = app.palette(scheme), cur = Array(app.get(variable)?.text ?? ""), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? p.accent
+        let r: CGFloat = keyStyle == "round" ? 999 : keyStyle == "flat" ? 6 : 16
+        VStack(spacing: 12) {
+            if display {
+                Text((0..<maxLength).map { $0 < cur.count ? (mask ? "•" : String(cur[$0])) : "–" }.joined(separator: "  "))
+                    .font(.system(size: 26, weight: .heavy)).foregroundColor(fg).frame(maxWidth: .infinity).padding(.vertical, 14)
+                    .background(RoundedRectangle(cornerRadius: 14).fill(p.resolve(displayBg) ?? p.resolve("@field") ?? p.card))
+            }
+            ForEach([["1", "2", "3"], ["4", "5", "6"], ["7", "8", "9"], ["⌫", "0", "✓"]], id: \.self) { row in
+                HStack(spacing: 12) {
+                    ForEach(row, id: \.self) { k in
+                        Button { press(k) } label: {
+                            Text(k).font(.system(size: 24, weight: .bold)).foregroundColor(k == "✓" ? .white : fg)
+                                .frame(maxWidth: .infinity).aspectRatio(keyStyle == "round" ? 1 : 1.5, contentMode: .fit)
+                                .background(RoundedRectangle(cornerRadius: r).fill(k == "✓" ? ac : keyStyle == "flat" ? .clear : (p.resolve(keyColor) ?? p.card)))
+                        }.buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 300).frame(maxWidth: .infinity)
+    }
+}
+
+/// ‹ Easy › : pick one of several options with arrows; the choice goes into a variable.
+struct Selector: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let variable: String
+    let options: [String]
+    var wrap = true
+    init(_ variable: String, _ options: [String], wrap: Bool = true) { self.variable = variable; self.options = options; self.wrap = wrap }
+    var body: some View {
+        let p = app.palette(scheme), n = options.count, i = Swift.max(0, options.firstIndex(of: app.get(variable)?.text ?? "") ?? 0)
+        HStack {
+            Button { app.set(variable, .s(options[wrap ? (i - 1 + n) % n : Swift.max(0, i - 1)])) } label: { Text("‹").font(.system(size: 28)).frame(width: 48, height: 48) }.disabled(!wrap && i == 0)
+            Text(n > 0 ? options[i] : "").font(.system(size: 17, weight: .heavy)).foregroundColor(p.text).frame(maxWidth: .infinity)
+            Button { app.set(variable, .s(options[wrap ? (i + 1) % n : Swift.min(n - 1, i + 1)])) } label: { Text("›").font(.system(size: 28)).frame(width: 48, height: 48) }.disabled(!wrap && i == n - 1)
+        }
+        .buttonStyle(.plain).foregroundColor(p.text)
+        .background(RoundedRectangle(cornerRadius: 14).fill(p.resolve("@field") ?? p.card))
+        .disabled(n == 0)
+    }
+}
+
+/// A popup or a bottom sheet with things inside: opens on a message and closes on another (or after a few seconds).
+struct PPopup<Content: View>: View {
+    @EnvironmentObject var app: AppState
+    var mode = "popup", openOn = "popup", closeOn = "close"
+    var startOpen = false
+    var autoClose: Double = 0
+    var tapCloses = false, dim = true, handle = true
+    let content: Content
+    @State private var open: Bool? = nil
+    init(mode: String = "popup", openOn: String = "popup", closeOn: String = "close", startOpen: Bool = false, autoClose: Double = 0, tapCloses: Bool = false, dim: Bool = true, handle: Bool = true, @ViewBuilder content: () -> Content) {
+        self.mode = mode; self.openOn = openOn; self.closeOn = closeOn; self.startOpen = startOpen; self.autoClose = autoClose; self.tapCloses = tapCloses; self.dim = dim; self.handle = handle; self.content = content()
+    }
+    var body: some View {
+        let shown = Binding<Bool>(get: { open ?? startOpen }, set: { open = $0 })
+        Color.clear.frame(height: 0)
+            .onReceive(app.messages) { m in if m == openOn { open = true } else if m == closeOn { open = false } }
+            .task(id: shown.wrappedValue) {
+                guard shown.wrappedValue, autoClose > 0 else { return }
+                try? await Task.sleep(nanoseconds: UInt64(autoClose * 1_000_000_000))
+                if !Task.isCancelled { open = false }
+            }
+            .sheet(isPresented: Binding(get: { mode == "sheet" && shown.wrappedValue }, set: { shown.wrappedValue = $0 })) {
+                content.padding(16).environmentObject(app)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(handle ? .visible : .hidden)
+            }
+            .fullScreenCover(isPresented: Binding(get: { mode != "sheet" && shown.wrappedValue }, set: { shown.wrappedValue = $0 })) {
+                ZStack {
+                    Color.black.opacity(dim ? 0.5 : 0.001).ignoresSafeArea().onTapGesture { if tapCloses { open = false } }
+                    content.padding(20).environmentObject(app)
+                }
+                .modifier(ClearCover())
+            }
+    }
+}
+
+/// A full-screen cover you can see the app through (iOS 16.4 and newer).
+struct ClearCover: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 16.4, *) { content.presentationBackground(.clear) } else { content }
     }
 }

@@ -2,7 +2,7 @@
 // Made from the same app model as the Flutter, Kotlin and SwiftUI exports, so it looks and works the same.
 // App.js has the app (pages, tabs, data, App Bar, Bottom Nav, Side Menu); pages/ has one component per page;
 // pocket.js (editor/native/rn/pocket.js) is the fixed runtime with the state and the building blocks.
-import { appModel, PALETTES, barIcons, todoFor } from './appmodel.js';
+import { appModel, PALETTES, barIcons } from './appmodel.js';
 import { NAV_ART } from './navart.js';
 import { names, placeOf } from './nativecode.js';
 
@@ -22,7 +22,11 @@ const COMP = {
   rating: 'PRating', divider: 'PDivider', avatar: 'PAvatar', banner: 'PBanner', xpbar: 'XpBar', steps: 'PSteps', spinner: 'PSpinner', list: 'RecordList', form: 'RecordForm',
   input: 'VarField', toggle: 'VarSwitch', items: 'StaticList', image: 'PImage', row: 'PCard', feed: 'SocialFeed', composer: 'Composer', stories: 'Stories', inbox: 'Inbox',
   chat: 'Chat', profile: 'ProfileHeader', market: 'Marketplace', activity: 'Activity', people: 'People', achievements: 'Achievements', trending: 'Trending', todo: 'TodoBox',
+  chart: 'PChart', carousel: 'Carousel', pager: 'Pager', photogrid: 'PhotoGrid', like: 'LikeButton', ticker: 'Ticker', timer: 'PTimer', skeleton: 'Skeleton', colors: 'ColorSwatches',
+  keypad: 'Keypad', selector: 'Selector', overlay: 'PPopup',
 };
+/** Kinds whose model carries the component's own name and type (only placeholders need them). */
+const NAMED = new Set(['chart', 'carousel', 'pager', 'photogrid', 'like', 'ticker', 'timer', 'skeleton', 'colors', 'keypad', 'selector', 'overlay']);
 /** Parts that fill the rest of the page (it doesn't scroll as a whole then). */
 const FILLS = ['list', 'form', 'inbox', 'chat', 'market', 'activity', 'people'];
 const SKIP = new Set(['kind', 'children', 'pin', 'start', 'fab']);
@@ -34,14 +38,17 @@ const attr = (k, v) => {
   return `${k}={${JSON.stringify(v)}}`;
 };
 /** Settings that are on unless turned off (their false is written out; other false settings are just left out). */
-const ON_BY_DEFAULT = new Set(['swipeDelete', 'doneLook', 'yours', 'border']);
+const ON_BY_DEFAULT = new Set(['swipeDelete', 'doneLook', 'yours', 'border', 'values', 'labels', 'grid', 'arrows', 'dots', 'autoStart', 'display', 'autoEnter', 'wrap', 'dim', 'handle']);
 const attrs = (x, extra = {}) => Object.entries({ ...x, ...extra }).filter(([k, v]) => !SKIP.has(k) && v !== '' && v != null && (v !== false || ON_BY_DEFAULT.has(k)) && !(Array.isArray(v) && !v.length && k !== 'options')).map(([k, v]) => attr(k, v));
 
 /** One element as JSX (cards with things inside get their children with where each sits). */
 function rnElement(x, ind, inBox = false) {
   const pad = ' '.repeat(ind), comp = COMP[x.kind] || 'TodoBox';
-  const a = [...attrs(x.kind === 'todo' || !COMP[x.kind] ? { name: x.name || x.type, type: x.type || x.kind } : x), ...(inBox && x.pin ? [attr('pin', x.pin)] : [])];
+  const own = NAMED.has(x.kind) ? (({ name, type, box, ...rest }) => rest)(x) : x; // (the name and type are for placeholders; a popup's card is its child)
+  const a = [...attrs(x.kind === 'todo' || !COMP[x.kind] ? { name: x.name || x.type, type: x.type || x.kind } : own), ...(inBox && x.pin ? [attr('pin', x.pin)] : [])];
   const open = `<${comp}${a.length ? ' ' + a.join(' ') : ''}`;
+  if (x.kind === 'pager' && x.children?.length) return `${open}>\n${x.children.map((c) => pad + '  ' + rnElement(c, ind + 2)).join('\n')}\n${pad}</${comp}>`;
+  if (x.kind === 'overlay') return `${open}>\n${pad}  ${rnElement(x.box, ind + 2)}\n${pad}</${comp}>`;
   if ((x.kind === 'box' || x.kind === 'row') && x.children?.length) {
     return `${open}>\n${x.children.map((c) => pad + '  ' + rnElement(c, ind + 2, x.kind === 'box')).join('\n')}\n${pad}</${comp}>`;
   }
@@ -50,7 +57,7 @@ function rnElement(x, ind, inBox = false) {
 
 function rnPage(p, cls, model) {
   const fills = p.items.some((x) => x.fill && FILLS.includes(x.kind)), used = new Set(['PocketPage']);
-  const walk = (x) => { used.add(COMP[x.kind] || 'TodoBox'); (x.children || []).forEach(walk); };
+  const walk = (x) => { used.add(COMP[x.kind] || 'TodoBox'); (x.children || []).forEach(walk); if (x.box) walk(x.box); };
   const parts = [];
   let bottom = false;
   for (const x of p.items) {
@@ -83,7 +90,7 @@ function rnApp(model, N) {
     name: model.name, home: model.home, theme: model.theme,
     light: { ...PALETTES.light, accent: model.accent || PALETTES.light.accent }, dark: { ...PALETTES.dark, accent: model.accent || PALETTES.dark.accent },
     vars: model.vars, tabs: model.tabs, pages: model.pages.map((p) => ({ value: p.value })), collections: model.collections.map(({ name, fields, rows }) => ({ name, fields, rows })), stats: model.stats,
-    appBar: model.appBar, bar: model.bar, nav: model.nav, menu: model.menu,
+    appBar: model.appBar, bar: model.bar, nav: model.nav, menu: model.menu, notify: model.notify,
     art: Object.fromEntries(icons.map((n) => [n, artOf(n)])), // the App Bar's, Bottom Nav's and Side Menu's icons, drawn like the editor's (other names: their usual twin)
   };
   return `// ${model.name}: a native React Native app (Expo), made by Pocket Engine's native export.
@@ -107,7 +114,7 @@ ${model.pages.map((p) => `        ${JSON.stringify(p.value)}: ${N[p.value]},`).j
 }
 
 function rnReadme(model, o, dir) {
-  const todo = [...new Map(todoFor(model, 'rn').map((t) => [t.name, t])).values()];
+  const todo = [...new Map(model.todo.map((t) => [t.name, t])).values()];
   return `# ${model.name} (React Native)
 
 Made with Pocket Engine. This folder is an [Expo](https://expo.dev) app with real React Native views: the same pages, tabs,

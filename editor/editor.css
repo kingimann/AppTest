@@ -2461,7 +2461,7 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-chip.on { background: color-mix(in srgb, var(--accent) 22%, var(--card)); border-color: var(--accent); }
 .npv-todo { border: 2px dashed var(--line); border-radius: 16px; padding: 18px; text-align: center; display: flex; flex-direction: column; gap: 4px; }
 .npv-todo small { color: var(--sub); }
-/* more components (Flutter and Kotlin): chart, carousel, swipe pages, photo grid, like, ticker, timer, skeleton, swatches, keypad, option picker, popups, notifications */
+/* more components: chart, carousel, swipe pages, photo grid, like, ticker, timer, skeleton, swatches, keypad, option picker, popups, notifications */
 .npv-chart { border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .npv-chart > b { font-size: 16px; font-weight: 800; }
 .npv-chartsvg { display: block; overflow: visible; }

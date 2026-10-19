@@ -30,7 +30,7 @@ import * as CM from './codemagic.js';
 import { expoFiles, BRIDGE } from './expo.js';
 import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
 import { flutterNativeFiles, swiftNativeFiles, nativeReadme } from './nativecode.js';
-import { appModel, todoFor } from './appmodel.js';
+import { appModel } from './appmodel.js';
 import { kotlinNativeFiles, kotlinGameFiles } from './kotlincode.js';
 import { reactNativeFiles } from './rncode.js';
 import { PREFABS_2D, PREFABS_3D, OBJECTS_2D, OBJECTS_3D } from './presets.js';
@@ -7283,7 +7283,7 @@ async function exportNative(kind) {
     const dir = files[0].name.split('/')[0] + '/';
     const zip = downloadZip([...files, ...kit.map((f) => ({ ...f, name: dir + f.name }))], zipName);
     noteBuild('native', zip.size);
-    const todo = new Set(todoFor(model, kind).map((t) => t.name)).size;
+    const todo = new Set(model.todo.map((t) => t.name)).size;
     toast(`${{ flutter: 'Flutter', swift: 'SwiftUI', kotlin: 'Kotlin', rn: 'React Native' }[kind]} code ready (${kb(zip.size)}): ${model.pages.length} pages${todo ? `, ${todo} placeholder${todo > 1 ? 's' : ''} to build (see README.md)` : ''}.`);
   } catch (err) { toast('Could not write the native code: ' + err.message); }
 }
@@ -7734,11 +7734,11 @@ function openBuildSettings() {
     want('native') && sec('Xcode & Android Studio', 'phone', (() => {
       const so = storeOpts(), idOk = validAppId(so.appId), ios = target === 'xcode';
       if (target === 'native') {
-        const isApp = !!root.settings?.app, m = isApp ? appModel(buildGameJSON().game) : null, todo = m ? [...new Set(m.todo.map((t) => t.name))] : [], later = m ? [...new Set(m.later.map((t) => t.name))] : [];
+        const isApp = !!root.settings?.app, m = isApp ? appModel(buildGameJSON().game) : null, todo = m ? [...new Set(m.todo.map((t) => t.name))] : [];
         return [
           h('p', { class: 'desc' }, 'Your app written out as code: a Flutter app (Dart widgets, iOS and Android), a SwiftUI app (Xcode, iOS 16+), a Kotlin Multiplatform app (Compose, one Kotlin codebase for Android and iOS) or a React Native app (Expo, JavaScript, iOS and Android). No web view: pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and your data collections (saved on the phone) become native code that you keep building on. Games and things with no native version yet stay as placeholders marked TODO.'),
           !isApp && h('p', { class: 'desc warn' }, 'Native code is made from apps (pages, lists, forms). For a game, use the Flutter project or the Xcode / Android Studio projects: they run it in a web view.'),
-          m && h('p', { class: 'desc' }, `${m.pages.length} page${m.pages.length === 1 ? '' : 's'}${m.tabs.length ? `, ${m.tabs.length} tabs` : ''}, ${m.collections.length} data collection${m.collections.length === 1 ? '' : 's'}.` + (todo.length ? ` Placeholders for: ${todo.slice(0, 8).join(', ')}${todo.length > 8 ? '…' : ''}.` : ' Everything has a native version.') + (later.length ? ` SwiftUI and React Native also have placeholders for (Flutter and Kotlin draw these): ${later.slice(0, 6).join(', ')}${later.length > 6 ? '…' : ''}.` : '')),
+          m && h('p', { class: 'desc' }, `${m.pages.length} page${m.pages.length === 1 ? '' : 's'}${m.tabs.length ? `, ${m.tabs.length} tabs` : ''}, ${m.collections.length} data collection${m.collections.length === 1 ? '' : 's'}.` + (todo.length ? ` Placeholders for: ${todo.slice(0, 8).join(', ')}${todo.length > 8 ? '…' : ''}.` : ' Everything has a native version.')),
           Cr('appId', { label: 'App ID (bundle ID / applicationId)', def: '', placeholder: suggestAppId(o.author, o.title || root.name), infoText: 'Unique, like com.yourname.app. It can never change after the first store release.' }),
           !idOk && h('p', { class: 'desc warn' }, 'Use letters, numbers and dots only, like com.yourname.app (each part starts with a letter).'),
           h('div', { class: 'btns' }, h('button', { class: 'btn primary', disabled: !isApp, onclick: () => { closeLayer(); openNativeApp(); } }, icon('play'), 'Preview & test the native app')),

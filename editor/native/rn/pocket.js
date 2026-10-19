@@ -8,7 +8,7 @@ import {
   ActivityIndicator, Animated, BackHandler, Image, KeyboardAvoidingView, Modal, PanResponder, Platform, Pressable, ScrollView,
   StyleSheet, Switch, Text, TextInput, View, useColorScheme,
 } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { Circle, Line, Path, Polygon, Polyline, Rect, Text as SvgText } from 'react-native-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -136,7 +136,23 @@ export function setupApp(model) {
       case 'new record': A.openId = null; return A.go(v);
       case 'edit opened record': return A.go(v);
       case 'delete opened record': if (A.openCollection && A.openId) { A.deleteRecord(A.openCollection, A.openId); A.openId = null; } return A.back();
+      case 'message': return A.send(v);
       default: console.log(`TODO: the "${action}" action (${v}) has no native version yet`);
+    }
+  };
+  // ---- messages: a button's "message" action, App Bar buttons, Side Menu rows → everything listening (popups, timers, swipe pages, notifications) ----
+  const hearers = new Set();
+  A.toasts = [];
+  /** Hear the app's messages; call what it returns to stop. */
+  A.listen = (f) => { hearers.add(f); return () => hearers.delete(f); };
+  A.send = (message) => {
+    const m = A.fill(message).trim(); if (!m) return;
+    hearers.forEach((f) => f(m));
+    const n = model.notify;
+    if (n && (m === n.listen || m.startsWith(n.listen + ' '))) {
+      const [title = '', text = '', icon = ''] = m.slice(n.listen.length).trim().split('|').map((t) => t.trim()), t = { title, text, icon: icon || (n.look === 'achievement' ? '🏆' : ''), key: Math.random() };
+      A.toasts = [...A.toasts, t].slice(-n.max); A.changed();
+      setTimeout(() => { A.toasts = A.toasts.filter((q) => q !== t); A.changed(); }, n.seconds * 1000);
     }
   };
   A.openMenu = (open) => { A.menuOpen = open; A.changed(); };
@@ -171,7 +187,7 @@ export function usePal() {
   return { ...(dark ? m.dark : m.light), dark };
 }
 /** "@accent" → the palette's colour, "#ff0000" → itself. */
-export const col = (c, P) => { if (!c) return null; const t = /^@(\w+)$/.exec(c); return t ? P[t[1]] || null : /^#[0-9a-f]{3,8}$/i.test(c) ? c : null; };
+export const col = (c, P) => { if (!c) return null; const t = /^@(\w+)$/.exec(c); return t ? P[t[1]] || null : /^#[0-9a-f]{3,8}$/i.test(c) || /^rgba?\(/.test(c) ? c : null; };
 const alpha = (hex, a) => { const h = String(hex || '#000000').replace('#', ''); const f = h.length === 3 ? [...h].map((c) => c + c).join('') : h.slice(0, 6); return `rgba(${parseInt(f.slice(0, 2), 16)},${parseInt(f.slice(2, 4), 16)},${parseInt(f.slice(4, 6), 16)},${a})`; };
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -239,6 +255,7 @@ export function PocketApp({ pages }) {
         <Page key={entry ? entry.key : 'tab' + app.tab} />
         {m.tabs.length && !stack.length ? <TabBar P={P} /> : null}
         {app.menuOpen && m.menu ? <SideMenu P={P} /> : null}
+        {m.notify && app.toasts.length ? <ToastLayer P={P} /> : null}
       </View>
     </SafeAreaProvider>
   );
@@ -270,7 +287,7 @@ function AppBar({ title, page, P }) {
   const brand = B.look !== 'standard' && !back && (!B.brandPages.length || B.brandPages.includes(page));
   const fg = col(B.text, P) || P.text, ic = col(B.icon, P) || P.text, center = B.align === 'center';
   const acts = B.actions.filter((a) => !a.only.length || a.only.includes(page)).reverse(); // (the first sits at the right edge)
-  const tap = (a) => { if (/dark mode/.test(a.does)) app.set('darkMode', !P.dark); else if (a.does.startsWith('page:')) app.go(a.does.slice(5)); else console.log(`TODO: the App Bar button sends "${a.does}"`); };
+  const tap = (a) => { if (/dark mode/.test(a.does)) app.set('darkMode', !P.dark); else if (a.does.startsWith('page:')) app.go(a.does.slice(5)); else app.send(a.does); };
   const left = back
     ? <Pressable accessibilityLabel="Back" onPress={() => app.back()} style={S.barBtn}><Icon name="back" color={ic} size={26} /></Pressable>
     : B.avatar ? <Pressable accessibilityLabel="Menu" onPress={() => app.menuOn() && app.openMenu(true)} style={{ paddingHorizontal: 4 }}><Avatar name={app.barName() || '?'} size={32} /></Pressable>
@@ -337,7 +354,7 @@ function SideMenu({ P }) {
     if (it.kind === 'section') return <Text key={i} style={{ color: alpha(fg, 0.55), fontSize: 12, fontWeight: '800', letterSpacing: 0.6, paddingTop: 14, paddingBottom: 4, paddingHorizontal: 12 }}>{it.label.toUpperCase()}</Text>;
     const n = it.badge ? num(app.vars[it.badge]) || 0 : 0, on = it.kind === 'page' && it.page === page, tint = on ? acc : fg;
     return (
-      <Pressable key={i} onPress={() => { if (it.kind === 'toggle') return app.set(it.var, !lit(it.var)); close(); if (it.kind === 'page') app.go(it.page); else console.log(`TODO: the Side Menu sends "${it.msg}"`); }}
+      <Pressable key={i} onPress={() => { if (it.kind === 'toggle') return app.set(it.var, !lit(it.var)); close(); if (it.kind === 'page') app.go(it.page); else app.send(String(it.msg).replace(/^msg:/, '')); }}
         style={{ flexDirection: 'row', alignItems: 'center', gap: 14, minHeight: 48, paddingHorizontal: 12, borderRadius: 14, backgroundColor: on ? alpha(acc, 0.18) : 'transparent' }}>
         {it.icon ? <Icon name={it.icon} color={tint} size={22} /> : null}
         <Text numberOfLines={1} style={{ flex: 1, color: tint, fontSize: 16, fontWeight: '600' }}>{app.fill(it.label)}</Text>
@@ -949,7 +966,296 @@ export function Trending({ collection = 'Posts', searchVar }) {
   return <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>{T.map(([t, c]) => <Pressable key={t} onPress={() => searchVar && app.set(searchVar, t)} style={{ borderWidth: 1, borderColor: P.line, backgroundColor: P.card, borderRadius: 10, paddingVertical: 8, paddingHorizontal: 14 }}><Text style={{ color: P.text }}>{t} · {c}</Text></Pressable>)}</View>;
 }
 
+// ---------------------------------------------------------------------------------------------------------------
+// More components: charts, carousels, swipe pages, timers, keypads, popups, notifications…
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Hear the app's messages while this is on screen. */
+function useMessages(f) {
+  const ref = useRef(f); ref.current = f;
+  useEffect(() => app.listen((m) => ref.current(m)), []);
+}
+/** A component's own width (for charts and carousels). */
+function useWidth(start = 340) { const [w, setW] = useState(start); return [w, (e) => { const x = e.nativeEvent.layout.width; if (Math.abs(x - w) > 0.5) setW(x); }]; }
+
+/** The notifications on screen, stacked at the top (or bottom, or centre). */
+function ToastLayer({ P }) {
+  const n = app.model.notify, inset = useSafeAreaInsets(), bg = col(n.bg, P) || P.card, fg = col(n.text, P) || P.text, ac = col(n.accent, P) || P.accent;
+  const pill = n.look === 'pill', banner = n.look === 'banner';
+  const pos = n.position === 'bottom' ? { bottom: inset.bottom + 96 } : n.position === 'center' ? { top: '40%' } : { top: inset.top + 8 };
+  return (
+    <View pointerEvents="box-none" style={[{ position: 'absolute', left: banner ? 0 : 12, right: banner ? 0 : 12, gap: 8, alignItems: n.position === 'top right' ? 'flex-end' : 'center' }, pos]}>
+      {app.toasts.map((t) => (
+        <Pressable key={t.key} onPress={() => { app.toasts = app.toasts.filter((q) => q !== t); app.changed(); }}
+          style={[{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: bg, maxWidth: banner ? undefined : 420, alignSelf: banner ? 'stretch' : undefined, borderRadius: banner ? 0 : pill ? 30 : 16, paddingHorizontal: pill ? 18 : 14, paddingVertical: pill ? 10 : 12 }, n.look === 'achievement' && { borderWidth: 2, borderColor: ac }, S.cardShadow]}>
+          {t.icon ? <Text style={{ fontSize: pill ? 18 : 24 }}>{t.icon}</Text> : null}
+          <View style={{ flexShrink: 1 }}>
+            {t.title ? <Text style={{ color: n.look === 'achievement' ? ac : fg, fontWeight: '800', fontSize: 15 }}>{t.title}</Text> : null}
+            {t.text && !pill ? <Text style={{ color: fg, opacity: 0.8, fontSize: 13 }}>{t.text}</Text> : null}
+          </View>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+const MORE = ['#ff6b8b', '#ffc94d', '#3ccf7a', '#8e6bf2', '#22b8c9', '#ff9f43', '#e0559b'];
+const n1 = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1));
+/** A bar, column, line, area, pie, donut or radar chart: from label | value lines ({variables} work), or a variable tracked over time. */
+export function PChart({ chart = 'columns', data = [], track = '', every = 1, points = 30, title = '', max = 0, values = true, labels = true, grid = true, color = '@accent', text = '', bg = '', h = 200 }) {
+  useApp(); const P = usePal(), [W, onLayout] = useWidth(), [hist, setHist] = useState(() => (track ? [num(app.vars[track]) || 0] : []));
+  useEffect(() => { if (!track) return undefined; const t = setInterval(() => setHist((L) => [...L, num(app.vars[track]) || 0].slice(-points)), Math.max(100, every * 1000)); return () => clearInterval(t); }, [track, every, points]);
+  const fg = col(text, P) || P.text, c = col(color, P) || P.accent, H = Math.max(60, h - (title ? 52 : 24));
+  const items = track ? hist.map((v) => ['', v]) : data.map((d) => [app.fill(d.label), num(app.fill(d.value).trim()) ?? 0]);
+  const kind = track && !['line', 'area', 'columns', 'bars'].includes(chart) ? 'line' : chart, n = items.length, out = [];
+  const top = Math.max(0, ...items.map((i) => i[1])), hi = max > 0 ? max : top <= 0 ? 1 : top * 1.12;
+  const txt = (s, x, y, o = {}) => { if (s !== '') out.push(<SvgText key={out.length} fontFamily={Platform.OS === 'web' ? 'system-ui, sans-serif' : undefined} x={x} y={y + 4} textAnchor={o.anchor || 'middle'} fontSize={o.size || 11} fontWeight={o.bold ? '800' : '600'} fill={o.fill || fg} opacity={o.fill ? 1 : 0.75}>{s}</SvgText>); };
+  const slice = (i) => (i === 0 ? c : MORE[(i - 1) % MORE.length]);
+  if (n && (kind === 'pie' || kind === 'donut')) {
+    const total = items.reduce((a, i) => a + Math.max(0, i[1]), 0), r = Math.min(W, H) / 2 - 4, cx = W / 2, cy = H / 2; let a = -Math.PI / 2;
+    if (total > 0) items.forEach(([name, v], i) => {
+      const sw = Math.max(0, v) / total * Math.PI * 2, rr = kind === 'donut' ? r * 0.78 : r, a2 = a + Math.min(sw, Math.PI * 2 - 0.0001), big = sw > Math.PI ? 1 : 0;
+      const p0 = `${cx + Math.cos(a) * rr},${cy + Math.sin(a) * rr}`, p1 = `${cx + Math.cos(a2) * rr},${cy + Math.sin(a2) * rr}`;
+      out.push(kind === 'donut' ? <Path key={out.length} d={`M${p0} A${rr},${rr} 0 ${big} 1 ${p1}`} fill="none" stroke={slice(i)} strokeWidth={r * 0.42} /> : <Path key={out.length} d={`M${cx},${cy} L${p0} A${rr},${rr} 0 ${big} 1 ${p1} Z`} fill={slice(i)} />);
+      if (labels && sw > 0.4) { const m = a + sw / 2, k = kind === 'donut' ? 0.78 : 0.62; txt(name, cx + Math.cos(m) * r * k, cy + Math.sin(m) * r * k, { fill: '#fff', bold: true }); }
+      a += sw;
+    });
+    if (kind === 'donut' && values) txt(n1(total), cx, cy, { size: 20, bold: true, fill: fg });
+  } else if (n && kind === 'radar') {
+    const r = Math.min(W, H) / 2 - (labels ? 18 : 4), cx = W / 2, cy = H / 2, at = (i, k) => { const a = -Math.PI / 2 + i * Math.PI * 2 / n; return [cx + Math.cos(a) * r * k, cy + Math.sin(a) * r * k]; };
+    for (const k of [0.33, 0.66, 1]) if (grid || k === 1) out.push(<Polygon key={out.length} points={items.map((_, i) => at(i, k).join(',')).join(' ')} fill="none" stroke={P.line} />);
+    items.forEach(([name], i) => { const e = at(i, 1); out.push(<Line key={out.length} x1={cx} y1={cy} x2={e[0]} y2={e[1]} stroke={P.line} />); if (labels) txt(name, ...at(i, 1.18)); });
+    out.push(<Polygon key={out.length} points={items.map(([, v], i) => at(i, Math.min(1, Math.max(0, v / hi))).join(',')).join(' ')} fill={c} fillOpacity={0.3} stroke={c} strokeWidth={2.5} />);
+  } else if (n && kind === 'bars') {
+    const lw = labels && items.some((i) => i[0]) ? 52 : 0, vw = values ? 34 : 0, row = H / n;
+    items.forEach(([name, v], i) => { const y = row * i + row * 0.2, bh = row * 0.6, bw = (W - lw - vw) * Math.min(1, Math.max(0, v / hi));
+      out.push(<Rect key={out.length} x={lw} y={y} width={bw} height={bh} rx={bh / 3} fill={c} />); if (lw) txt(name, lw - 6, y + bh / 2, { anchor: 'end' }); if (values) txt(n1(v), lw + bw + 6, y + bh / 2, { anchor: 'start', bold: true, fill: fg }); });
+  } else if (n) {
+    const lb = labels && items.some((i) => i[0]) ? 18 : 2, tp = values ? 16 : 4, h0 = H - lb - tp, slot = W / n, yOf = (v) => tp + h0 * (1 - Math.min(1, Math.max(0, v / hi)));
+    if (grid) for (let i = 0; i <= 3; i++) out.push(<Line key={out.length} x1={0} x2={W} y1={tp + h0 * i / 3} y2={tp + h0 * i / 3} stroke={P.line} />);
+    if (kind === 'line' || kind === 'area') {
+      const pts = items.map(([, v], i) => [n === 1 ? W / 2 : i * W / (n - 1), yOf(v)]);
+      if (kind === 'area') out.push(<Polygon key={out.length} points={[...pts, [pts[n - 1][0], tp + h0], [pts[0][0], tp + h0]].map((p) => p.join(',')).join(' ')} fill={c} fillOpacity={0.25} />);
+      out.push(<Polyline key={out.length} points={pts.map((p) => p.join(',')).join(' ')} fill="none" stroke={c} strokeWidth={3} strokeLinejoin="round" strokeLinecap="round" />);
+      pts.forEach((p, i) => { if (n <= 14) { out.push(<Circle key={out.length} cx={p[0]} cy={p[1]} r={3.5} fill={c} />); if (values) txt(n1(items[i][1]), p[0], p[1] - 11, { bold: true, fill: fg }); } if (lb > 2) txt(items[i][0], Math.min(W - 14, Math.max(14, p[0])), H - 8); });
+    } else items.forEach(([name, v], i) => { const x = slot * i + slot * 0.2, bw = slot * 0.6, y = yOf(v);
+      out.push(<Path key={out.length} d={`M${x},${tp + h0} V${y + 6} Q${x},${y} ${x + 6},${y} H${x + bw - 6} Q${x + bw},${y} ${x + bw},${y + 6} V${tp + h0} Z`} fill={c} />);
+      if (values) txt(n1(v), x + bw / 2, y - 8, { bold: true, fill: fg }); if (lb > 2) txt(name, x + bw / 2, H - 8); });
+  }
+  return (
+    <View style={{ borderRadius: 16, padding: 12, gap: 8, backgroundColor: col(bg, P) || 'transparent' }}>
+      {title ? <Text style={{ color: fg, fontSize: 16, fontWeight: '800' }}>{app.fill(title)}</Text> : null}
+      <View onLayout={onLayout}><Svg width={W} height={H}>{out}</Svg></View>
+    </View>
+  );
+}
+
+/** Swipe through cards; the one in the middle is picked into a variable (locked cards wait for their variable). */
+export function Carousel({ var: v, items = [], cardWidth = 0.55, arrows = true, dots = true, message = '', card = '@card', text = '', accent = '@accent', h = 220 }) {
+  useApp(); const P = usePal(), [W, onLayout] = useWidth(), ref = useRef(null);
+  const [i, setI] = useState(() => Math.max(0, items.findIndex((it) => it.value === show(app.vars[v]))));
+  const cw = W * cardWidth, side = (W - cw) / 2, fg = col(text, P) || P.text, ac = col(accent, P) || P.accent;
+  const locked = (it) => !!it.lock && !isOn(app.vars[it.lock]);
+  const pick = (j) => { j = Math.max(0, Math.min(items.length - 1, j)); setI(j); const it = items[j]; if (it && !locked(it) && show(app.vars[v]) !== it.value) { app.set(v, it.value); if (message) app.send(message); } };
+  const go = (j) => { j = Math.max(0, Math.min(items.length - 1, j)); ref.current?.scrollTo({ x: j * cw, animated: true }); pick(j); };
+  useEffect(() => { ref.current?.scrollTo({ x: i * cw, animated: false }); }, [cw]);
+  return (
+    <View style={{ height: h }} onLayout={onLayout}>
+      <View style={{ flex: 1 }}>
+        <ScrollView ref={ref} horizontal showsHorizontalScrollIndicator={false} snapToInterval={cw} decelerationRate="fast" contentContainerStyle={{ paddingHorizontal: side }}
+          onMomentumScrollEnd={(e) => pick(Math.round(e.nativeEvent.contentOffset.x / cw))}>
+          {items.map((it, k) => (
+            <Pressable key={k} onPress={() => go(k)} style={{ width: cw, padding: 6, transform: [{ scale: k === i ? 1 : 0.86 }] }}>
+              <View style={{ flex: 1, borderRadius: 20, padding: 14, alignItems: 'center', justifyContent: 'center', gap: 4, backgroundColor: col(card, P) || P.card, borderWidth: 2.5, borderColor: k === i ? ac : 'transparent', opacity: locked(it) ? 0.5 : 1 }}>
+                <Text style={{ fontSize: 46 }}>{locked(it) ? '🔒' : it.icon}</Text>
+                <Text numberOfLines={1} style={{ color: fg, fontSize: 17, fontWeight: '800' }}>{it.name}</Text>
+                {it.desc ? <Text numberOfLines={2} style={{ color: fg, opacity: 0.7, fontSize: 13, textAlign: 'center' }}>{app.fill(it.desc)}</Text> : null}
+              </View>
+            </Pressable>
+          ))}
+        </ScrollView>
+        {arrows ? <Pressable accessibilityLabel="Previous" onPress={() => go(i - 1)} style={[S.carr, { left: 0 }]}><Text style={{ color: fg, fontSize: 30 }}>‹</Text></Pressable> : null}
+        {arrows ? <Pressable accessibilityLabel="Next" onPress={() => go(i + 1)} style={[S.carr, { right: 0 }]}><Text style={{ color: fg, fontSize: 30 }}>›</Text></Pressable> : null}
+      </View>
+      {dots ? <Dots n={items.length} i={i} on={ac} off={P.line} /> : null}
+    </View>
+  );
+}
+const Dots = ({ n, i, on, off }) => <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 6, paddingTop: 10 }}>{Array.from({ length: n }, (_, k) => <View key={k} style={{ width: k === i ? 18 : 7, height: 7, borderRadius: 4, backgroundColor: k === i ? on : off }} />)}</View>;
+
+/** Swipe left and right between pages (onboarding, a tour); the page number goes into a variable, and "slide next" / "slide prev" / "slide 2" move it. */
+export function Pager({ var: v, dots = true, dotColor = '@accent', loop = false, auto = 0, message = 'slide', h = 320, children }) {
+  useApp(); const P = usePal(), [W, onLayout] = useWidth(), ref = useRef(null), pages = React.Children.toArray(children), n = pages.length;
+  const cur = Math.max(0, Math.min(n - 1, (num(app.vars[v]) || 1) - 1)), dot = col(dotColor, P) || P.accent;
+  const go = (j) => { j = loop ? ((j % n) + n) % n : Math.max(0, Math.min(n - 1, j)); if (j + 1 !== num(app.vars[v])) app.set(v, j + 1); };
+  useEffect(() => { ref.current?.scrollTo({ x: cur * W, animated: true }); }, [cur, W]);
+  useMessages((m) => { const c = (num(app.vars[v]) || 1) - 1; if (m === message + ' next') go(c + 1); else if (m === message + ' prev' || m === message + ' back') go(c - 1); else if (m.startsWith(message + ' ') && Number.isFinite(+m.slice(message.length + 1))) go(+m.slice(message.length + 1) - 1); });
+  useEffect(() => { if (!(auto > 0)) return undefined; const t = setInterval(() => go((num(app.vars[v]) || 1)), auto * 1000); return () => clearInterval(t); }, [auto, n]);
+  return (
+    <View style={{ height: h }} onLayout={onLayout}>
+      <ScrollView ref={ref} horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={{ flex: 1 }} onMomentumScrollEnd={(e) => go(Math.round(e.nativeEvent.contentOffset.x / W))}>
+        {pages.map((c, k) => <View key={k} style={{ width: W, justifyContent: 'center', paddingHorizontal: 4 }}>{c}</View>)}
+      </ScrollView>
+      {dots ? <Dots n={n} i={cur} on={dot} off={alpha(dot.startsWith('#') ? dot : '#888888', 0.3)} /> : null}
+    </View>
+  );
+}
+
+/** A grid of square pictures from a collection's media field (or emojis); tap one to open it. */
+export function PhotoGrid({ collection = 'Posts', field = 'media', filter = '', columns = 3, gap = 2, radius = 0, openPage = '', message = '' }) {
+  useApp(); const P = usePal(), [W, onLayout] = useWidth();
+  const rows = app.query(collection, filter, '', 'newest first').filter((r) => mediaList(r[field]).length), cols = Math.max(1, columns), size = (W - gap * (cols - 1)) / cols;
+  if (!rows.length) return <Text style={{ color: P.sub, textAlign: 'center', padding: 24 }}>No pictures yet</Text>;
+  return (
+    <View onLayout={onLayout} style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+      {rows.map((r) => (
+        <Pressable key={r._id} onPress={() => { app.openCollection = collection; app.openId = r._id; if (openPage) app.go(openPage); else app.changed(); if (message) app.send(message); }} style={{ width: size, height: size, borderRadius: radius, overflow: 'hidden' }}>
+          <Tile m={mediaList(r[field])[0]} bg={hexOf(r.color) || avColor(r._id)} height={size} />
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+/** A heart (or thumbs-up, or star) that turns a variable on or off, with a count next to it. */
+export function LikeButton({ var: v, countVar = 'likes', icon = 'heart', message = '', on = '#f91880', off = '@sub', text = '@sub' }) {
+  useApp(); const P = usePal(), liked = isOn(app.vars[v]), c = liked ? col(on, P) || P.accent : col(off, P) || P.sub, k = useRef(new Animated.Value(1)).current;
+  const d = icon === 'thumbs up' ? 'M7 10v10H4V10zm3 10h7.5a2 2 0 0 0 2-1.6l1.4-7A2 2 0 0 0 19 9h-5l.7-3.6a1.6 1.6 0 0 0-3-1L8 10v10' : icon === 'star' ? 'M12 3l2.7 6 6.3.6-4.8 4.2 1.5 6.2L12 17l-5.7 3 1.5-6.2L3 9.6 9.3 9z' : SMALL.heart;
+  const tap = () => { app.set(v, !liked); if (countVar) app.add(countVar, liked ? -1 : 1); if (message) app.send(message); if (!liked) { k.setValue(1.5); Animated.spring(k, { toValue: 1, friction: 3, useNativeDriver: true }).start(); } };
+  return (
+    <Pressable accessibilityLabel="Like" onPress={tap} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingVertical: 6, paddingHorizontal: 8 }}>
+      <Animated.View style={{ transform: [{ scale: k }] }}><Svg width={26} height={26} viewBox="0 0 24 24"><Path d={d} fill={liked ? c : 'none'} stroke={c} strokeWidth={2} strokeLinejoin="round" /></Svg></Animated.View>
+      {countVar ? <Text style={{ color: liked ? c : col(text, P) || P.sub, fontWeight: '700' }}>{compact(app.vars[countVar])}</Text> : null}
+    </Pressable>
+  );
+}
+
+/** Text that scrolls across (several messages separated by |, with {variables}). */
+export function Ticker({ text = '', speed = 60, direction = 'left', gap = 60, size = 15, bg = '', color = '', accent = '#ffd23d', h = 36 }) {
+  useApp(); const P = usePal(), x = useRef(new Animated.Value(0)).current, [w, setW] = useState(0);
+  const parts = text.split('|').map((t) => app.fill(t.trim())).filter(Boolean), fg = col(color, P) || P.text, ac = col(accent, P) || P.accent;
+  useEffect(() => { if (!w) return undefined; x.setValue(0); const a = Animated.loop(Animated.timing(x, { toValue: 1, duration: w / Math.max(10, speed) * 1000, easing: (t) => t, useNativeDriver: true })); a.start(); return () => a.stop(); }, [w, speed]);
+  const line = (k) => <Text key={k} numberOfLines={1} onLayout={k === 0 ? (e) => setW(e.nativeEvent.layout.width) : undefined} style={{ color: fg, fontSize: size, fontWeight: '700', paddingRight: gap }}>{parts.map((t, i) => <Text key={i}>{i ? <Text style={{ color: ac }}>{'   ●   '}</Text> : null}{t}</Text>)}</Text>;
+  const tx = x.interpolate({ inputRange: [0, 1], outputRange: direction === 'right' ? [-w, 0] : [0, -w] });
+  return (
+    <View style={{ height: h, overflow: 'hidden', justifyContent: 'center', backgroundColor: col(bg, P) || 'transparent', marginHorizontal: -16 }}>
+      <Animated.View style={{ flexDirection: 'row', width: 100000, transform: [{ translateX: tx }] }}>{[0, 1, 2, 3].map(line)}</Animated.View>
+    </View>
+  );
+}
+
+/** A countdown (or count-up) as a ring, bar, big digits or a pill: red near the end, then a message. "timer start / pause / reset / restart / add 5" control it. */
+export function PTimer({ seconds = 30, countUp = false, look = 'ring', format = 'seconds', autoStart = true, message = 'timer', endMessage = '', endAction = 'nothing else', warnAt = 5, var: v = '', color = '@accent', warn = '#ff4d5e', track = '@line', text = '', size = 120 }) {
+  const P = usePal(), st = useRef({ t: 0, running: autoStart, done: false, shown: -1 }).current, [, redraw] = useReducer((n) => n + 1, 0);
+  useMessages((m) => { if (!m.startsWith(message)) return; const rest = m.slice(message.length).trim();
+    if (['start', 'resume', ''].includes(rest)) st.running = true; else if (rest === 'pause' || rest === 'stop') st.running = false; else if (rest === 'reset') { st.t = 0; st.done = false; } else if (rest === 'restart') { st.t = 0; st.done = false; st.running = true; } else if (/^add\s+-?\d/.test(rest)) st.t = Math.max(0, st.t - +rest.split(/\s+/)[1] * (countUp ? -1 : 1));
+    redraw(); });
+  useEffect(() => { const t = setInterval(() => {
+    if (!st.running || st.done) return; st.t = Math.min(seconds, st.t + 0.1);
+    if (st.t >= seconds) { st.done = true; if (endMessage) app.send(endMessage); if (endAction === 'restart timer') { st.t = 0; st.done = false; } }
+    const left = countUp ? Math.floor(st.t) : Math.ceil(seconds - st.t - 1e-9); if (v && left !== st.shown) { st.shown = left; app.set(v, left); }
+    redraw(); }, 100); return () => clearInterval(t); }, []);
+  const s = seconds <= 0 ? 1 : seconds, left = countUp ? st.t : s - st.t, whole = countUp ? Math.floor(left) : Math.ceil(left - 1e-9);
+  const label = format === 'm:ss' ? `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}` : format === 'seconds.tenths' ? left.toFixed(1) : String(whole);
+  const warnOn = !countUp && left <= warnAt && !st.done && st.running, c = warnOn ? col(warn, P) || P.danger : col(color, P) || P.accent, frac = Math.min(1, Math.max(0, left / s));
+  const scale = warnOn && Math.floor(st.t * 2) % 2 === 0 ? 1.06 : 1, tr = col(track, P) || P.line;
+  const digits = <Text style={{ color: warnOn ? c : col(text, P) || P.text, fontWeight: '900', fontSize: size * (look === 'digits' ? 0.45 : 0.26), fontVariant: ['tabular-nums'] }}>{label}</Text>;
+  let body;
+  if (look === 'bar') body = <View style={{ alignSelf: 'stretch', alignItems: 'center', gap: 6 }}>{digits}<View style={{ alignSelf: 'stretch', height: 12, borderRadius: 6, backgroundColor: tr, overflow: 'hidden' }}><View style={{ width: `${frac * 100}%`, height: '100%', backgroundColor: c }} /></View></View>;
+  else if (look === 'digits') body = digits;
+  else if (look === 'pill') body = <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 30, backgroundColor: alpha(c.startsWith('#') ? c : '#4fa3ff', 0.16) }}><Text style={{ fontSize: 18 }}>⏱</Text>{digits}</View>;
+  else { const R = 50 - 4; body = (
+    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+      <Svg width={size} height={size} viewBox="0 0 100 100" style={StyleSheet.absoluteFill}>
+        <Circle cx={50} cy={50} r={R} fill="none" stroke={tr} strokeWidth={8} />
+        <Circle cx={50} cy={50} r={R} fill="none" stroke={c} strokeWidth={8} strokeLinecap="round" strokeDasharray={`${2 * Math.PI * R * frac} 999`} transform="rotate(-90 50 50)" />
+      </Svg>{digits}
+    </View>); }
+  return <View style={{ alignItems: 'center', transform: [{ scale }] }}>{body}</View>;
+}
+
+/** Grey shapes that shimmer while content loads; gone when its variable turns on. */
+export function Skeleton({ layout = 'avatar + lines', lines = 3, doneVar = '', radius = 8 }) {
+  useApp(); const P = usePal(), k = useRef(new Animated.Value(0)).current;
+  useEffect(() => { const a = Animated.loop(Animated.sequence([Animated.timing(k, { toValue: 1, duration: 1100, useNativeDriver: true }), Animated.timing(k, { toValue: 0, duration: 1100, useNativeDriver: true })])); a.start(); return () => a.stop(); }, []);
+  if (doneVar && isOn(app.vars[doneVar])) return null;
+  const base = alpha(P.text, 0.12), op = k.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] });
+  const bar = (w, i) => <View key={i} style={{ width: `${w}%`, height: 12, borderRadius: radius, backgroundColor: base, marginVertical: 5 }} />;
+  const rows = (n) => <View style={{ flex: 1 }}>{Array.from({ length: n }, (_, i) => bar(i === n - 1 && n > 1 ? 60 : 100, i))}</View>;
+  const dot = (d) => <View style={{ width: d, height: d, borderRadius: d / 2, backgroundColor: base }} />;
+  const block = (hh) => <View style={{ height: hh, borderRadius: radius * 1.5, backgroundColor: base }} />;
+  const body = layout === 'text lines' ? rows(lines) : layout === 'card' ? <View style={{ gap: 8 }}>{block(140)}{rows(Math.max(1, lines - 1))}</View>
+    : layout === 'list rows' ? <View>{Array.from({ length: lines }, (_, i) => <View key={i} style={{ flexDirection: 'row', gap: 12, alignItems: 'center', paddingVertical: 6 }}>{dot(40)}{rows(2)}</View>)}</View>
+    : layout === 'picture' ? block(180) : <View style={{ flexDirection: 'row', gap: 12 }}>{dot(48)}{rows(lines)}</View>;
+  return <Animated.View style={{ opacity: op }}>{body}</Animated.View>;
+}
+
+/** Colour swatches: tap one to pick it into a variable. */
+export function ColorSwatches({ var: v, colors = [], columns = 5, shape = 'circle', gap = 10, ring = '@text', message = '' }) {
+  useApp(); const P = usePal(), [W, onLayout] = useWidth(), cols = Math.max(1, columns), size = (W - gap * (cols - 1)) / cols, cur = show(app.vars[v]).toLowerCase();
+  return (
+    <View onLayout={onLayout} style={{ flexDirection: 'row', flexWrap: 'wrap', gap }}>
+      {colors.map((c) => { const on = c.toLowerCase() === cur; return (
+        <Pressable key={c} accessibilityLabel={c} onPress={() => { app.set(v, c); if (message) app.send(message); }}
+          style={{ width: size, height: size, borderRadius: shape === 'circle' ? size / 2 : shape === 'rounded' ? 12 : 3, backgroundColor: col(c, P) || c, borderWidth: on ? 3.5 : 1, borderColor: on ? col(ring, P) || P.text : P.line, alignItems: 'center', justifyContent: 'center' }}>
+          {on ? <Text style={{ color: '#fff', fontSize: 18, fontWeight: '800', textShadowColor: 'rgba(0,0,0,0.4)', textShadowRadius: 2 }}>✓</Text> : null}
+        </Pressable>); })}
+    </View>
+  );
+}
+
+/** A number pad for a code, a PIN or an answer: ✓ checks it against the answer and sends the right / wrong message. */
+export function Keypad({ var: v, maxLength = 4, mask = false, answer = '', rightMessage = '', wrongMessage = '', enterMessage = '', autoEnter = true, display = true, keyStyle = 'round', keyColor = '@field', text = '', accent = '@good', displayBg = '' }) {
+  useApp(); const P = usePal(), cur = show(app.vars[v]), fg = col(text, P) || P.text, ac = col(accent, P) || P.accent;
+  const enter = (val) => { if (enterMessage) app.send(enterMessage); if (!answer) return; if (val === answer) { if (rightMessage) app.send(rightMessage); } else { if (wrongMessage) app.send(wrongMessage); app.set(v, ''); } };
+  const press = (k) => { if (k === '⌫') app.set(v, cur.slice(0, -1)); else if (k === '✓') enter(cur); else if (cur.length < maxLength) { const nx = cur + k; app.set(v, nx); if (autoEnter && nx.length === maxLength) enter(nx); } };
+  return (
+    <View style={{ alignSelf: 'center', width: '100%', maxWidth: 300, gap: 8 }}>
+      {display ? <Text style={{ textAlign: 'center', fontSize: 26, fontWeight: '800', letterSpacing: 2, padding: 14, borderRadius: 14, overflow: 'hidden', color: fg, backgroundColor: col(displayBg, P) || P.field }}>{Array.from({ length: maxLength }, (_, i) => (i < cur.length ? (mask ? '•' : cur[i]) : '–')).join('  ')}</Text> : null}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 12 }}>
+        {['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', '✓'].map((k) => (
+          <Pressable key={k} accessibilityLabel={k === '⌫' ? 'Delete' : k === '✓' ? 'Enter' : k} onPress={() => press(k)}
+            style={{ width: '30%', aspectRatio: keyStyle === 'round' ? 1 : 1.5, borderRadius: keyStyle === 'round' ? 999 : keyStyle === 'flat' ? 6 : 16, alignItems: 'center', justifyContent: 'center', backgroundColor: k === '✓' ? ac : keyStyle === 'flat' ? 'transparent' : col(keyColor, P) || P.field }}>
+            <Text style={{ fontSize: 24, fontWeight: '700', color: k === '✓' ? '#fff' : fg }}>{k}</Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+/** ‹ Easy › : pick one of several options with arrows; the choice goes into a variable. */
+export function Selector({ var: v, options = [], wrap = true }) {
+  useApp(); const P = usePal(), n = options.length, i = Math.max(0, options.indexOf(show(app.vars[v])));
+  if (!n) return null;
+  const pick = (d) => app.set(v, options[wrap ? (i + d + n) % n : Math.max(0, Math.min(n - 1, i + d))]);
+  const arrow = (t, d, ok, label) => <Pressable accessibilityLabel={label} disabled={!ok} onPress={() => pick(d)} style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center', opacity: ok ? 1 : 0.3 }}><Text style={{ color: P.text, fontSize: 28 }}>{t}</Text></Pressable>;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: P.field, borderRadius: 14 }}>
+      {arrow('‹', -1, wrap || i > 0, 'Previous')}<Text style={{ flex: 1, textAlign: 'center', color: P.text, fontSize: 17, fontWeight: '800' }}>{options[i]}</Text>{arrow('›', 1, wrap || i < n - 1, 'Next')}
+    </View>
+  );
+}
+
+/** A popup or a bottom sheet with things inside: opens on a message and closes on another (or after a few seconds). */
+export function PPopup({ mode = 'popup', openOn = 'popup', closeOn = 'close', startOpen = false, autoClose = 0, tapCloses = false, dim = true, handle = true, children }) {
+  const P = usePal(), [open, setOpen] = useState(!!startOpen), sheet = mode === 'sheet';
+  useMessages((m) => { if (m === openOn) setOpen(true); else if (m === closeOn) setOpen(false); });
+  useEffect(() => { if (!open || !(autoClose > 0)) return undefined; const t = setTimeout(() => setOpen(false), autoClose * 1000); return () => clearTimeout(t); }, [open]);
+  return (
+    <Modal visible={open} transparent animationType={sheet ? 'slide' : 'fade'} onRequestClose={() => setOpen(false)}>
+      <Pressable onPress={() => { if (tapCloses) setOpen(false); }} style={{ flex: 1, backgroundColor: dim ? 'rgba(0,0,0,0.5)' : 'transparent', justifyContent: sheet ? 'flex-end' : 'center', padding: sheet ? 0 : 20 }}>
+        <Pressable onPress={() => {}} style={sheet ? { backgroundColor: P.card, borderTopLeftRadius: 22, borderTopRightRadius: 22, paddingHorizontal: 16, paddingTop: 8, paddingBottom: 28 } : null}>
+          {sheet && handle ? <View style={{ alignSelf: 'center', width: 36, height: 4, borderRadius: 2, backgroundColor: P.line, marginTop: 4, marginBottom: 12 }} /> : null}
+          {children}
+        </Pressable>
+      </Pressable>
+    </Modal>
+  );
+}
+
 const S = StyleSheet.create({
+  carr: { position: 'absolute', top: '50%', marginTop: -22, width: 40, height: 44, alignItems: 'center', justifyContent: 'center' },
   barBtn: { padding: 6 },
   barAct: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', top: 2, right: 1, borderRadius: 9, paddingHorizontal: 5, minWidth: 18, alignItems: 'center' },

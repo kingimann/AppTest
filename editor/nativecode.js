@@ -2,7 +2,7 @@
 // web view. Pages, the App Bar, the Bottom Nav, text, buttons, Data Lists, Forms, inputs, switches and data
 // collections become native code; anything else is left as a placeholder with a TODO. The runtime (state, data,
 // building blocks) is a fixed file (editor/native/…); the pages are generated from the project.
-import { appModel, PALETTES, iconFor, barIcons, todoFor } from './appmodel.js';
+import { appModel, PALETTES, iconFor, barIcons } from './appmodel.js';
 import { NAV_ART } from './navart.js';
 import { dartName, FLUTTER_VERSIONS } from './flutter.js';
 
@@ -46,6 +46,8 @@ function names(model) {
 
 function dartValue(v) { return lit(v) ?? (v == null ? 'null' : ds(v)); }
 /** Named arguments that differ from the runtime's defaults: [[name, value, default]] → ", name: value…" (strings written with str). */
+/** Swift numbers: the Int settings rounded, the rest as written (CGFloat / Double). */
+const SN = (v, k) => (['points', 'columns', 'lines', 'maxLength'].includes(k) ? String(Math.round(v)) : String(v));
 export const optArgs = (pairs, eq, str, num = (v) => String(v)) => pairs.filter(([, v, d]) => v != null && v !== d).map(([k, v]) => `, ${k}${eq}${typeof v === 'string' ? str(v) : typeof v === 'number' ? num(v, k) : v}`).join(''); // (num gets the name too: Kotlin's Int / Double / Float)
 
 function dartElement(x, ind) {
@@ -222,7 +224,7 @@ Future<void> main() async {
 }
 
 function nativeReadme(model, o, kind) {
-  const parts = todoFor(model, kind === 'flutter' ? 'flutter' : 'swift');
+  const parts = model.todo;
   const todo = parts.length ? `\n## Still to build\n\nThese parts of your app have no native version yet. Each shows a placeholder (search the code for \`TODO\`):\n\n${[...new Map(parts.map((t) => [t.name, t])).values()].map((t) => `- **${t.name}** (${t.type})`).join('\n')}\n` : '';
   const flutter = kind === 'flutter';
   return `# ${model.name} (native ${flutter ? 'Flutter' : 'SwiftUI'} code)
@@ -354,6 +356,18 @@ function swiftElement(x, ind) {
     case 'people': return `People(collection: ${ss(x.collection)}${x.profilePage ? `, profilePage: ${ss(x.profilePage)}` : ''})`;
     case 'achievements': return 'Achievements()';
     case 'trending': return `Trending(collection: ${ss(x.collection)}${x.searchVar ? `, searchVar: ${ss(x.searchVar)}` : ''})`;
+    case 'chart': return `PChart(data: [${x.data.map((d) => `(${ss(d.label)}, ${ss(d.value)})`).join(', ')}]${optArgs([['chart', x.chart, 'columns'], ['track', x.track, ''], ['every', x.every, 1], ['points', x.points, 30], ['title', x.title, ''], ['max', x.max, 0], ['values', x.values, true], ['labels', x.labels, true], ['grid', x.grid, true], ['color', x.color, '@accent'], ['text', x.text, ''], ['bg', x.bg, ''], ['height', x.h, 200]], ': ', ss, SN)})`;
+    case 'carousel': return `Carousel(${ss(x.var)}, [\n${x.items.map((i) => `${pad}    CarouselItem(${ss(i.name)}, ${ss(i.icon)}, ${ss(i.value)}${i.lock ? `, lock: ${ss(i.lock)}` : ''}${i.desc ? `, desc: ${ss(i.desc)}` : ''}),`).join('\n')}\n${pad}]${optArgs([['cardWidth', x.cardWidth, 0.55], ['arrows', x.arrows, true], ['dots', x.dots, true], ['loop', x.loop, false], ['message', x.message, ''], ['card', x.card, '@card'], ['text', x.text, ''], ['accent', x.accent, '@accent'], ['height', x.h, 220]], ': ', ss, SN)})`;
+    case 'pager': return `Pager(${ss(x.var)}${optArgs([['dots', x.dots, true], ['dotColor', x.dotColor, '@accent'], ['loop', x.loop, false], ['auto', x.auto, 0], ['message', x.message, 'slide'], ['height', x.h, 320]], ': ', ss, SN)}, pages: [\n${x.children.map((c) => `${pad}    AnyView(${swiftElement(c, ind + 4)}),`).join('\n')}\n${pad}])`;
+    case 'photogrid': return `PhotoGrid(${optArgs([['collection', x.collection, 'Posts'], ['field', x.field, 'media'], ['filter', x.filter, ''], ['columns', x.columns, 3], ['gap', x.gap, 2], ['radius', x.radius, 0], ['openPage', x.openPage, ''], ['message', x.message, '']], ': ', ss, SN).slice(2)})`;
+    case 'like': return `LikeButton(${ss(x.var)}${optArgs([['countVar', x.countVar, 'likes'], ['icon', x.icon, 'heart'], ['message', x.message, ''], ['on', x.on, '#f91880'], ['off', x.off, '@sub'], ['text', x.text, '@sub']], ': ', ss)})`;
+    case 'ticker': return `Ticker(${ss(x.text)}${optArgs([['speed', x.speed, 60], ['direction', x.direction, 'left'], ['gap', x.gap, 60], ['size', x.size, 15], ['bg', x.bg, ''], ['color', x.color, ''], ['accent', x.accent, '#ffd23d'], ['height', x.h, 36]], ': ', ss, SN)})`;
+    case 'timer': return `PTimer(${optArgs([['seconds', x.seconds, 30], ['countUp', x.countUp, false], ['look', x.look, 'ring'], ['format', x.format, 'seconds'], ['autoStart', x.autoStart, true], ['message', x.message, 'timer'], ['endMessage', x.endMessage, ''], ['endAction', x.endAction, 'nothing else'], ['warnAt', x.warnAt, 5], ['variable', x.var, ''], ['color', x.color, '@accent'], ['warn', x.warn, '#ff4d5e'], ['track', x.track, '@line'], ['text', x.text, ''], ['size', x.size, 120]], ': ', ss, SN).slice(2)})`;
+    case 'skeleton': return `Skeleton(${optArgs([['layout', x.layout, 'avatar + lines'], ['lines', x.lines, 3], ['doneVar', x.doneVar, ''], ['radius', x.radius, 8]], ': ', ss, SN).slice(2)})`;
+    case 'colors': return `ColorSwatches(${ss(x.var)}, [${x.colors.map(ss).join(', ')}]${optArgs([['columns', x.columns, 5], ['shape', x.shape, 'circle'], ['gap', x.gap, 10], ['ring', x.ring, '@text'], ['message', x.message, '']], ': ', ss, SN)})`;
+    case 'keypad': return `Keypad(${ss(x.var)}${optArgs([['maxLength', x.maxLength, 4], ['mask', x.mask, false], ['answer', x.answer, ''], ['rightMessage', x.rightMessage, ''], ['wrongMessage', x.wrongMessage, ''], ['enterMessage', x.enterMessage, ''], ['autoEnter', x.autoEnter, true], ['display', x.display, true], ['keyStyle', x.keyStyle, 'round'], ['keyColor', x.keyColor, '@field'], ['text', x.text, ''], ['accent', x.accent, '@good'], ['displayBg', x.displayBg, '']], ': ', ss, SN)})`;
+    case 'selector': return `Selector(${ss(x.var)}, [${x.options.map(ss).join(', ')}]${x.wrap ? '' : ', wrap: false'})`;
+    case 'overlay': return `PPopup(${optArgs([['mode', x.mode, 'popup'], ['openOn', x.openOn, 'popup'], ['closeOn', x.closeOn, 'close'], ['startOpen', x.startOpen, false], ['autoClose', x.autoClose, 0], ['tapCloses', x.tapCloses, false], ['dim', x.dim, true], ['handle', x.handle, true]], ': ', ss, SN).slice(2)}) {\n${pad}    ${swiftElement(x.box, ind + 4)}\n${pad}}`;
     default: return `TodoBox(${ss(x.name)}, ${ss(x.type)}) // TODO: build the ${x.type} natively`;
   }
 }
@@ -412,7 +426,7 @@ struct ${appName}: App {
         stats: [${model.stats.map((s) => `\n            Stat(variable: ${ss(s.var)}, collection: ${ss(s.collection)}, how: ${ss(s.how)}${s.field && s.field !== 'field' ? `, field: ${ss(s.field)}` : ''}${s.filter ? `, filter: ${ss(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}],
         bar: ${swiftBar(model)},
         nav: ${model.nav ? `NavStyle(style: ${ss(model.nav.style)}, bar: ${ss(tok(model.nav.bar, '@bar'))}, active: ${ss(tok(model.nav.active, '@accent'))}, idle: ${ss(tok(model.nav.idle, '@sub'))}, labels: ${ss(model.nav.labels || 'always')}, margin: ${+model.nav.margin || 0}, on: ${ss(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'},
-        menu: ${swiftMenu(model)}
+        menu: ${swiftMenu(model)}${model.notify ? `,\n        notify: NotifyStyle(${optArgs([['listen', model.notify.listen, 'notify'], ['position', model.notify.position, 'top'], ['look', model.notify.look, 'card'], ['seconds', model.notify.seconds, 3], ['max', model.notify.max, 3], ['bg', model.notify.bg, '#1e2235'], ['text', model.notify.text, '#ffffff'], ['accent', model.notify.accent, '#ffd23d']], ': ', ss, (v, k) => (k === 'max' ? String(Math.round(v)) : String(v))).slice(2)})` : ''}
     )
 
     init() { artIcons = [${barIcons(model).filter((n) => NAV_ART[n]).map((n) => `\n        ${ss(n)}: [${NAV_ART[n].map(ss).join(', ')}],`).join('') || ':'}${barIcons(model).some((n) => NAV_ART[n]) ? '\n    ' : ''}] } // the App Bar's and Bottom Nav's icons, drawn like the editor's

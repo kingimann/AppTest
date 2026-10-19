@@ -257,6 +257,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       case 'achievements': return achievements();
       case 'trending': return trending(x);
       case 'chart': case 'carousel': case 'pager': case 'photogrid': case 'like': case 'ticker': case 'timer': case 'skeleton': case 'colors': case 'keypad': case 'selector': case 'overlay':
+      case 'shop': case 'daily': case 'wheel': case 'skill': case 'radial': case 'levelmap': case 'quests':
         return more(x, P, entry);
       default: return h('div', { class: 'npv-todo' }, h('b', {}, x.name), h('small', {}, `${x.type}: a TODO placeholder in the native code`));
     }
@@ -695,6 +696,82 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       case 'selector': {
         const n = x.options.length, i = Math.max(0, x.options.indexOf(show(A.vars[x.var]))), pick = (d) => { A.set(x.var, x.options[x.wrap ? (i + d + n) % n : Math.max(0, Math.min(n - 1, i + d))]); drawPhone(); };
         return h('div', { class: 'npv-selector' }, h('button', { 'aria-label': 'Previous', disabled: !x.wrap && i === 0, onclick: () => pick(-1) }, '‹'), h('b', {}, x.options[i] ?? ''), h('button', { 'aria-label': 'Next', disabled: !x.wrap && i === n - 1, onclick: () => pick(1) }, '›'));
+      }
+      // game-style parts that work in apps too
+      case 'shop': {
+        const st = stateOf(x, () => ({ armed: -1 })), cash = num(A.vars[x.currency]) || 0, ownC = col(x.owned, P) || P.accent;
+        const tap = (it, i) => {
+          const item = it.id.startsWith('item:'), has = !item && A.vars['owned_' + it.id] === true;
+          if (has) { if (x.equipVar) A.set(x.equipVar, it.id); drawPhone(); return; }
+          if (cash < it.price) { A.send('not enough'); return; }
+          if (x.confirm && st.armed !== i) { st.armed = i; setTimeout(() => { if (st.armed === i) { st.armed = -1; drawPhone(); } }, 2200); drawPhone(); return; }
+          st.armed = -1; A.set(x.currency, cash - it.price);
+          if (item) A.send(`give ${it.id.slice(5).trim()}|1`); else { A.set('owned_' + it.id, true); if (x.equipVar) A.set(x.equipVar, it.id); }
+          if (x.message) A.send(x.message); drawPhone();
+        };
+        return h('div', { class: 'npv-shop ' + (x.layout === 'list' ? 'list' : 'grid'), style: `grid-template-columns:repeat(${x.layout === 'list' ? 1 : Math.max(1, x.columns)},1fr)` }, x.items.map((it, i) => {
+          const item = it.id.startsWith('item:'), has = !item && A.vars['owned_' + it.id] === true, eq = has && x.equipVar && show(A.vars[x.equipVar]) === it.id, can = cash >= it.price, armed = st.armed === i;
+          const label = eq ? '✓ Equipped' : has ? (x.equipVar ? 'Equip' : '✓ Owned') : armed ? 'Buy?' : `${x.currencyIcon} ${n1(it.price)}`.trim();
+          return h('button', { class: 'npv-shopcard', 'aria-label': `${it.name}, ${label}`, style: `background:${col(x.card, P) || P.card};color:${fg(x.text)};${eq ? `box-shadow:0 0 0 2.5px ${ownC} inset` : ''}`, onclick: () => tap(it, i) },
+            h('span', { class: 'npv-gi' }, it.icon), h('b', {}, it.name), it.note && h('small', {}, it.note),
+            h('i', { class: 'npv-buy', style: `background:${has ? ownC : armed ? '#ff9f43' : can ? col(x.accent, P) || '#3ccf7a' : 'rgba(127,127,127,.18)'};${eq ? 'opacity:.5' : ''}` }, label));
+        }));
+      }
+      case 'daily': {
+        const st = stateOf(x, () => ({ streak: 0, last: '' })), today = new Date().toDateString(), can = st.last !== today, ac = col(x.accent, P) || '#ffd23d', cl = col(x.claimed, P) || '#3ccf7a';
+        const claim = () => { if (!can || st.streak >= x.rewards.length) return; const r = x.rewards[st.streak]; if (r.v.startsWith('item:')) A.send(`give ${r.v.slice(5)}|${r.amount}`); else A.set(r.v, (num(A.vars[r.v]) || 0) + r.amount); st.streak++; st.last = today; A.send(x.message); drawPhone(); };
+        return h('div', { class: 'npv-daily' }, h('div', { class: 'npv-dgrid', style: `grid-template-columns:repeat(${Math.max(1, x.columns)},1fr)` }, x.rewards.map((r, i) => { const done = i < st.streak, now = i === st.streak && can;
+          return h('button', { class: 'npv-dday' + (done ? ' done' : '') + (now ? ' now' : ''), disabled: !now, style: `background:${done ? cl + '2e' : col(x.card, P) || P.card};color:${fg(x.text)};${now ? `box-shadow:0 0 0 3px ${ac} inset` : ''}`, onclick: claim },
+            h('small', {}, r.label), h('span', { class: 'npv-gi' }, r.icon), h('b', { style: now ? `color:${ac}` : '' }, now ? 'CLAIM' : (r.v.startsWith('item:') ? '×' : '+') + n1(r.amount)), done && h('i', { style: `background:${cl}` }, '✓')); })),
+          !can && h('small', { class: 'npv-dnote' }, 'Come back tomorrow!'));
+      }
+      case 'wheel': {
+        const st = stateOf(x, () => ({ angle: 0, busy: false }));
+        const spin = () => {
+          if (st.busy || !x.segments.length) return;
+          if (x.spinsVar) { if ((num(A.vars[x.spinsVar]) || 0) <= 0) return; A.set(x.spinsVar, num(A.vars[x.spinsVar]) - 1); }
+          const tot = x.segments.reduce((n, g) => n + g.w, 0) || 1; let r = Math.random() * tot, w = x.segments.findIndex((g) => (r -= g.w) < 0); if (w < 0) w = x.segments.length - 1;
+          const seg = 360 / x.segments.length, land = -(w + 0.5) * seg; st.angle = st.angle - ((st.angle - land) % 360 + 360) % 360 - 360 * (5 + Math.floor(x.duration)); st.busy = true; drawPhone();
+          setTimeout(() => { st.busy = false; const g = x.segments[w]; if (x.var && g.amount) A.set(x.var, (num(A.vars[x.var]) || 0) + g.amount); if (x.resultVar) A.set(x.resultVar, g.label); A.send(x.doneMessage); drawPhone(); }, x.duration * 1000);
+        };
+        st.hear = (m) => { if (m === x.message) spin(); };
+        const n = Math.max(1, x.segments.length), seg = 360 / n, grad = x.segments.map((g, i) => `${col(g.color, P) || g.color} ${i * seg}deg ${(i + 1) * seg}deg`).join(',');
+        return h('div', { class: 'npv-wheel', style: `width:${x.size}px;height:${x.size}px;background:${col(x.rim, P) || '#ffd23d'}` },
+          h('button', { class: 'npv-wdisc', 'aria-label': 'Prize wheel, tap to spin', style: `background:conic-gradient(${grad});transform:rotate(${st.angle}deg);transition:transform ${st.busy ? x.duration : 0}s cubic-bezier(.25,1,.5,1)`, onclick: () => { if (x.spinOn !== 'message only') spin(); } },
+            x.segments.map((g, i) => h('i', { style: `transform:rotate(${(i + 0.5) * seg}deg) translateY(-${x.size * 0.3}px);color:${col(x.text, P) || '#fff'}` }, g.label))),
+          h('b', { class: 'npv-wpin' }, '▼'));
+      }
+      case 'skill': {
+        const st = stateOf(x, () => ({ left: x.charges, cd: 0 }));
+        st.tick = (dt) => { if (st.left < x.charges && x.cooldown > 0) { st.cd += dt; if (st.cd >= x.cooldown) { st.cd = 0; st.left++; } drawPhone(); } };
+        const afford = !x.costVar || (num(A.vars[x.costVar]) || 0) >= x.cost, f = st.left === 0 && x.cooldown > 0 ? 1 - st.cd / x.cooldown : 0;
+        return h('div', { class: 'npv-skill' }, h('button', { 'aria-label': x.label || x.message, class: x.shape === 'rounded square' ? 'sq' : '', style: `width:${x.size}px;height:${x.size}px;background:${col(x.bg, P) || P.card};${st.left > 0 && afford ? `box-shadow:0 0 0 2.5px ${col(x.ring, P) || '#7fd3ff'} inset` : ''}`,
+          onclick: () => { if (st.left <= 0 || !afford) return; if (st.left === x.charges) st.cd = 0; st.left--; if (x.costVar) A.set(x.costVar, num(A.vars[x.costVar]) - x.cost); A.send(x.message); drawPhone(); } },
+          h('span', { class: 'npv-gi' }, x.icon), f > 0 && h('i', { class: 'npv-sweep', style: `background:conic-gradient(rgba(0,0,0,.55) ${f * 360}deg, transparent 0)` }, x.showTime ? Math.ceil(x.cooldown - st.cd) : '')), x.label && h('small', {}, x.label));
+      }
+      case 'radial': {
+        const st = stateOf(x, () => ({ open: false }));
+        return h('div', { class: 'npv-radial' + (st.open ? ' open' : ''), style: `--r:${x.radius}px` }, st.open && h('div', { class: 'npv-rdim', style: `background:rgba(0,0,0,${x.dim})`, onclick: () => { st.open = false; drawPhone(); } }),
+          st.open && x.items.map((it, i) => { const a = -Math.PI / 2 + i * Math.PI * 2 / Math.max(1, x.items.length); return h('button', { class: 'npv-ritem', 'aria-label': it.label, style: `transform:translate(${Math.cos(a) * x.radius}px,${Math.sin(a) * x.radius}px);background:${col(x.bg, P) || P.card}`, onclick: () => { st.open = false; A.send(it.msg); drawPhone(); } }, h('span', { class: 'npv-gi' }, it.icon), x.labels && h('small', {}, it.label)); }),
+          h('button', { class: 'npv-rbtn', 'aria-label': 'Open menu', style: `width:${x.size}px;height:${x.size}px;background:${st.open ? col(x.accent, P) || P.accent : col(x.bg, P) || P.card}`, onclick: () => { st.open = !st.open; drawPhone(); } }, h('span', { class: 'npv-gi' }, x.icon)));
+      }
+      case 'levelmap': {
+        const open = x.allOpen ? Infinity : Math.max(1, num(A.vars[x.unlockedVar]) || 1), ac = col(x.accent, P) || '#ffd23d';
+        const go = (n) => { if (x.action === 'sends a message') { A.send(`${x.message} ${n}`); A.send(x.message); } else if (x.action === 'sets a variable') A.set(x.message, n); else { A.set('level', n); A.send('play game'); } drawPhone(); };
+        const dot = (i) => { const n = i + 1, locked = n > open, cur = n === open, stars = Math.max(0, Math.min(3, Math.round(num(A.vars[x.starsVar + n]) || 0)));
+          return h('button', { class: 'npv-lvl' + (cur ? ' cur' : ''), disabled: locked, 'aria-label': `Level ${n}${locked ? ', locked' : `, ${stars} stars`}`, style: x.layout === 'grid' ? '' : `transform:translateX(${x.layout === 'straight up' ? 0 : Math.sin(i * 1.1) * 30}%)`, onclick: () => go(n) },
+            h('b', { style: `background:${locked ? 'rgba(127,127,127,.2)' : col(x.node, P) || P.accent};${cur ? `box-shadow:0 0 0 3px ${ac}` : ''}` }, locked ? '🔒' : n), !locked && h('small', { style: `color:${ac}` }, '★'.repeat(stars), h('span', { style: 'opacity:.25' }, '★'.repeat(3 - stars)))); };
+        return h('div', { class: 'npv-levelmap ' + (x.layout === 'grid' ? 'grid' : 'path'), style: x.layout === 'grid' ? '' : `height:${x.h}px` }, Array.from({ length: x.count }, (_, i) => dot(i)));
+      }
+      case 'quests': {
+        const ac = col(x.accent, P) || P.accent, dn = col(x.done, P) || '#3ccf7a';
+        x.quests.forEach((q, i) => { if (A.vars['quest_done_' + i] !== true && (num(A.vars[q.v]) || 0) >= q.target) { A.vars['quest_done_' + i] = true; const r = q.reward.split(/\s+/); if (r.length >= 2) A.vars[r[0]] = (num(A.vars[r[0]]) || 0) + (num(r[1]) || 0); setTimeout(() => A.send(x.doneMessage)); } });
+        const order = x.quests.map((_, i) => i).sort((a, b) => (x.hideDone ? (A.vars['quest_done_' + a] === true) - (A.vars['quest_done_' + b] === true) : 0));
+        return h('div', { class: 'npv-quests', style: `color:${fg(x.text)};${x.bg ? `background:${col(x.bg, P)}` : ''}` }, x.title && h('b', { class: 'npv-qtitle' }, x.title), order.map((i) => {
+          const q = x.quests[i], ok = A.vars['quest_done_' + i] === true, have = num(A.vars[q.v]) || 0, f = Math.max(0, Math.min(1, have / q.target));
+          return h('div', { class: 'npv-quest' + (ok ? ' ok' : '') }, h('i', { style: ok ? `background:${dn}` : '' }, ok ? '✓' : ''), h('div', {}, h('span', {}, q.text), h('em', {}, h('u', { style: `width:${(ok ? 1 : f) * 100}%;background:${ok ? dn : ac}` }))),
+            h('small', {}, ok ? '✓' : `${n1(Math.min(have, q.target))}/${n1(q.target)}`), q.reward && h('small', { style: `color:${ac}` }, '+' + q.reward));
+        }));
       }
       case 'overlay': return null; // (drawn over the page while it's open: popupLayer)
     }

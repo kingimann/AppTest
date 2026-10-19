@@ -1911,3 +1911,284 @@ fun PPopup(mode: String = "popup", openOn: String = "popup", closeOn: String = "
         }
     }
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Game-style parts that work in apps too: a shop, a daily reward calendar, a prize wheel, a skill button,
+// a radial menu, a level map and a quest log (all kept in the app's variables, so games share them).
+// ---------------------------------------------------------------------------------------------------------------
+
+/** An icon from the project: an emoji (drawn as text) or one of the editor's icon names. */
+@Composable
+fun GameIcon(icon: String, size: Int = 28, color: Color = Color.White) {
+    val emoji = icon.isNotEmpty() && icon.any { it.code > 0x2000 || it.isSurrogate() }
+    if (emoji) Text(icon, fontSize = (size * 0.9).sp, lineHeight = (size * 0.95).sp)
+    else Icon(PocketIcons.nav(icon.ifEmpty { "star" }), null, Modifier.size(size.dp), tint = color)
+}
+
+/** 15300 → 15.3K (as the engine shows prices and amounts). */
+fun gameNum(v: Double): String {
+    val a = kotlin.math.abs(v)
+    if (a < 10000) return if (v == kotlin.math.round(v)) kotlin.math.round(v).toLong().toString() else ((v * 10).toLong() / 10.0).toString()
+    for ((n, u) in listOf(1e9 to "B", 1e6 to "M", 1e3 to "K")) if (a >= n) return ((v / n * 10).toLong() / 10.0).toString().removeSuffix(".0") + u
+    return v.toString()
+}
+
+data class ShopItem(val name: String, val icon: String, val price: Double, val id: String, val note: String = "")
+
+/** Shop: buy items with a currency variable (coins, gems). Bought ones stay owned (owned_ID) and can be equipped (equipVar);
+ *  ids starting with item: are given each time (a give message for the game's inventory). */
+@Composable
+fun PShop(items: List<ShopItem>, currency: String = "coins", currencyIcon: String = "🪙", equipVar: String = "outfit", layout: String = "grid", columns: Int = 2, confirm: Boolean = true, message: String = "bought", card: String = "@card", text: String = "", accent: String = "@good", owned: String = "@accent") {
+    val p = LocalPalette.current
+    var armed by remember { mutableStateOf(-1) }
+    LaunchedEffect(armed) { if (armed >= 0) { delay(2200); armed = -1 } }
+    val fg = p.resolve(text) ?: p.text; val cash = num(app.get(currency)) ?: 0.0; val grid = layout != "list"
+    fun tap(it: ShopItem, i: Int) {
+        val item = it.id.startsWith("item:")
+        if (!item && app.get("owned_${it.id}") == true) { if (equipVar.isNotEmpty()) app.set(equipVar, it.id); return }
+        if (cash < it.price) { app.send("not enough"); return }
+        if (confirm && armed != i) { armed = i; return }
+        armed = -1
+        app.set(currency, cash - it.price)
+        if (item) app.send("give ${it.id.removePrefix("item:").trim()}|1") else { app.set("owned_${it.id}", true); if (equipVar.isNotEmpty()) app.set(equipVar, it.id) }
+        if (message.isNotEmpty()) app.send(message)
+    }
+    @Composable fun Card(i: Int, mod: Modifier) {
+        val it = items[i]; val item = it.id.startsWith("item:"); val has = !item && app.get("owned_${it.id}") == true
+        val eq = has && equipVar.isNotEmpty() && show(app.get(equipVar)) == it.id; val can = cash >= it.price; val isArmed = armed == i
+        val label = when { eq -> "✓ Equipped"; has -> if (equipVar.isNotEmpty()) "Equip" else "✓ Owned"; isArmed -> "Buy?"; else -> "$currencyIcon ${gameNum(it.price)}".trim() }
+        val ownC = p.resolve(owned) ?: p.accent
+        val btn = when { has -> ownC.copy(alpha = if (eq) 0.35f else 0.9f); isArmed -> Color(0xFFFF9F43); can -> p.resolve(accent) ?: Color(0xFF3CCF7A); else -> fg.copy(alpha = 0.12f) }
+        val button = @Composable { Box(Modifier.height(32.dp).clip(RoundedCornerShape(16.dp)).background(btn).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+            Text(label, fontSize = 13.5.sp, fontWeight = FontWeight.Black, color = if (has || can || isArmed) Color.White else fg.copy(alpha = 0.5f)) } }
+        val shape = RoundedCornerShape(16.dp)
+        Box(mod.clip(shape).background(p.resolve(card) ?: p.card).then(if (eq) Modifier.border(2.5.dp, ownC, shape) else Modifier).clickable { tap(it, i) }.padding(10.dp)) {
+            if (grid) Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                GameIcon(it.icon, 40, fg); Spacer(Modifier.height(6.dp))
+                Text(it.name, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = fg, maxLines = 1)
+                if (it.note.isNotEmpty()) Text(it.note, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = fg.copy(alpha = 0.6f), maxLines = 1)
+                Spacer(Modifier.height(8.dp)); button()
+            } else Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(48.dp), contentAlignment = Alignment.Center) { GameIcon(it.icon, 32, fg) }
+                Column(Modifier.weight(1f)) {
+                    Text(it.name, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = fg)
+                    if (it.note.isNotEmpty()) Text(it.note, fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = fg.copy(alpha = 0.6f))
+                }
+                button()
+            }
+        }
+    }
+    if (!grid) Column(verticalArrangement = Arrangement.spacedBy(10.dp)) { for (i in items.indices) Card(i, Modifier.fillMaxWidth().height(72.dp)) }
+    else BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val cols = maxOf(1, columns); val cw = (maxWidth - 10.dp * (cols - 1)) / cols
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            for (r in items.indices.chunked(cols)) Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) { for (i in r) Card(i, Modifier.width(cw).height(minOf(cw * 1.2f, 190.dp))) }
+        }
+    }
+}
+
+data class Reward(val label: String, val icon: String, val v: String, val amount: Double)
+
+/** Daily Reward: a calendar of rewards, one claim a day; the streak grows when you come back (and resets if you miss a day). Kept on the phone. */
+@Composable
+fun DailyReward(rewards: List<Reward>, resetIfMissed: Boolean = true, columns: Int = 4, message: String = "daily claimed", card: String = "@card", text: String = "", accent: String = "#ffd23d", claimed: String = "@good") {
+    val p = LocalPalette.current
+    fun day(off: Int = 0) = dayOf(nowMs().toLong() + off * 86_400_000L)
+    var streak by remember { mutableStateOf(0) }
+    var last by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        Store.get("pocket.daily")?.split("|")?.let { s -> streak = s.getOrNull(0)?.toIntOrNull() ?: 0; last = s.getOrNull(1) ?: "" }
+        if (resetIfMissed && last.isNotEmpty() && last != day() && last != day(-1)) streak = 0
+        if (streak >= rewards.size && last != day()) streak = 0
+    }
+    val can = last != day()
+    val fg = p.resolve(text) ?: p.text; val ac = p.resolve(accent) ?: Color(0xFFFFD23D); val cl = p.resolve(claimed) ?: Color(0xFF3CCF7A)
+    fun claim() {
+        if (!can || streak >= rewards.size) return
+        val r = rewards[streak]
+        if (r.v.startsWith("item:")) app.send("give ${r.v.removePrefix("item:").trim()}|${show(r.amount)}") else app.set(r.v, (num(app.get(r.v)) ?: 0.0) + r.amount)
+        streak++; last = day(); Store.put("pocket.daily", "$streak|$last"); app.send(message)
+    }
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val cols = maxOf(1, columns); val cw = (maxWidth - 8.dp * (cols - 1)) / cols
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                for (row in rewards.indices.chunked(cols)) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    for (i in row) {
+                        val r = rewards[i]; val done = i < streak; val today = i == streak && can; val shape = RoundedCornerShape(14.dp)
+                        Box(Modifier.width(cw).height(cw * 1.1f).clip(shape).background(if (done) cl.copy(alpha = 0.18f) else p.resolve(card) ?: p.card)
+                            .then(if (today) Modifier.border(3.dp, ac, shape) else Modifier).clickable(enabled = today) { claim() }) {
+                            Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceEvenly) {
+                                Text(r.label, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = fg.copy(alpha = 0.75f))
+                                Box(Modifier.alpha(if (done) 0.5f else 1f)) { GameIcon(r.icon, (cw.value * 0.34f).toInt(), fg) }
+                                Text(if (today) "CLAIM" else (if (r.v.startsWith("item:")) "×" else "+") + gameNum(r.amount), fontSize = 12.5.sp, fontWeight = FontWeight.Black, color = if (today) ac else fg)
+                            }
+                            if (done) Box(Modifier.align(Alignment.TopEnd).padding(5.dp).size(18.dp).clip(CircleShape).background(cl), contentAlignment = Alignment.Center) { Text("✓", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Black) }
+                        }
+                    }
+                }
+            }
+        }
+        if (!can) Text("Come back tomorrow!", Modifier.padding(top = 8.dp), fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, color = fg.copy(alpha = 0.7f))
+    }
+}
+
+data class WheelSeg(val label: String, val color: String, val amount: Double, val w: Double = 1.0)
+
+/** Prize Wheel: spins when tapped (or on a message) and lands on a prize (by weight): adds it to a variable and sends a message. */
+@Composable
+fun PrizeWheel(segments: List<WheelSeg>, variable: String = "coins", resultVar: String = "prize", spinOn: String = "tapped", message: String = "spin", doneMessage: String = "prize won", duration: Double = 4.0, spinsVar: String = "", text: String = "#ffffff", rim: String = "#ffd23d", size: Int = 280) {
+    val p = LocalPalette.current
+    val angle = remember { androidx.compose.animation.core.Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var win by remember { mutableStateOf(-1) }
+    val measurer = rememberTextMeasurer()
+    fun spin() {
+        if (angle.isRunning || segments.isEmpty()) return
+        if (spinsVar.isNotEmpty()) { if ((num(app.get(spinsVar)) ?: 0.0) <= 0) return; app.set(spinsVar, (num(app.get(spinsVar)) ?: 0.0) - 1) }
+        val total = segments.sumOf { it.w }.takeIf { it > 0 } ?: 1.0
+        var r = kotlin.random.Random.nextDouble() * total; var w = segments.size - 1
+        for (i in segments.indices) { r -= segments[i].w; if (r < 0) { w = i; break } }
+        val seg = (kotlin.math.PI * 2 / segments.size).toFloat(); val land = -(w + 0.5f) * seg + (kotlin.random.Random.nextFloat() - 0.5f) * seg * 0.7f
+        val from = angle.value % (kotlin.math.PI * 2).toFloat(); val twoPi = (kotlin.math.PI * 2).toFloat()
+        val to = from - (((from - land) % twoPi) + twoPi) % twoPi - twoPi * (5 + duration.toInt())
+        win = -1
+        scope.launch {
+            angle.snapTo(from)
+            angle.animateTo(to, tween((duration * 1000).toInt(), easing = androidx.compose.animation.core.CubicBezierEasing(0.25f, 1f, 0.5f, 1f)))
+            win = w
+            val s = segments[w]
+            if (variable.isNotEmpty() && s.amount != 0.0) app.set(variable, (num(app.get(variable)) ?: 0.0) + s.amount)
+            if (resultVar.isNotEmpty()) app.set(resultVar, s.label)
+            app.send(doneMessage)
+        }
+    }
+    OnMessage { m -> if (m == message) spin() }
+    val tc = p.resolve(text) ?: Color.White; val rc = p.resolve(rim) ?: Color(0xFFFFD23D)
+    Canvas(Modifier.size(size.dp).then(if (spinOn != "message only") Modifier.clickable { spin() } else Modifier)) {
+        val c = center; val R = minOf(this.size.width, this.size.height) / 2 - 10.dp.toPx(); val n = maxOf(1, segments.size); val seg = 360f / n
+        drawCircle(rc, R + 8.dp.toPx(), c)
+        val a = angle.value * 180f / kotlin.math.PI.toFloat()
+        segments.forEachIndexed { i, s ->
+            val a0 = -90f + i * seg + a
+            drawArc(Color(("FF" + s.color.removePrefix("#").padEnd(6, '0').take(6)).toLong(16)), a0, seg, true, Offset(c.x - R, c.y - R), Size(R * 2, R * 2))
+            if (i == win) drawArc(Color(0x55FFFFFF), a0, seg, true, Offset(c.x - R, c.y - R), Size(R * 2, R * 2))
+            val am = (a0 + seg / 2) * kotlin.math.PI.toFloat() / 180f
+            val layout = measurer.measure(s.label, TextStyle(color = tc, fontSize = (R * 0.13f / density).sp, fontWeight = FontWeight.Black))
+            drawText(layout, topLeft = Offset(c.x + kotlin.math.cos(am) * R * 0.64f - layout.size.width / 2, c.y + kotlin.math.sin(am) * R * 0.64f - layout.size.height / 2))
+        }
+        drawCircle(rc, R * 0.14f, c)
+        drawPath(Path().apply { moveTo(c.x - 12.dp.toPx(), c.y - R - 12.dp.toPx()); lineTo(c.x + 12.dp.toPx(), c.y - R - 12.dp.toPx()); lineTo(c.x, c.y - R + 10.dp.toPx()); close() }, Color.White)
+    }
+}
+
+/** Skill Button: tap to use (sends a message), then it cools down with a sweeping shadow; charges and a cost are optional. */
+@Composable
+fun SkillButton(icon: String = "⚡", label: String = "", message: String = "skill", cooldown: Double = 3.0, charges: Int = 1, costVar: String = "", cost: Double = 10.0, shape: String = "circle", showTime: Boolean = true, bg: String = "@card", ring: String = "#7fd3ff", size: Int = 72) {
+    val p = LocalPalette.current
+    var left by remember { mutableStateOf(charges) }
+    var cd by remember { mutableStateOf(0.0) }
+    LaunchedEffect(left) { while (left < charges && cooldown > 0) { delay(50); cd += 0.05; if (cd >= cooldown) { cd = 0.0; left++ } } }
+    val afford = costVar.isEmpty() || (num(app.get(costVar)) ?: 0.0) >= cost
+    val ready = left > 0 && afford; val f = if (left == 0 && cooldown > 0) (1 - cd / cooldown).toFloat() else 0f
+    val sh = if (shape == "rounded square") RoundedCornerShape((size * 0.25f).dp) else CircleShape
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(Modifier.size(size.dp).clip(sh).background(p.resolve(bg) ?: p.card).then(if (ready) Modifier.border(2.5.dp, p.resolve(ring) ?: Color(0xFF7FD3FF), sh) else Modifier)
+            .clickable { if (left > 0 && afford) { if (left == charges) cd = 0.0; left--; if (costVar.isNotEmpty()) app.set(costVar, (num(app.get(costVar)) ?: 0.0) - cost); app.send(message) } }, contentAlignment = Alignment.Center) {
+            GameIcon(icon, (size * 0.5f).toInt(), p.text)
+            if (f > 0) Canvas(Modifier.fillMaxSize()) { drawArc(Color(0x8C000000), -90f, f * 360f, true, Offset(-this.size.width / 2, -this.size.height / 2), Size(this.size.width * 2, this.size.height * 2)) }
+            if (f > 0 && showTime) Text("${kotlin.math.ceil(cooldown - cd).toInt()}", color = Color.White, fontWeight = FontWeight.Black, fontSize = (size * 0.32f).sp)
+            if (charges > 1) Box(Modifier.align(Alignment.BottomEnd).size(20.dp).clip(CircleShape).background(p.accent), contentAlignment = Alignment.Center) { Text("$left", fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.Black) }
+            if (!afford) Box(Modifier.fillMaxSize().background(Color(0x59283CA0)))
+        }
+        if (label.isNotEmpty()) Text(label, Modifier.padding(top = 4.dp), fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = p.text)
+    }
+}
+
+data class RadialItem(val label: String, val icon: String, val msg: String)
+
+/** Radial Menu: a round button that opens a wheel of choices around it; tap a choice to send its message. */
+@Composable
+fun RadialMenu(items: List<RadialItem>, icon: String = "😀", open: String = "hold and slide", radius: Int = 110, dim: Double = 0.35, labels: Boolean = true, accent: String = "@accent", bg: String = "@card", size: Int = 64) {
+    val p = LocalPalette.current
+    var shown by remember { mutableStateOf(false) }
+    Box(contentAlignment = Alignment.Center) {
+        Box(Modifier.size(size.dp).clip(CircleShape).background(p.resolve(bg) ?: p.card).clickable { shown = true }, contentAlignment = Alignment.Center) { GameIcon(icon, (size * 0.5f).toInt(), p.text) }
+        if (shown) Dialog(onDismissRequest = { shown = false }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim.toFloat())).clickable { shown = false }, contentAlignment = Alignment.Center) {
+                val n = maxOf(1, items.size)
+                items.forEachIndexed { i, it ->
+                    val a = -kotlin.math.PI / 2 + i * kotlin.math.PI * 2 / n
+                    Box(Modifier.offset((kotlin.math.cos(a) * radius).dp, (kotlin.math.sin(a) * radius).dp).size(64.dp).clip(CircleShape).background(p.resolve(bg) ?: p.card)
+                        .clickable { shown = false; app.send(it.msg) }, contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) { GameIcon(it.icon, 26, p.text); if (labels) Text(it.label, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold, color = p.text, maxLines = 1) }
+                    }
+                }
+                Box(Modifier.size(size.dp).clip(CircleShape).background(p.resolve(accent) ?: p.accent), contentAlignment = Alignment.Center) { GameIcon(icon, (size * 0.5f).toInt(), Color.White) }
+            }
+        }
+    }
+}
+
+/** Level Map: a path of level buttons with stars (stars_1, stars_2…) and locks (unlocked); tap an open level to play it (or send a message / set a variable). */
+@Composable
+fun LevelMap(count: Int = 12, unlockedVar: String = "unlocked", allOpen: Boolean = false, starsVar: String = "stars_", layout: String = "winding path", action: String = "plays that level", message: String = "level", spacing: Int = 92, accent: String = "#ffd23d", node: String = "@accent", text: String = "", height: Int = 480) {
+    val p = LocalPalette.current
+    val open = if (allOpen) Int.MAX_VALUE else maxOf(1, (num(app.get(unlockedVar)) ?: 1.0).toInt())
+    val fg = p.resolve(text) ?: p.text; val ac = p.resolve(accent) ?: Color(0xFFFFD23D)
+    fun go(n: Int) = when (action) { "sends a message" -> { app.send("$message $n"); app.send(message) }; "sets a variable" -> app.set(message, n.toDouble()); else -> { app.set("level", n.toDouble()); app.send("play level $n"); app.send("play game") } }
+    @Composable fun Dot(i: Int) {
+        val n = i + 1; val locked = n > open; val cur = n == open; val stars = (num(app.get("$starsVar$n")) ?: 0.0).toInt().coerceIn(0, 3)
+        Column(Modifier.width(76.dp).clickable(enabled = !locked) { go(n) }, horizontalAlignment = Alignment.CenterHorizontally) {
+            val d = if (cur) 60.dp else 52.dp
+            Box(Modifier.size(d).clip(CircleShape).background(if (locked) fg.copy(alpha = 0.15f) else p.resolve(node) ?: p.accent).then(if (cur) Modifier.border(3.dp, ac, CircleShape) else Modifier), contentAlignment = Alignment.Center) {
+                if (locked) Icon(Icons.Filled.Lock, null, tint = fg.copy(alpha = 0.6f)) else Text("$n", color = Color.White, fontWeight = FontWeight.Black, fontSize = 20.sp)
+            }
+            if (!locked) Row { for (s in 0 until 3) Icon(Icons.Filled.Star, null, Modifier.size(14.dp), tint = if (s < stars) ac else fg.copy(alpha = 0.2f)) }
+        }
+    }
+    if (layout == "grid") Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        for (r in (0 until count).chunked(4)) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { for (i in r) Dot(i) }
+    } else LazyColumn(Modifier.fillMaxWidth().height(height.dp), reverseLayout = true) {
+        items((0 until count).toList()) { i ->
+            Box(Modifier.fillMaxWidth().height(spacing.dp), contentAlignment = androidx.compose.ui.BiasAlignment(if (layout == "straight up") 0f else (kotlin.math.sin(i * 1.1) * 0.6).toFloat(), 0f)) { Dot(i) }
+        }
+    }
+}
+
+data class QuestGoal(val text: String, val v: String, val target: Double, val reward: String = "")
+
+/** Quest Log: goals with progress bars; each follows a variable up to a target, ticks off when done (quest_done_N) and gives its reward ("gems 5"). */
+@Composable
+fun QuestLog(quests: List<QuestGoal>, title: String = "Quests", doneMessage: String = "quest done", hideDone: Boolean = true, text: String = "", accent: String = "@accent", done: String = "@good", bg: String = "") {
+    val p = LocalPalette.current
+    val fg = p.resolve(text) ?: p.text; val ac = p.resolve(accent) ?: p.accent; val dn = p.resolve(done) ?: Color(0xFF3CCF7A)
+    SideEffect {
+        quests.forEachIndexed { i, q ->
+            if (app.get("quest_done_$i") != true && (num(app.get(q.v)) ?: 0.0) >= q.target) {
+                app.set("quest_done_$i", true)
+                val r = q.reward.split(Regex("\\s+")); if (r.size >= 2) app.set(r[0], (num(app.get(r[0])) ?: 0.0) + (r[1].toDoubleOrNull() ?: 0.0))
+                app.send(doneMessage)
+            }
+        }
+    }
+    val order = quests.indices.sortedBy { if (hideDone && app.get("quest_done_$it") == true) 1 else 0 }
+    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.resolve(bg) ?: Color.Transparent).padding(12.dp)) {
+        if (title.isNotEmpty()) Text(title, Modifier.padding(bottom = 8.dp), fontSize = 17.sp, fontWeight = FontWeight.Black, color = fg)
+        for (i in order) {
+            val q = quests[i]; val ok = app.get("quest_done_$i") == true; val have = num(app.get(q.v)) ?: 0.0; val f = (have / q.target).coerceIn(0.0, 1.0).toFloat()
+            Row(Modifier.fillMaxWidth().padding(vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(24.dp).clip(CircleShape).background(if (ok) dn else fg.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) { if (ok) Text("✓", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Black) }
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(q.text, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = if (ok) fg.copy(alpha = 0.5f) else fg, textDecoration = if (ok) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                    Spacer(Modifier.height(5.dp))
+                    LinearProgressIndicator(progress = { if (ok) 1f else f }, Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)), color = if (ok) dn else ac, trackColor = fg.copy(alpha = 0.1f))
+                }
+                Spacer(Modifier.width(12.dp))
+                Text(if (ok) "✓" else "${gameNum(minOf(have, q.target))}/${gameNum(q.target)}", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = fg.copy(alpha = 0.7f))
+                if (q.reward.isNotEmpty()) Text("+${q.reward}", Modifier.padding(start = 8.dp), fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, color = ac)
+            }
+        }
+    }
+}

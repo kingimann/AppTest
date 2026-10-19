@@ -7,10 +7,16 @@ import { dartSetup } from './nativecode.js';
 import { kotlinNativeFiles, kotlinPackage } from './kotlincode.js';
 
 /** The components the native game runtimes have (the same in Dart and Kotlin). */
-export const NATIVE_GAME_COMPONENTS = new Set(['move', 'timeScore', 'spawner', 'velocity', 'rotate', 'hazard', 'destroyOffscreen', 'collectible', 'tappable', 'pulse',
-  'lifetime', 'income', 'upgrade', 'shooter', 'projectile', 'destructible', 'bounce', 'camera']);
+export const NATIVE_GAME_COMPONENTS = new Set([
+  'move', 'platformer', 'controller2d', 'timeScore', 'spawner', 'velocity', 'rotate', 'hazard', 'destroyOffscreen', 'collectible', 'tappable',
+  'pulse', 'lifetime', 'income', 'upgrade', 'shooter', 'projectile', 'destructible', 'bounce', 'camera', 'cameraFollow', 'cameraImpulse',
+  'cameraControls', 'patrol', 'goal', 'spring', 'wrap', 'chase', 'float', 'message', 'teleport', 'unlock', 'sound', 'draggable', 'swipeMove',
+  'orbit', 'checkpoint', 'follow', 'wander', 'path', 'turret', 'dropItem', 'emitter', 'particles', 'blink', 'forceZone', 'touchButton', 'button',
+  'clickPopup', 'comboClicker', 'longPress', 'doubleTap', 'tapToggle', 'pressFeedback', 'tapToSpawn', 'dragLaunch', 'trigger', 'timer', 'condition',
+  'waveSpawner', 'dayNight', 'typewriter', 'health', 'damager', 'hunger', 'thirst', 'car', 'savePoint', 'autoSave', 'saveManager', 'joint',
+  'navigator', 'enemyAI', 'loader']);
 /** Shapes the native runtimes draw (others are drawn as a rounded box). */
-const NATIVE_SHAPES = new Set(['rect', 'circle', 'star', 'triangle', 'ellipse', 'diamond']);
+const NATIVE_SHAPES = new Set(['rect', 'circle', 'ring', 'star', 'triangle', 'ellipse', 'diamond', 'emoji', 'hexagon', 'pentagon', 'cross', 'arrow', 'capsule', 'pill', 'heart', 'line', 'polygon']);
 
 const semver = (v) => String(v || '1.0').split('.').concat(['0', '0']).slice(0, 3).map((n) => parseInt(n, 10) || 0).join('.');
 const ds = (s) => "'" + String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\$/g, '\\$').replace(/\n/g, '\\n') + "'";
@@ -136,6 +142,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:${pkg}/pocket_game.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized(); // (haptics and sounds talk to the phone)
   test('the game plays', () async {
     SharedPreferences.setMockInitialValues({});
     final game = PocketGame(jsonDecode(File('assets/game.json').readAsStringSync()) as Map<String, dynamic>);

@@ -47,7 +47,44 @@ Platformer (and the Character Controller's platformer type) has these settings:
 - **Run & dash:** run with the joystick at the edge, the Fire button, always or Shift. Dash with the Fire button, a double tap or a swipe, with speed, length, cooldown and dashes in the air.
 - **Down:** down drops through one-way platforms; ground pound slams down in the air and shakes the camera.
 
-The *dash*, *wallJump*, *airJump* and *groundPound* events fire for Triggers and scripts.
+- **Crouch and slide:** hold down on the ground to crouch (lower and slower). Crouch while running fast to slide.
+- **Jump shape:** *Fall faster* (gravity × when falling, 1.5–2 feels snappy) and *Floaty top of the jump* (gravity eases off at the top while jump is held).
+- **Feel:** a separate stopping speed, and a *slippery ground tag* that makes anything with that tag slide like ice.
+- **Climbing:** up or down on an object tagged `ladder` (make it a trigger) climbs it with no gravity. Jump lets go.
+- **Dodge:** *Can't be hurt while dashing* makes the dash a dodge roll.
+
+The *dash*, *wallJump*, *airJump*, *groundPound* and *slide* events fire for Triggers and scripts.
+
+### Movement feel and looks (Character Controller)
+
+Every movement type has a **Feel** group and a **Looks** group in the Inspector:
+
+- **Feel:**
+  - *Time to full speed* and *Time to stop* make movement heavier or icier.
+  - *Directions* gives top-down movement 4 or 8 directions.
+  - *Face where it moves* flips left / right or turns to face the way it moves.
+  - *Speed × variable* lets a power-up like `boost = 2` double the speed.
+  - *Wrap around the screen edges* works like Asteroids or Pac-Man.
+- **Looks:**
+  - *Squash & stretch* on jumps and landings.
+  - *Lean into movement*.
+  - *Bob while walking*.
+  - *Dust puffs* when it lands, turns or dashes.
+
+  These only change how it looks: the collider stays the same.
+
+Some movement types have settings of their own:
+
+| Type | Extra settings |
+|---|---|
+| Car | Grip (low drifts) and reverse speed |
+| Auto-runner | Speeds up over time, top speed, jumps in the air (the `runSpeed` variable shows the speed) |
+| Flappy | Tilts with its speed (on or off) |
+| Tap to move | A ring that shows where you tapped |
+| Follow finger | Stay above the finger, and follow sideways or up / down only |
+| Jetpack | Thrust power and fuel |
+| Slingshot | Bounciness |
+| Grid steps | Time per step, keep walking while held, diagonal steps, tap a tile to walk there |
 
 ### More movement types
 

@@ -1012,7 +1012,11 @@ Players get their own **Settings** panel. Their choices are saved on their devic
 
 - One component with a **Movement type**: Top-down (8 or 4 directions), Platformer, Auto-runner (tap to jump), Flappy (tap to fly up), Car (steer & drive), Spaceship (turn & thrust, wraps around the screen), Tank, Tap to move (point & click), Follow finger, Side to side (paddle), Grid steps, Jetpack (hold to fly up, with fuel), Lanes (swipe between lanes) and Slingshot (pull back and let go, with an aim line). Only the settings that matter for the chosen type are shown, with a tip for each.
 - **Controls:** best for the movement, a joystick (floating or fixed), a D-pad, ◀ ▶ buttons, touching the sides of the screen, holding where it should go, swipes, tilt or keyboard only. Space jumps, Shift runs, X / K dash and J / Enter fire on a keyboard. **Game controllers** (Bluetooth or USB) steer with the left stick or D-pad: A jumps, B fires, X dashes, RB runs; *Game Settings › Keyboard & Controller* changes the keys and buttons (`pad:a`, `pad:start`…, also usable in Key pressed triggers).
-- **Platformer moves** (Platformer and the platformer type): air jumps, coyote time, jump buffer, max fall speed, wall slide and wall jump, run, dash (Fire, double tap or swipe; dashes in the air), down to drop through one-way platforms, and ground pound. These fire the *dash*, *wallJump*, *airJump* and *groundPound* events.
+- **Platformer moves** (Platformer and the platformer type): air jumps, coyote time, jump buffer, max fall speed, wall slide and wall jump, run, dash (Fire, double tap or swipe; dashes in the air), down to drop through one-way platforms, and ground pound. Also crouch and slide, fall faster, a floaty top of the jump, a stopping speed, slippery (ice) ground by tag, ladder climbing (tag `ladder`), and dashes that can't be hurt. These fire the *dash*, *wallJump*, *airJump*, *groundPound* and *slide* events.
+- **Feel and looks** for every movement type:
+  - Feel: time to full speed and time to stop, 4 / 8 directions, face where it moves (flip or turn), speed × a variable, wrapping around the screen edges.
+  - Looks: squash & stretch, lean, walking bob and dust puffs. These only change how it looks.
+  - Per type: car grip and reverse, an auto-runner that speeds up (with air jumps), flappy tilt on/off, a tap marker, follow-finger offset and axes, jetpack thrust, slingshot bounciness, grid step options.
 
 ### Progress bars and in-game loading screens
 

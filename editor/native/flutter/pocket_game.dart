@@ -187,6 +187,9 @@ class GameObject {
   Body? body;
   final List<Component> parts = [];
   final Map<String, Object?> data = {};
+  /// Looks only (squash & stretch, lean, bob, crouch from the Character Controller / Platformer): drawn, but the collider doesn't change.
+  double fxX = 0, fxY = 0, fxRz = 0, fxSx = 1, fxSy = 1, fxCrouch = 1;
+  bool fxJuice = false;
   bool dead = false;
   double invuln = 0;
   /// Bars drawn over it (health, hunger…): 0–1 and a colour.
@@ -1161,7 +1164,14 @@ class Move extends Component {
   Move(this.p);
   final Map<String, dynamic> p;
   double dashT = 0, dashCd = 0, lastTap = -9;
-  Offset dashDir = const Offset(1, 0), lastDir = const Offset(1, 0);
+  Offset dashDir = const Offset(1, 0), lastDir = const Offset(1, 0), cur = Offset.zero;
+  /// Speed up / slow down over "Time to full speed" / "Time to stop" (0 = at once).
+  double approach(double c, double want, double dt, double top) {
+    final t = want != 0 && want.abs() > c.abs() * 0.99 ? numOf(p['accelTime']) : numOf(p['decelTime']);
+    if (t <= 0) return want;
+    final k = math.max(1.0, top.abs()) / t * dt;
+    return c + (want - c).clamp(-k, k);
+  }
   @override
   void start(GameObject e, PocketGame g) {
     for (final use in [strOf(p['runWith'], 'off'), strOf(p['dashWith'], 'off')]) { if (use == 'action' || use == 'jump') g.wantButton(use); } // run / dash on a button: make sure it's on screen
@@ -1172,11 +1182,14 @@ class Move extends Component {
     var a = control == 'drag' ? Offset.zero : g.axis();
     if (axes == 'vertical') a = Offset(0, a.dy);
     if (axes == 'horizontal') a = Offset(a.dx, 0);
+    final dirs = strOf(p['directions'], 'any');
+    if ((dirs == '4' || dirs == '8') && a.distance > 0) { final m = a.distance, st = math.pi / (dirs == '4' ? 2 : 4), an = (math.atan2(a.dy, a.dx) / st).round() * st; a = Offset((math.cos(an) * m * 1e6).round() / 1e6, (math.sin(an) * m * 1e6).round() / 1e6); }
     if (a.distance > 0.2) lastDir = a / a.distance;
     // run (pushing the joystick to the edge, holding a button, or always; Shift on a keyboard) and dash (a quick burst)
     final runWith = strOf(p['runWith'], 'off'), shift = g.keys.contains(LogicalKeyboardKey.shiftLeft) || g.keys.contains(LogicalKeyboardKey.shiftRight);
     final running = switch (runWith) { 'edge' => a.distance > 0.9 || shift, 'action' => g.isDown('action') || shift, 'jump' => g.isDown('jump') || shift, 'always' => !shift, _ => false };
-    final speed = slowed(e, numOf(p['speed'], 260)) * (running ? numOf(p['runSpeed'], 1.7) : 1);
+    final sv = strOf(p['speedVar']).isEmpty ? double.nan : numOf(g.vars[strOf(p['speedVar'])], double.nan);
+    final speed = slowed(e, numOf(p['speed'], 260)) * (sv.isFinite ? sv : 1) * (running ? numOf(p['runSpeed'], 1.7) : 1);
     final dashWith = strOf(p['dashWith'], 'off');
     dashCd -= dt;
     if (dashWith != 'off' && dashT <= 0 && dashCd <= 0) {
@@ -1185,12 +1198,16 @@ class Move extends Component {
       if (dashWith == 'jump' && g.pressed.contains('btn:jump')) go = lastDir;
       if (dashWith == 'swipe') { for (final (k, v) in [('left', const Offset(-1, 0)), ('right', const Offset(1, 0)), ('up', const Offset(0, -1)), ('down', const Offset(0, 1))]) { if (g.pressed.contains('swipe:$k')) go = v; } }
       if (dashWith == 'doubletap' && g.taps.isNotEmpty) { if (g.time - lastTap < 0.3) { go = lastDir; lastTap = -9; } else { lastTap = g.time; } }
-      if (go != null) { dashDir = go; dashT = numOf(p['dashTime'], 0.15); dashCd = numOf(p['dashCooldown'], 0.6) + dashT; g.send('dash'); if (p['dashTrail'] != false) g.burst(e.x, e.y, Colors.white, 10); g.buzz(); }
+      if (go != null) { dashDir = go; dashT = numOf(p['dashTime'], 0.15); dashCd = numOf(p['dashCooldown'], 0.6) + dashT; if (onOf(p['dashInvuln'])) e.invuln = math.max(e.invuln, dashT + 0.05); g.send('dash'); if (p['dashTrail'] != false) g.burst(e.x, e.y, Colors.white, 10); g.buzz(); }
     }
     final b = e.body;
     if (dashT > 0) { dashT -= dt; final ds = numOf(p['dashSpeed'], 800); if (b != null && b.isDynamic && g.gravity != 0 && b.gravityScale != 0) { b.vx = dashDir.dx * ds; } else { e.x += dashDir.dx * ds * dt; e.y += dashDir.dy * ds * dt; } }
-    else if (b != null && b.isDynamic && g.gravity != 0 && b.gravityScale != 0) { b.vx = a.dx * speed; } // (with gravity: left and right only)
-    else { e.x += a.dx * speed * dt; e.y += a.dy * speed * dt; }
+    else {
+      cur = Offset(approach(cur.dx, a.dx * speed, dt, speed), approach(cur.dy, a.dy * speed, dt, speed));
+      if (b != null && b.isDynamic && g.gravity != 0 && b.gravityScale != 0) { b.vx = cur.dx; } // (with gravity: left and right only)
+      else { e.x += cur.dx * dt; e.y += cur.dy * dt; }
+    }
+    e.data['dashing'] = dashT > 0; e.data['moveVx'] = cur.dx; e.data['moveVy'] = cur.dy;
     if (control == 'drag' || control == 'both') { // the finger's movement, a little faster (the engine's drag speed 1.2)
       final d = g.dragDelta / g.zoom * numOf(p['dragSpeed'], 1.2);
       e.x += axes == 'vertical' ? 0 : d.dx; e.y += axes == 'horizontal' ? 0 : d.dy;
@@ -1211,15 +1228,15 @@ class Move extends Component {
 class Platformer extends Component {
   Platformer(this.p);
   final Map<String, dynamic> p;
-  double coyote = 0, buffer = 0, dashT = 0, dashCd = 0, gs0 = 1, wallLock = 0, wallMem = 0, lastTap = -9, bodyMax = 0;
+  double coyote = 0, buffer = 0, dashT = 0, dashCd = 0, gs0 = 1, wallLock = 0, wallMem = 0, lastTap = -9, bodyMax = 0, gsBase = 1;
   int airUsed = 0, airDash = 0, facing = 1, dashDir = 1, lastWall = 0;
-  bool rising = false, pounding = false, wasDown = false, running = false, sliding = false;
+  bool rising = false, pounding = false, wasDown = false, running = false, sliding = false, climbing = false, crouching = false, groundSlide = false;
   (LogicalKeyboardKey, double)? lastKey;
   int get airJumps => math.max(numOf(p['airJumps']).round(), onOf(p['doubleJump']) ? 1 : 0);
   bool get dashing => dashT > 0;
   @override
   void start(GameObject e, PocketGame g) {
-    bodyMax = e.ensureBody('dynamic').maxFall; // (a Rigidbody's own max fall speed)
+    final b0 = e.ensureBody('dynamic'); bodyMax = b0.maxFall; gsBase = b0.gravityScale; // (a Rigidbody's own max fall speed and gravity)
     if (g.gravity == 0) g.gravity = 1600;
     if (g.settings['controls'] == null) g.wantJoystick();
     for (final use in [strOf(p['runWith'], 'off'), strOf(p['dashWith'], 'off')]) { if (use == 'action') g.wantButton('action'); } // run / dash on the Fire button
@@ -1229,7 +1246,8 @@ class Platformer extends Component {
     if (b == null || dashCd > 0 || dashing) return false;
     if (!b.grounded && airDash >= numOf(p['airDashes'], 1).round()) return false;
     if (!b.grounded) airDash++;
-    dashDir = dir; dashT = numOf(p['dashTime'], 0.15); dashCd = numOf(p['dashCooldown'], 0.5) + dashT; gs0 = b.gravityScale; b.gravityScale = 0; b.vy = 0; pounding = false;
+    dashDir = dir; dashT = numOf(p['dashTime'], 0.15); dashCd = numOf(p['dashCooldown'], 0.5) + dashT; gs0 = gsBase; b.gravityScale = 0; b.vy = 0; pounding = false; climbing = false;
+    if (onOf(p['dashInvuln'])) e.invuln = math.max(e.invuln, dashT + 0.05); // a dodge
     g.send('dash'); if (p['dashTrail'] != false) g.burst(e.x, e.y, Colors.white, 10); g.buzz();
     return true;
   }
@@ -1267,8 +1285,27 @@ class Platformer extends Component {
     } else if (wallLock > 0) {
       wallLock -= dt; // just sprang off a wall: the push holds for a moment
     } else {
-      final ctl = b.grounded ? 1.0 : numOf(p['airControl'], 1).clamp(0.0, 1.0), want = a.dx * speed;
-      if (!pounding) b.vx = accel > 0 ? b.vx + (want - b.vx).clamp(-accel * ctl * dt, accel * ctl * dt) : b.vx + (want - b.vx) * ctl;
+      final ctl = b.grounded ? 1.0 : numOf(p['airControl'], 1).clamp(0.0, 1.0), icy = strOf(p['iceTag']).isNotEmpty && b.grounded && (b.groundedOn?.has(strOf(p['iceTag'])) ?? false);
+      final want = a.dx * speed * (crouching && !groundSlide ? numOf(p['crouchSpeed'], 0.45) : 1) * (climbing ? 0.6 : 1);
+      final slowing = want.abs() < b.vx.abs() - 1 || (want != 0 && b.vx != 0 && want.sign != b.vx.sign);
+      var k = slowing && numOf(p['decel']) > 0 ? numOf(p['decel']) : accel;
+      if (icy) k = math.min(k > 0 ? k : 9999, slowing ? 260 : 700); // (ice: slow to get going, slower to stop)
+      if (groundSlide) { b.vx *= math.max(0.0, 1 - 1.6 * dt); } // a slide keeps its speed for a while, then stops
+      else if (!pounding) { b.vx = k > 0 ? b.vx + (want - b.vx).clamp(-k * ctl * dt, k * ctl * dt) : b.vx + (want - b.vx) * ctl; }
+    }
+    // ladders: up / down on one climbs it (no gravity while on it)
+    if (onOf(p['climb'])) {
+      final lad = touchingTag(e, g, strOf(p['climbTag'], 'ladder'));
+      if (lad != null && !climbing && a.dy.abs() > 0.4 && !dashing) { climbing = true; airUsed = 0; }
+      if (lad == null && climbing) climbing = false;
+      if (climbing) { b.gravityScale = 0; b.vy = a.dy * numOf(p['climbSpeed'], 160); coyote = math.max(coyote, 0.05); }
+    }
+    if (!climbing && !dashing) { // the shape of the jump: fall faster, float at the top
+      var gr = gsBase;
+      final fg = numOf(p['fallGravity'], 1);
+      if (b.vy > 0 && fg > 0 && fg != 1) { gr = gsBase * fg; }
+      else if (onOf(p['apexHang']) && !b.grounded && b.vy.abs() < 110 && g.isDown('jump')) { gr = gsBase * 0.45; }
+      b.gravityScale = gr;
     }
     if (b.grounded) {
       coyote = numOf(p['coyoteTime'], 0.12); airUsed = 0; airDash = 0;
@@ -1283,6 +1320,14 @@ class Platformer extends Component {
       else if (!b.grounded && onOf(p['groundPound']) && !dashing) { pounding = true; b.vx = 0; }
     }
     if (pounding) b.vy = numOf(p['poundSpeed'], 1400);
+    // crouch (and slide when running fast)
+    final canCrouch = onOf(p['crouch']) && b.grounded && !climbing && !dashing && !(p['dropThrough'] != false && (b.groundedOn?.body?.oneWay ?? false));
+    if (canCrouch && downNow) { if (!crouching && onOf(p['slide']) && b.vx.abs() > numOf(p['speed'], 240) * 0.8) { groundSlide = true; g.send('slide'); } crouching = true; }
+    else if (crouching && (!downNow || !b.grounded)) { crouching = false; groundSlide = false; }
+    if (groundSlide && b.vx.abs() < 40) groundSlide = false;
+    e.data['crouching'] = crouching; e.data['climbing'] = climbing; e.data['groundSlide'] = groundSlide;
+    e.fxCrouch = crouching ? 0.62 : 1;
+    if (!e.fxJuice) { e.fxSy = e.fxCrouch; e.fxY = e.half.height * (1 - e.fxSy); } // looks lower (the Character Controller's squash builds on this)
     // jump (with a buffer: pressed a little early still counts)
     if (g.pressed.contains('jump')) buffer = math.max(numOf(p['jumpBuffer'], 0.12), dt * 1.5);
     if (b.wall != 0) { lastWall = b.wall; wallMem = 0.1; } else { wallMem -= dt; } // (it only touches while pressing in: remember the wall for a moment)
@@ -1293,7 +1338,7 @@ class Platformer extends Component {
       else if (wall != 0 && onOf(p['wallJump'])) { did = 'wall'; b.vx = -wall * numOf(p['wallJumpPush'], 320); facing = -wall; wallLock = 0.18; airUsed = 0; }
       else if (airUsed < airJumps) { did = 'air'; airUsed++; }
       if (did.isNotEmpty) {
-        endDash(e); pounding = false;
+        endDash(e); pounding = false; climbing = false; crouching = false; groundSlide = false; b.gravityScale = gsBase;
         b.vy = -numOf(p['jump'], 620); coyote = 0; buffer = 0; rising = true;
         g.sfx('jump'); if (did != 'ground') g.send(did == 'wall' ? 'wall jump' : 'air jump');
       }
@@ -1326,19 +1371,69 @@ class Controller2D extends Component {
     final mode = strOf(p['mode'], 'topdown8');
     final extras = {for (final k in controllerExtras) if (p[k] != null) k: p[k]};
     final moveCtl = custom ? 'joystick' : 'both'; // a chosen control scheme steers on its own (no dragging the player as well)
+    final feel = {'accelTime': p['accelTime'] ?? 0, 'decelTime': p['decelTime'] ?? 0, 'speedVar': p['speedVar'] ?? ''}, keepOn = p['keepInView'] != false && !onOf(p['wrapEdges']);
+    final spd = numOf(p['speed'], 240);
     inner = switch (mode) {
-      'topdown8' => Move({...extras, 'speed': p['speed'] ?? 240, 'control': moveCtl, 'axes': 'all', 'keepInView': p['keepInView'] ?? true, 'face2D': onOf(p['faceMove']) ? 'rotate' : 'none'}),
-      'sideToSide' => Move({...extras, 'speed': p['speed'] ?? 240, 'control': moveCtl, 'axes': 'horizontal', 'keepInView': p['keepInView'] ?? true}),
-      'platformer' => Platformer({...extras, 'speed': p['speed'] ?? 240, 'jump': p['jump'] ?? 620, 'onFall': p['onFall'] ?? 'respawn'}),
+      'topdown8' => Move({...extras, ...feel, 'speed': spd, 'control': moveCtl, 'axes': 'all', 'keepInView': keepOn, 'face2D': faceMode, 'directions': p['directions'] ?? 'any'}),
+      'sideToSide' => Move({...extras, ...feel, 'speed': spd, 'control': moveCtl, 'axes': 'horizontal', 'keepInView': keepOn, 'face2D': faceMode}),
+      'platformer' => Platformer({...extras, 'speed': spd, 'jump': p['jump'] ?? 620, 'onFall': p['onFall'] ?? 'respawn',
+        if (numOf(p['accelTime']) > 0) 'accel': spd / numOf(p['accelTime']), if (numOf(p['decelTime']) > 0) 'decel': spd / numOf(p['decelTime'])}),
       'lanes' => SwipeLanes({'distance': p['laneWidth'] ?? 110, 'lanes': p['lanes'] ?? 3, 'jump': 0}),
-      'grid' => GridStep({'tile': p['tile'] ?? 40}),
+      'grid' => GridStep({'tile': p['tile'] ?? 40, 'stepTime': p['gridStep'] ?? 0.14, 'holdRepeat': p['gridHold'] ?? true, 'diagonal': p['gridDiagonal'] ?? false, 'tapToMove': p['gridTap'] ?? true}),
       _ => null,
     };
   }
   final Map<String, dynamic> p;
   Component? inner;
-  double heading = 0, speed = 0, fuel = 1;
+  double heading = 0, speed = 0, fuel = 1, runT = 0;
+  int runAir = 0;
   Offset? target;
+  // the looks: squash amount, was it on the ground, last fall speed, bob time, last direction
+  double _k = 0, _vy = 0, _bobT = 0;
+  bool _wasG = true;
+  int _dir = 0;
+  String get faceMode => strOf(p['face2D'], 'none') != 'none' ? strOf(p['face2D']) : onOf(p['faceMove']) ? 'rotate' : 'none';
+  /// The speed, times "Speed × variable".
+  double speedNow(GameObject e, PocketGame g) { final v = strOf(p['speedVar']).isEmpty ? double.nan : numOf(g.vars[strOf(p['speedVar'])], double.nan); return slowed(e, numOf(p['speed'], 240)) * (v.isFinite ? v : 1); }
+  /// Speed up / slow down over "Time to full speed" / "Time to stop".
+  double approach(double c, double want, double dt, double top) {
+    final t = want != 0 && want.abs() > c.abs() * 0.99 ? numOf(p['accelTime']) : numOf(p['decelTime']);
+    if (t <= 0) return want;
+    final k = math.max(1.0, top.abs()) / t * dt;
+    return c + (want - c).clamp(-k, k);
+  }
+  /// After the movement: wrap around the edges, and the looks (squash, lean, bob, dust).
+  void _after(GameObject e, double dt, PocketGame g) {
+    final b = e.body;
+    if (onOf(p['wrapEdges'])) {
+      final v = g.viewBounds, h = e.half;
+      if (e.x < v.left - h.width) { e.x = v.right + h.width; } else if (e.x > v.right + h.width) { e.x = v.left - h.width; }
+      if (mode != 'jetpack') { if (e.y < v.top - h.height) { e.y = v.bottom + h.height; } else if (e.y > v.bottom + h.height) { e.y = v.top - h.height; } }
+    }
+    final on = onOf(p['squash']) || numOf(p['lean']) != 0 || onOf(p['bob']) || onOf(p['dust']);
+    if (!on) return;
+    e.fxJuice = true;
+    final gnd = b?.grounded ?? false, sp = math.max(1.0, numOf(p['speed'], 240)), hy = e.half.height, dyn = b != null && b.isDynamic && (b.vx != 0 || b.vy != 0 || mode == 'platformer');
+    final vx = dyn ? b.vx : numOf(e.data['moveVx']), vy = dyn ? b.vy : numOf(e.data['moveVy']);
+    if (onOf(p['squash'])) {
+      if (gnd && !_wasG && _vy > 220) _k = math.min(0.32, _vy / 2600); // landing: squash
+      if (!gnd && _wasG && vy < -150) _k = -0.22; // take-off: stretch
+      _k += (0 - _k) * math.min(1.0, dt * 11);
+    } else { _k = 0; }
+    e.fxSy = (1 - _k) * e.fxCrouch; e.fxSx = 1 + _k * 0.7;
+    e.fxY = hy * (1 - e.fxSy); // feet stay on the ground
+    final moving = math.sqrt(vx * vx + vy * vy) > 25 && (gnd || !const ['platformer', 'runner', 'jetpack', 'flappy'].contains(mode));
+    if (onOf(p['bob']) && moving) { _bobT += dt * (7 + math.sqrt(vx * vx + vy * vy) / 45); e.fxY -= (math.sin(_bobT)).abs() * math.min(4.0, hy * 0.25); } else { _bobT = 0; }
+    if (numOf(p['lean']) != 0 && !_turny.contains(mode)) { final want = (vx / sp).clamp(-1.0, 1.0) * numOf(p['lean']); e.fxRz += (want - e.fxRz) * math.min(1.0, dt * 10); } else { e.fxRz = 0; }
+    if (onOf(p['dust'])) {
+      final feet = e.y + hy, d = vx == 0 ? 0 : vx.sign.toInt();
+      if (gnd && !_wasG && _vy > 260) { g.burst(e.x, feet, const Color(0xFFD9D2C3), 9, 0.5); }
+      else if (gnd && d != 0 && _dir != 0 && d != _dir && vx.abs() > sp * 0.5) { g.burst(e.x, feet, const Color(0xFFD9D2C3), 4, 0.35); }
+      if (e.data['dashing'] == true && _rnd.nextDouble() < dt * 40) g.burst(e.x, e.y, Colors.white, 2, 0.3);
+      if (d != 0) _dir = d;
+    }
+    _wasG = gnd; _vy = vy;
+  }
   (int, Offset)? pull;
   final scheme = SchemeState();
   static final _rnd = math.Random();
@@ -1368,6 +1463,16 @@ class Controller2D extends Component {
     if (gravity && g.gravity == 0) g.gravity = 1600;
     heading = e.rz * deg;
     e.data['respawn'] ??= Offset(e.x, e.y);
+    if (mode == 'slingshot') b.bounce = numOf(p['bounce'], 0.3).clamp(0.0, 1.0);
+    if (mode == 'tapToMove' && p['tapMarker'] != false) {
+      g.overlays.add((c) { // where it's walking to: a ring that pulses
+        final tg = target;
+        if (tg == null || e.dead) return;
+        final o = g.toScreen(tg.dx, tg.dy), r = 10 + math.sin(g.time * 8) * 2;
+        c.drawCircle(o, r, Paint()..color = Colors.white.withValues(alpha: 0.75)..style = PaintingStyle.stroke..strokeWidth = 2.5);
+        c.drawCircle(o, r * 0.35, Paint()..color = Colors.white.withValues(alpha: 0.35));
+      });
+    }
     if (mode == 'slingshot') {
       g.overlays.add((c) { // the aim: a dotted line the way it will fly, longer for a harder pull
         final pl = pull;
@@ -1390,39 +1495,51 @@ class Controller2D extends Component {
     }
   }
   void _keep(GameObject e, PocketGame g) {
-    if (p['keepInView'] == false) return;
+    if (p['keepInView'] == false || onOf(p['wrapEdges'])) return;
     final v = g.viewBounds, h = e.half;
     e.x = e.x.clamp(v.left + h.width, math.max(v.left + h.width, v.right - h.width)).toDouble();
     e.y = e.y.clamp(v.top + h.height, math.max(v.top + h.height, v.bottom - h.height)).toDouble();
   }
-  void _face(GameObject e, double vx, double vy) { if (onOf(p['faceMove']) && math.sqrt(vx * vx + vy * vy) > 5) e.rz = math.atan2(vy, vx) / deg; }
+  void _face(GameObject e, double vx, double vy) {
+    if (math.sqrt(vx * vx + vy * vy) <= 5) return;
+    if (faceMode == 'rotate') { e.rz = math.atan2(vy, vx) / deg; } else if (faceMode == 'flip' && vx.abs() > 5) { faceX(e, vx); }
+  }
   @override
   void update(GameObject e, double dt, PocketGame g) {
     if (custom && g.state == 'play') steerScheme(e, g, sch, mode, scheme);
     final i = inner;
-    if (i != null) { i.update(e, dt, g); return; }
-    final a = g.axis(), b = e.ensureBody('dynamic'), sp = slowed(e, numOf(p['speed'], 240)), damp = math.max(0.0, 1 - numOf(p['friction'], 2) * dt);
+    if (i != null) { i.update(e, dt, g); if (g.state == 'play') _after(e, dt, g); return; }
+    _move(e, dt, g);
+    _after(e, dt, g);
+  }
+  void _move(GameObject e, double dt, PocketGame g) {
+    final a = g.axis(), b = e.ensureBody('dynamic'), sp = speedNow(e, g), damp = math.max(0.0, 1 - numOf(p['friction'], 2) * dt);
     final turn = numOf(p['turn'], 200) * deg, accel = numOf(p['accel'], 600);
     switch (mode) {
       case 'topdown4':
         var ax = a.dx, ay = a.dy;
         if (ax.abs() > ay.abs()) { ay = 0; } else { ax = 0; }
-        b.vx = ax.sign * (ax.abs() > 0.3 ? sp : 0); b.vy = ay.sign * (ay.abs() > 0.3 ? sp : 0);
+        b.vx = approach(b.vx, ax.sign * (ax.abs() > 0.3 ? sp : 0), dt, sp); b.vy = approach(b.vy, ay.sign * (ay.abs() > 0.3 ? sp : 0), dt, sp);
         _face(e, b.vx, b.vy); _keep(e, g);
       case 'runner':
-        b.vx = sp;
-        if ((g.pressed.contains('tap') || g.pressed.contains('btn:jump') || g.pressed.contains('swipe:up') || g.pressed.contains('jump')) && b.grounded) { b.vy = -numOf(p['jump'], 620); g.sfx('jump'); }
+        runT += dt;
+        var rs = sp * (1 + numOf(p['runRamp']) / 100 * runT / 10);
+        if (numOf(p['runMax']) > 0) rs = math.min(rs, numOf(p['runMax']));
+        b.vx = rs; g.setVar('runSpeed', rs.roundToDouble());
+        if (b.grounded) runAir = 0;
+        if ((g.pressed.contains('tap') || g.pressed.contains('btn:jump') || g.pressed.contains('swipe:up') || g.pressed.contains('jump')) && (b.grounded || runAir < numOf(p['runJumps']).round())) { if (!b.grounded) runAir++; b.vy = -numOf(p['jump'], 620); g.sfx('jump'); }
         if (e.y > g.viewBounds.bottom + 300) g.hurt(e, strOf(p['onFall'], 'respawn'));
       case 'flappy':
         if (g.pressed.contains('tap') || g.pressed.contains('btn:jump') || g.pressed.contains('jump')) { b.vy = -numOf(p['jump'], 620) * 0.6; g.sfx('jump'); }
-        e.rz = (b.vy / 12).clamp(-30.0, 70.0);
+        if (p['flapTilt'] != false) e.rz = (b.vy / 12).clamp(-30.0, 70.0);
         if (p['keepInView'] != false && e.y < g.viewBounds.top) { e.y = g.viewBounds.top; b.vy = 0; }
         if (e.y > g.viewBounds.bottom + 300) g.hurt(e, strOf(p['onFall'], 'respawn'));
       case 'car':
         final thr = onOf(p['autoDrive']) ? 1.0 : math.max(0.0, -a.dy) + (a.dy > 0.3 ? -0.5 : 0);
-        speed = (speed * damp + thr * accel * dt).clamp(-sp * 0.4, sp);
+        speed = (speed * damp + thr * accel * dt).clamp(-sp * numOf(p['reverseSpeed'], 0.4).clamp(0.0, 1.0), sp);
         heading += a.dx * turn * dt * (speed.abs() / (sp * 0.3)).clamp(0.0, 1.0) * (speed == 0 ? 1 : speed.sign);
-        b.vx = math.cos(heading) * speed; b.vy = math.sin(heading) * speed; e.rz = heading / deg;
+        final grip = numOf(p['grip'], 1).clamp(0.05, 1.0), kk = grip >= 1 ? 1.0 : math.min(1.0, grip * grip * dt * 30); // low grip: keeps sliding the way it was going (drifts)
+        b.vx += (math.cos(heading) * speed - b.vx) * kk; b.vy += (math.sin(heading) * speed - b.vy) * kk; e.rz = heading / deg;
       case 'spaceship':
         heading += a.dx * turn * dt;
         final thrust = math.max(0.0, -a.dy) + (g.pointers.values.any((q) => q.role == 'free') ? 1 : 0);
@@ -1433,7 +1550,7 @@ class Controller2D extends Component {
         if (p['keepInView'] != false) { final vb = g.viewBounds; if (e.x < vb.left) { e.x = vb.right; } else if (e.x > vb.right) { e.x = vb.left; } if (e.y < vb.top) { e.y = vb.bottom; } else if (e.y > vb.bottom) { e.y = vb.top; } }
       case 'tank':
         heading += a.dx * turn * dt;
-        final fwd = -a.dy * sp;
+        final fwd = approach(speed, -a.dy * sp, dt, sp); speed = fwd;
         b.vx = math.cos(heading) * fwd; b.vy = math.sin(heading) * fwd; e.rz = heading / deg;
       case 'tapToMove':
         final t = g.taps.isNotEmpty ? g.taps.first.world : g.pointers.values.where((q) => q.role == 'free').map((q) => g.toWorld(q.at)).firstOrNull;
@@ -1445,21 +1562,25 @@ class Controller2D extends Component {
         }
       case 'followFinger':
         final f = g.pointers.values.where((q) => q.role == 'free').firstOrNull;
-        if (f != null) { final w = g.toWorld(f.at), k = math.min(1.0, dt * (sp / 20)); b.vx = (w.dx - e.x) * k / math.max(dt, 1e-3); b.vy = (w.dy - e.y) * k / math.max(dt, 1e-3); } else { b.vx = 0; b.vy = 0; }
+        if (f != null) {
+          final w = g.toWorld(f.at - Offset(0, numOf(p['fingerOffset']))), ax2 = strOf(p['followAxes'], 'both'), k = math.min(1.0, dt * (sp / 20));
+          final dx = ax2 == 'y' ? 0.0 : w.dx - e.x, dy = ax2 == 'x' ? 0.0 : w.dy - e.y;
+          b.vx = dx * k / math.max(dt, 1e-3); b.vy = dy * k / math.max(dt, 1e-3); _face(e, dx, dy);
+        } else { b.vx = 0; b.vy = 0; }
         _keep(e, g);
       case 'jetpack':
-        b.vx += (a.dx * sp - b.vx) * math.min(1.0, dt * 10);
+        b.vx = numOf(p['accelTime']) > 0 || numOf(p['decelTime']) > 0 ? approach(b.vx, a.dx * sp, dt, sp) : b.vx + (a.dx * sp - b.vx) * math.min(1.0, dt * 10);
         final hold = g.isDown('jump') || (!g.hasButton('jump') && !custom && g.pointers.values.any((q) => q.role == 'free')) || g.keys.contains(LogicalKeyboardKey.space) || g.keys.contains(LogicalKeyboardKey.arrowUp) || g.keys.contains(LogicalKeyboardKey.keyW);
         final tank = numOf(p['fuel']);
         if (b.grounded) fuel = math.min(1.0, fuel + dt / math.max(0.5, tank * 0.5));
         if (hold && (tank <= 0 || fuel > 0)) {
-          b.vy = math.max(b.vy - (g.gravity == 0 ? 1600 : g.gravity) * 2.1 * dt, -numOf(p['jump'], 620) * 0.75);
+          b.vy = math.max(b.vy - (g.gravity == 0 ? 1600 : g.gravity) * 2.1 * dt, -(numOf(p['thrust']) > 0 ? numOf(p['thrust']) : numOf(p['jump'], 620) * 0.75));
           if (tank > 0) fuel = math.max(0.0, fuel - dt / tank);
           if (_rnd.nextDouble() < dt * 30) g.burst(e.x, e.y + e.half.height, const Color(0xFFFFB347), 2, 0.4);
         }
         if (tank > 0) g.setVar('fuel', (fuel * 100).roundToDouble());
         if (p['keepInView'] != false && e.y < g.viewBounds.top) { e.y = g.viewBounds.top; b.vy = math.max(0, b.vy); }
-        faceX(e, a.dx);
+        if (faceMode == 'rotate') { _face(e, a.dx, 0); } else { faceX(e, a.dx); }
         if (e.y > g.viewBounds.bottom + 300) g.hurt(e, strOf(p['onFall'], 'respawn'));
       case 'slingshot':
         final noGrav = p['slingGravity'] == false;
@@ -1483,7 +1604,18 @@ class Controller2D extends Component {
 
 /// The platformer's extra moves (and run & dash, which top-down movement has too) the Character Controller passes on.
 const controllerExtras = ['doubleJump', 'airJumps', 'coyoteTime', 'jumpBuffer', 'maxFall', 'wallSlide', 'wallSlideSpeed', 'wallJump', 'wallJumpPush',
-  'runWith', 'runSpeed', 'dashWith', 'dashSpeed', 'dashTime', 'dashCooldown', 'airDashes', 'dashTrail', 'dropThrough', 'groundPound', 'poundSpeed'];
+  'runWith', 'runSpeed', 'dashWith', 'dashSpeed', 'dashTime', 'dashCooldown', 'airDashes', 'dashTrail', 'dashInvuln', 'dropThrough', 'groundPound', 'poundSpeed',
+  'crouch', 'crouchSpeed', 'slide', 'fallGravity', 'apexHang', 'decel', 'iceTag', 'climb', 'climbTag', 'climbSpeed'];
+/// The first object with this tag that overlaps e (boxes; triggers too): ladders.
+GameObject? touchingTag(GameObject e, PocketGame g, String tag) {
+  final h = e.half;
+  for (final q in g.objects) {
+    if (q == e || q.dead || !q.has(tag)) continue;
+    final qh = q.half;
+    if ((q.x - e.x).abs() < h.width + qh.width && (q.y - e.y).abs() < h.height + qh.height) return q;
+  }
+  return null;
+}
 const _jumpy = ['platformer', 'jetpack'], _turny = ['car', 'spaceship', 'tank'];
 /// What a swipe set (it keeps going until the next swipe).
 class SchemeState { double dx = 0, dy = 0; double? head; bool go = false; }
@@ -1554,7 +1686,8 @@ class GridStep extends Component {
   GridStep(this.p);
   final Map<String, dynamic> p;
   double t = 0;
-  Offset? to;
+  Offset? to, tapGoal;
+  bool released = true;
   @override
   void start(GameObject e, PocketGame g) { final s = numOf(p['tile'], 40); e.x = (e.x / s).round() * s; e.y = (e.y / s).round() * s; }
   @override
@@ -1569,14 +1702,24 @@ class GridStep extends Component {
       return;
     }
     var a = g.axis();
+    if (a.distance < 0.4) released = true;
+    if (p['holdRepeat'] == false && !released) a = Offset.zero; // one step per push
+    if (p['tapToMove'] != false && g.taps.isNotEmpty) tapGoal = g.taps.first.world;
+    final tg = tapGoal;
+    if (tg != null && a.distance < 0.4) { // tapped a tile: step toward it
+      final ddx = tg.dx - e.x, ddy = tg.dy - e.y;
+      if (ddx.abs() < s / 2 && ddy.abs() < s / 2) { tapGoal = null; } else { a = Offset(ddx.abs() >= s / 2 ? ddx.sign : 0, ddy.abs() >= s / 2 ? ddy.sign : 0); }
+    }
     if (g.pressed.contains('swipe:left')) a = const Offset(-1, 0);
     if (g.pressed.contains('swipe:right')) a = const Offset(1, 0);
     if (g.pressed.contains('swipe:up')) a = const Offset(0, -1);
     if (g.pressed.contains('swipe:down')) a = const Offset(0, 1);
     if (a.distance < 0.4) return;
-    final dx = a.dx.abs() > a.dy.abs() ? a.dx.sign : 0.0, dy = dx == 0 ? a.dy.sign : 0.0;
+    released = false;
+    final diag = onOf(p['diagonal']);
+    final dx = diag ? (a.dx.abs() > 0.38 ? a.dx.sign : 0.0) : (a.dx.abs() > a.dy.abs() ? a.dx.sign : 0.0), dy = diag ? (a.dy.abs() > 0.38 ? a.dy.sign : 0.0) : (dx == 0 ? a.dy.sign : 0.0);
     final nx = e.x + dx * s, ny = e.y + dy * s;
-    if (g.objects.any((o) => o != e && !o.dead && o.body != null && o.body!.solid && (o.x - nx).abs() < s * 0.5 + o.half.width - 2 && (o.y - ny).abs() < s * 0.5 + o.half.height - 2)) return; // a wall
+    if (g.objects.any((o) => o != e && !o.dead && o.body != null && o.body!.solid && (o.x - nx).abs() < s * 0.5 + o.half.width - 2 && (o.y - ny).abs() < s * 0.5 + o.half.height - 2)) { tapGoal = null; return; } // a wall
     e.data['from'] = Offset(e.x, e.y); to = Offset(nx, ny); t = 0;
     faceX(e, dx);
   }
@@ -3482,9 +3625,9 @@ class GamePainter extends CustomPainter {
     final bump = 1 + pop * 1.2, alpha = o.alpha.clamp(0.0, 1.0);
     if (alpha <= 0) return;
     canvas.save();
-    canvas.translate(at.dx, at.dy);
-    canvas.rotate(o.rz * math.pi / 180);
-    canvas.scale(o.sx.sign * k * bump, o.sy.sign * k * bump); // (the size is in half: stretched HUD objects fill their row)
+    canvas.translate(at.dx + o.fxX * k, at.dy + o.fxY * k);
+    canvas.rotate((o.rz + o.fxRz) * math.pi / 180);
+    canvas.scale(o.sx.sign * k * bump * o.fxSx, o.sy.sign * k * bump * o.fxSy); // (the size is in half: stretched HUD objects fill their row)
     final flash = numOf(o.data['flash']) > 0;
     if (flash) o.data['flash'] = numOf(o.data['flash']) - 1 / 60;
     final w = half.width * 2, h = half.height * 2;

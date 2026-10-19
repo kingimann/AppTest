@@ -248,6 +248,17 @@ Object.assign(NODE_HELP, { // App nodes
 for (const [t, d] of Object.entries(NODE_TYPES)) if (d.fromLogic && !NODE_HELP[t]) NODE_HELP[t] = t.startsWith('le_') ? `The Triggers event “${d.label.replace(/^When: /, '')}”, as an event node` : t.startsWith('lc_') ? `The Triggers condition “${d.label}”: true or false` : `The Triggers instruction “${d.label}”; waits for it to finish, then “then”`;
 
 
+/** Groups for the ready-made scripts, in the order they're shown. */
+const TEMPLATE_GROUPS = ['Score & winning', 'Player & controls', 'Enemies & spawning', 'Effects & feel', 'Screens & UI', 'Logic & data'];
+const templateGroup = (t) => {
+  const l = t.label.toLowerCase();
+  if (/^ui:|daily|name tag/.test(l)) return 'Screens & UI';
+  if (/enemy|chase|wave|spawn|ring/.test(l)) return 'Enemies & spawning';
+  if (/score|win|countdown|collect/.test(l)) return 'Score & winning';
+  if (/keyboard|swipe|jump|run \/ idle|touch player/.test(l)) return 'Player & controls';
+  if (/blink|shake|pop|explode/.test(l)) return 'Effects & feel';
+  return 'Logic & data';
+};
 /** Ready-made node graphs you can drop in and change. */
 const GRAPH_TEMPLATES = [
   { label: 'UI: ask the player\'s name', nodes: [{ id: 's', type: 'start', x: 0, y: 0 }, { id: 'c', type: 'textCheck', x: 0, y: 200, params: { op: 'is empty' } }, { id: 'g', type: 'getText', x: -300, y: 200, params: { name: 'playerName' } }, { id: 'b', type: 'branch', x: 300, y: 0 },
@@ -372,8 +383,48 @@ export function openNodeEditor(opts) {
   document.body.append(root);
   area.append(band);
 
+  // ---------- zoom buttons + map of the whole script (tap or drag the map to go there) ----------
+  const zoomLbl = h('button', { class: 'ne-zl', title: 'Fit all nodes', onclick: () => fit() }, '');
+  const mini = h('canvas', { class: 'ne-mini', title: 'Map: tap or drag to move around' });
+  let mapOn = true; try { mapOn = localStorage.getItem('pocket.ne.map') !== '0'; } catch { /* storage unavailable */ }
+  const nav = h('div', { class: 'ne-nav' }, mini, h('div', { class: 'ne-zoom' },
+    h('button', { title: 'Zoom out', onclick: () => zoomBy(1 / 1.25) }, '−'), zoomLbl, h('button', { title: 'Zoom in', onclick: () => zoomBy(1.25) }, '+')));
+  area.append(nav);
+  let miniView = null, miniQueued = false;
+  const queueMini = () => { if (!miniQueued) { miniQueued = true; requestAnimationFrame(() => { miniQueued = false; drawMini(); }); } };
+  function drawMini() {
+    const show = mapOn && g.nodes.length > 1;
+    mini.hidden = !show; if (!show) { miniView = null; return; }
+    const A = area.getBoundingClientRect(), W = 132, H = 88, dpr = window.devicePixelRatio || 1;
+    if (mini.width !== W * dpr) { mini.width = W * dpr; mini.height = H * dpr; }
+    const boxes = g.nodes.map((n) => ({ n, h: world.querySelector(`[data-id="${n.id}"]`)?.offsetHeight || 120 }));
+    const vx0 = -tx / k, vy0 = -ty / k, vx1 = vx0 + A.width / k, vy1 = vy0 + A.height / k;
+    let x0 = Math.min(vx0, ...boxes.map((b) => b.n.x)), y0 = Math.min(vy0, ...boxes.map((b) => b.n.y)), x1 = Math.max(vx1, ...boxes.map((b) => b.n.x + NODE_W)), y1 = Math.max(vy1, ...boxes.map((b) => b.n.y + b.h));
+    const sc = Math.min((W - 8) / (x1 - x0), (H - 8) / (y1 - y0)), ox = 4 + ((W - 8) - (x1 - x0) * sc) / 2 - x0 * sc, oy = 4 + ((H - 8) - (y1 - y0) * sc) / 2 - y0 * sc;
+    miniView = { sc, ox, oy };
+    const c = mini.getContext('2d'); c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+    for (const b of boxes) { const d = def(b.n); c.globalAlpha = b.n.off ? 0.35 : 1; c.fillStyle = d.comment ? '#c9b458' : CAT_COLOR[d.cat] || '#777'; c.fillRect(ox + b.n.x * sc, oy + b.n.y * sc, Math.max(2, NODE_W * sc), Math.max(2, b.h * sc)); }
+    c.globalAlpha = 1; c.strokeStyle = '#fff'; c.lineWidth = 1.5; c.strokeRect(ox + vx0 * sc, oy + vy0 * sc, (vx1 - vx0) * sc, (vy1 - vy0) * sc);
+  }
+  const miniGo = (e) => { if (!miniView) return; const r = mini.getBoundingClientRect(), A = area.getBoundingClientRect(); const wx = (e.clientX - r.left - miniView.ox) / miniView.sc, wy = (e.clientY - r.top - miniView.oy) / miniView.sc; tx = A.width / 2 - wx * k; ty = A.height / 2 - wy * k; applyView(); };
+  mini.addEventListener('pointerdown', (e) => { e.stopPropagation(); mini.setPointerCapture(e.pointerId); const v = miniView; miniGo(e); miniView = v; mini._drag = true; });
+  mini.addEventListener('pointermove', (e) => { if (mini._drag) { const v = miniView; miniGo(e); miniView = v; } });
+  const miniUp = () => { mini._drag = false; queueMini(); };
+  mini.addEventListener('pointerup', miniUp); mini.addEventListener('pointercancel', miniUp);
+  function zoomBy(f, cx, cy) { // around a point on screen (the middle by default)
+    const A = area.getBoundingClientRect(); cx ??= A.width / 2; cy ??= A.height / 2;
+    const nk = Math.max(0.3, Math.min(2, k * f)); tx = cx - (cx - tx) * nk / k; ty = cy - (cy - ty) * nk / k; k = nk; applyView();
+  }
+  area.addEventListener('wheel', (e) => { // a mouse or trackpad: Ctrl/⌘ + wheel (or a trackpad pinch) zooms, the wheel moves around
+    if (e.target.closest('textarea, select, .ne-nav')) return;
+    e.preventDefault();
+    const A = area.getBoundingClientRect();
+    if (e.ctrlKey || e.metaKey) zoomBy(Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.0025)), e.clientX - A.left, e.clientY - A.top);
+    else { const m = e.deltaMode ? 30 : 1; tx -= (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * m; if (!e.shiftKey || e.deltaX) ty -= e.deltaY * m; applyView(); }
+  }, { passive: false });
+
   // ---------- view ----------
-  const applyView = () => { world.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; };
+  const applyView = () => { world.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`; zoomLbl.textContent = Math.round(k * 100) + '%'; queueMini(); };
   function fit(readable = false) { // readable (on opening): never so small you can't read it; a big script starts at its top-left instead
     const a = area.getBoundingClientRect();
     if (!g.nodes.length) { k = 0.85; tx = 20; ty = 20; applyView(); return; }
@@ -401,7 +452,7 @@ export function openNodeEditor(opts) {
   let temp = null;
   function drawLinks() {
     const ns = 'http://www.w3.org/2000/svg';
-    svg.replaceChildren();
+    svg.replaceChildren(); queueMini();
     g.links.forEach((l, i) => {
       const a = portPos(l.from.node, l.from.port, 'out'), b = portPos(l.to.node, l.to.port, 'in');
       if (!a || !b) return;
@@ -707,8 +758,9 @@ export function openNodeEditor(opts) {
       { icon: 'script', label: 'View as Code…', fn: () => viewCode() },
       { icon: 'collapse', label: anyMin ? 'Expand All' : 'Collapse All', fn: () => { for (const n of g.nodes) { if (anyMin) delete n.min; else if (!def(n).comment) n.min = true; } emit(); render(); } },
       { icon: 'frame', label: 'Fit All Nodes', fn: () => fit() },
+      { icon: 'eye', label: mapOn ? 'Hide the Map' : 'Show the Map', fn: () => { mapOn = !mapOn; try { localStorage.setItem('pocket.ne.map', mapOn ? '1' : '0'); } catch { /* storage unavailable */ } drawMini(); } },
       '-',
-      { icon: 'star', label: 'Ready-made Scripts…', fn: () => templateMenu(anchor) },
+      { icon: 'star', label: 'Ready-made Scripts…', fn: () => openReady() },
       { icon: 'save', label: 'Save / Reuse Script…', fn: () => scriptMenu(anchor) },
     ]);
   }
@@ -738,11 +790,25 @@ export function openNodeEditor(opts) {
     selected = map[c.nodes[0].id]; emit(); render(); toast(`Pasted ${c.nodes.length} node${c.nodes.length > 1 ? 's' : ''}`);
     const n0 = g.nodes.find((q) => q.id === selected); if (n0) { tx = A.width / 2 - (n0.x + NODE_W / 2) * k; ty = A.height / 3 - n0.y * k; applyView(); drawLinks(); } // show them
   }
-  function templateMenu(anchor) {
+  /** Ready-made (and your saved) scripts: search, in groups, each showing what it does. */
+  function openReady() {
     const mine = opts.scripts?.() || [];
-    popMenu(anchor, [
-      ...(mine.length ? [{ cap: 'My saved scripts' }, ...mine.map((q) => ({ icon: 'nodes', label: q.here ? q.name : `${q.name} (other game)`, fn: () => addTemplate({ label: q.name, ...q.graph }) }))] : []),
-      { cap: 'Add a ready-made script' }, ...GRAPH_TEMPLATES.map((t) => ({ icon: 'star', label: t.label, fn: () => addTemplate(t) }))]);
+    const search = h('input', { type: 'search', placeholder: `Search ${GRAPH_TEMPLATES.length + mine.length} ready-made scripts`, autocapitalize: 'off', oninput: () => draw() });
+    const list = sheet('Ready-made Scripts', (L) => [search, L]);
+    const flow = (t) => { const note = (t.nodes || []).find((n) => n.type === 'comment')?.params?.text; const steps = (t.nodes || []).filter((n) => NODE_TYPES[n.type] && !NODE_TYPES[n.type].value && !NODE_TYPES[n.type].comment).slice(0, 4).map((n) => NODE_TYPES[n.type].label); return steps.join(' → ') + ((t.nodes || []).length > 4 ? ' …' : '') + (note ? ' · ' + note : ''); };
+    const card = (t, mineOf) => { const n = (t.nodes || []).length, ev = (t.nodes || []).map((q) => NODE_TYPES[q.type]).find((d) => d && !d.exec && !d.value && !d.comment);
+      return h('button', { class: 'ne-pitem ne-ready', style: `--c:${CAT_COLOR[ev?.cat] || CAT_COLOR.Events || '#3c8d40'}`, onclick: () => { closePicker(); addTemplate(t); } },
+        h('b', {}, t.label), h('em', { class: 'ne-pcatname' }, mineOf || `${n} node${n === 1 ? '' : 's'}`), h('small', {}, flow(t))); };
+    function draw() {
+      const q = search.value.trim().toLowerCase(), hit = (t) => !q || (t.label + ' ' + flow(t) + ' ' + templateGroup(t)).toLowerCase().includes(q);
+      const own = mine.map((m) => ({ label: m.name, ...m.graph, here: m.here })).filter(hit), groups = {};
+      for (const t of GRAPH_TEMPLATES.filter(hit)) (groups[templateGroup(t)] ||= []).push(t);
+      const out = [];
+      if (own.length) out.push(h('div', { class: 'ne-pcat' }, 'My saved scripts'), h('div', { class: 'ne-pgrid' }, own.map((t) => card(t, t.here ? 'saved' : 'other game'))));
+      for (const gname of TEMPLATE_GROUPS) if (groups[gname]) out.push(h('div', { class: 'ne-pcat' }, gname), h('div', { class: 'ne-pgrid' }, groups[gname].map((t) => card(t))));
+      list.replaceChildren(...(out.length ? out : [h('div', { class: 'ne-pnone' }, `No script matches “${search.value}”`)]));
+    }
+    draw();
   }
   function scriptMenu(anchor) {
     const L = opts.linked?.();
@@ -754,7 +820,7 @@ export function openNodeEditor(opts) {
     ] : [
       { cap: 'Reuse this script' },
       { icon: 'save', label: 'Save as Reusable Script…', fn: () => saveAs() },
-      { icon: 'nodes', label: 'Insert a Saved Script…', fn: () => templateMenu(anchor) },
+      { icon: 'nodes', label: 'Insert a Saved Script…', fn: () => openReady() },
     ]);
   }
   function saveAs() {
@@ -902,7 +968,7 @@ export function openNodeEditor(opts) {
   let drag = null; // {type:'pan'|'node'|'port'|'wire', ...}
   let pinch = null;
   area.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('input, select, textarea, button')) return;
+    if (e.target.closest('input, select, textarea, button, .ne-nav')) return;
     area.setPointerCapture(e.pointerId);
     ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (ptrs.size === 2) {
@@ -1013,6 +1079,6 @@ export function openNodeEditor(opts) {
     opts.onClose?.();
   }
   render();
-  requestAnimationFrame(() => fit(true));
+  requestAnimationFrame(() => { fit(true); if (opts.browse) openReady(); });
   return { close };
 }

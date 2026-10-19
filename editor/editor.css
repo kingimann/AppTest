@@ -488,7 +488,7 @@ body.playing #scenePanel .panel-tabs, body.playing #hint, body.playing #toolRail
 @keyframes nePulse { 50% { box-shadow: 0 0 0 10px rgba(143,195,255,.1), 0 0 18px var(--c); } }
 .ne-empty { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); text-align: center; color: var(--muted); width: min(80%, 320px); pointer-events: none; line-height: 1.5; }
 .ne-empty b { display: block; color: var(--text); font-size: 19px; margin-bottom: 6px; }
-.ne-hint { position: absolute; left: 12px; right: 150px; bottom: calc(env(safe-area-inset-bottom) + 14px); display: flex; align-items: center; gap: 10px;
+.ne-hint { position: absolute; left: 12px; right: 190px; bottom: calc(env(safe-area-inset-bottom) + 14px); display: flex; align-items: center; gap: 10px;
   padding: 10px 14px; background: color-mix(in srgb, var(--g1) 94%, transparent); border: 1px solid var(--g0); border-radius: 14px; font-size: 14px; color: var(--muted); min-height: 52px; }
 .ne-hint span { flex: 1; }
 .ne-hint button { height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: var(--g6); color: #fff; font-weight: 600; }
@@ -2875,3 +2875,14 @@ body.playing #playBar #pbPlay { min-width: 56px; border-radius: 12px; }
 .pair > input[type=color] { flex: 1 1 auto; min-width: 72px; height: 44px; }
 .color-wrap > .pair > input[type=color] { flex: 1 1 auto; }
 .pair > input[type=checkbox] + input[type=color] { min-width: 64px; }
+
+/* node editor: zoom buttons + map */
+.ne-nav { position: absolute; top: 10px; right: 10px; z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; touch-action: none; }
+.ne-mini { width: 132px; height: 88px; border-radius: 10px; background: rgba(16,16,20,.94); border: 1px solid rgba(255,255,255,.14); cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.ne-mini[hidden] { display: none; }
+.ne-zoom { display: flex; border-radius: 12px; overflow: hidden; background: rgba(30,30,34,.96); border: 1px solid rgba(255,255,255,.14); box-shadow: 0 4px 14px rgba(0,0,0,.35); }
+.ne-zoom button { min-width: 40px; height: 38px; border: 0; background: transparent; color: var(--text); font-size: 20px; font-weight: 600; }
+.ne-zoom .ne-zl { min-width: 52px; font-size: 13px; color: var(--muted); border-left: 1px solid rgba(255,255,255,.1); border-right: 1px solid rgba(255,255,255,.1); }
+.ne-zoom button:active { background: rgba(255,255,255,.12); }
+.ne.selecting .ne-nav, .ne.linking .ne-mini { opacity: .5; }
+.ne-ready small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }

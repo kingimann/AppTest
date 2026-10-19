@@ -45,7 +45,7 @@ Playing on a phone with a controller:
 - **Rumble.** Hits, haptic taps and *Vibrate* also rumble a controller that has motors (*Rumble with vibration*). The player's *Vibration* setting turns both off.
 - **"🎮 Controller connected"** shows briefly when one connects or drops (*"Controller connected" message*).
 - **Visual script nodes** (Input folder): *On Controller Button* (pressed, released or held; *any* gives the button in Event Value), *Controller Button Held*, *Controller Stick* (left or right: x, y, how far, angle), *Controller Trigger* (0–1), *Controller Connected*, *Playing With Controller* (to show Ⓐ instead of "tap"), *On Controller Connected* (connected / disconnected, e.g. pause when it drops) and *Controller Rumble*.
-- **iOS and Android apps** (Flutter and Kotlin exports) map controller buttons the same way. Android turns the left stick into D-pad presses for Flutter. The Kotlin export reads the sticks and triggers directly.
+- **iOS and Android apps** (Flutter and Kotlin exports) map controller buttons the same way, hide the touch controls, and pause / resume with Start and B. On Android the left stick works like the D-pad. Analog stick amounts, the right stick, triggers as amounts and controller rumble are web-only for now (in the apps the triggers read 0 or 1 and Controller Rumble buzzes the phone instead); the Kotlin export has hooks (`padAxes`, `rumble`) ready for platform code.
 
 ### Platformer moves
 

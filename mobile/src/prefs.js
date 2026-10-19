@@ -2,7 +2,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export const DEFAULT_SITE = 'https://kingimann.github.io/AppTest';
-export const prefs = { site: DEFAULT_SITE, theme: 'dark', haptics: true };
+export const prefs = { site: DEFAULT_SITE, theme: 'dark', haptics: true, editor: 'native' }; // editor: native (the app's own) or full (the web editor)
 const KEY = 'pocket.app.prefs';
 const listeners = new Set();
 export const onPrefs = (f) => { listeners.add(f); return () => listeners.delete(f); };

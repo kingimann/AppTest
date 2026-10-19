@@ -32,6 +32,15 @@ const ops = {
     const id = uid(), name = data.name || 'Imported'; await saveProject(id, { name, updated: Date.now(), json: data }); return { id };
   },
   async backup() { await fresh(); return JSON.stringify(makeBackup()); },
+  // the native editor: read a whole project, save it, or start one from a template
+  async get({ project }) { const r = (await fresh())[project]; if (!r) throw new Error('no such project'); return { id: project, name: r.name || r.json.name, json: r.json }; },
+  async save({ project, name, json }) { const all = allProjects(), r = all[project] || {}; await saveProject(project, { ...r, name: name || json.name || r.name || 'Untitled', updated: Date.now(), json }); return true; },
+  async create({ template, name }) {
+    const t = templates[template]; if (!t) throw new Error('no such template');
+    const json = JSON.parse(JSON.stringify(t)), id = uid(); json.name = name || json.name;
+    for (const lv of [json, ...(json.levels || [])]) for (const e of lv.entities || []) e.id ||= 'e' + Math.random().toString(36).slice(2, 9);
+    await saveProject(id, { name: json.name, updated: Date.now(), json }); return { id, name: json.name, json };
+  },
 };
 
 async function handle(raw) {

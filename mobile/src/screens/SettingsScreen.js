@@ -22,6 +22,11 @@ export default function SettingsScreen({ T, onSiteChanged }) {
         <Switch value={!!prefs.haptics} onValueChange={(v) => set('haptics', v)} trackColor={{ true: T.accent, false: T.line }} />
       </Card>
       <H2 T={T}>Editor</H2>
+      <Card T={T} style={{ gap: 6 }}>
+        <Text style={{ color: T.text, fontWeight: '700', fontSize: 15 }}>Open projects in</Text>
+        <View style={{ flexDirection: 'row', backgroundColor: T.card2, borderRadius: 12, padding: 3 }}>{opt('editor', 'native', 'Native editor')}{opt('editor', 'full', 'Full editor')}</View>
+        <Sub T={T}>The native editor is the app's own: Scene, Hierarchy, Inspector, Add, Console, undo and Play. The full editor has every tool (scripts, triggers, data, build settings…); the native one opens it from ⋯.</Sub>
+      </Card>
       <Card T={T} style={{ gap: 8 }}>
         <Text style={{ color: T.text, fontWeight: '700', fontSize: 15 }}>Editor address</Text>
         <Sub T={T}>The app opens Pocket Engine's editor from here (your games are saved on this phone). Change it only if you host your own copy.</Sub>

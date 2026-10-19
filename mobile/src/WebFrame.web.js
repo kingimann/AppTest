@@ -5,6 +5,7 @@ const WebFrame = forwardRef(function WebFrame({ uri, onMessage, style }, ref) {
   const frame = useRef(null);
   useImperativeHandle(ref, () => ({
     send: (m) => frame.current?.contentWindow?.postMessage(JSON.stringify(m), '*'),
+    sendScene: (m) => frame.current?.contentWindow?.postMessage(JSON.stringify(m), '*'),
     reload: () => { if (frame.current) frame.current.src = uri; },
   }));
   useEffect(() => {

@@ -69,6 +69,8 @@ struct BarAction {
 /// The App Bar's look, from the project: x (your avatar on the left, the app's name on brand pages), title position, buttons, colours.
 struct BarStyle {
     var look = "standard", brandPages = ["home"], center = false, avatar = false
+    /// The left button (back, else menu · menu · back · none); ☰ or your avatar opens the Side Menu.
+    var left = "back, else menu"
     /// The buttons sit in a filled circle ("circles"), a ring ("outlined circles") or nothing ("plain").
     var circles = "plain"
     var actions: [BarAction] = []
@@ -84,6 +86,22 @@ struct NavStyle {
     var floating: Bool { ["floating", "glass", "segmented", "dock"].contains(style) }
     var pill: Bool { ["pill", "floating", "glass", "bubble", "classic"].contains(style) }
     var solid: Bool { ["segmented", "chips"].contains(style) }
+}
+
+/// A row of the Side Menu: a page, a message, a switch for a variable (toggle), a section title or a line.
+struct MenuItem {
+    let kind: String, label: String
+    var icon = "", to = "", badge = ""
+}
+
+/// The Side Menu: its header (the signed-in person, or a title, subtitle and picture), rows, footer and colours.
+struct SideMenuStyle {
+    var side = "left", title = "", subtitle = "", avatar = "", header = "simple"
+    var social = false
+    var profilePage = "profile"
+    var items: [MenuItem] = [], footer: [MenuItem] = []
+    var footerText = "", bg = "#151826", text = "#e8eaf2", accent = "#4fa3ff", badge = "#ff3b5c"
+    var width: CGFloat = 290
 }
 
 /// The editor's own line icons (64 × 64 SVG path data: [stroked, filled]), for the App Bar and Bottom Nav. Set by the app.
@@ -222,6 +240,12 @@ final class AppState: ObservableObject {
     let collections: [Collection], stats: [Stat], tabs: [NavTab]
     let light: Palette, dark: Palette
     let bar: BarStyle, nav: NavStyle
+    /// The Side Menu (nil: the app has none), and whether it's open.
+    let menu: SideMenuStyle?
+    @Published var menuOpen = false
+    var menuOn: Bool { menu != nil && bar.left != "none" && bar.left != "back" }
+    /// The page on screen.
+    var currentPage: String { paths[min(tab, paths.count - 1)].last ?? (tabs.isEmpty ? home : tabs[tab].page) }
     @Published var vars: [String: Val] = [:]
     @Published var data: [String: [Row]] = [:]
     @Published var tab = 0
@@ -229,8 +253,8 @@ final class AppState: ObservableObject {
     @Published var openCollection: String? = nil
     @Published var openId: String? = nil
 
-    init(name: String, home: String, themeSetting: String = "follow the phone", light: Palette, dark: Palette, vars: [String: Val], tabs: [NavTab], collections: [Collection], stats: [Stat], bar: BarStyle = BarStyle(), nav: NavStyle = NavStyle()) {
-        self.name = name; self.home = home; self.themeSetting = themeSetting; self.light = light; self.dark = dark; self.bar = bar; self.nav = nav
+    init(name: String, home: String, themeSetting: String = "follow the phone", light: Palette, dark: Palette, vars: [String: Val], tabs: [NavTab], collections: [Collection], stats: [Stat], bar: BarStyle = BarStyle(), nav: NavStyle = NavStyle(), menu: SideMenuStyle? = nil) {
+        self.name = name; self.home = home; self.themeSetting = themeSetting; self.light = light; self.dark = dark; self.bar = bar; self.nav = nav; self.menu = menu
         self.tabs = tabs; self.collections = collections; self.stats = stats; self.vars = vars
         paths = Array(repeating: [], count: max(1, tabs.count))
         load()
@@ -449,6 +473,7 @@ struct PocketRoot: View {
     func page(_ name: String) -> AnyView { pages[name]?() ?? AnyView(Text("No page \(name)")) }
 
     var body: some View {
+        ZStack {
         Group {
             if app.tabs.isEmpty {
                 NavigationStack(path: $app.paths[0]) {
@@ -480,8 +505,81 @@ struct PocketRoot: View {
                 }
             }
         }
+        if app.menuOpen && app.menu != nil { PocketDrawer().transition(.move(edge: app.menu?.side == "right" ? .trailing : .leading)) }
+        }
+        .animation(.easeOut(duration: 0.25), value: app.menuOpen)
         .tint(app.light.resolve(app.nav.active) ?? app.light.accent)
         .preferredColorScheme(app.colorScheme)
+    }
+}
+
+/// The Side Menu over the app: a header, rows that open pages, send messages or switch a variable, and a footer. Tap outside to close.
+struct PocketDrawer: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    func close() { app.menuOpen = false }
+    @ViewBuilder func row(_ it: MenuItem, _ p: Palette, _ fg: Color, _ acc: Color) -> some View {
+        if it.kind == "line" { Divider().background(fg.opacity(0.2)).padding(.horizontal, 8).padding(.vertical, 6) }
+        else if it.kind == "section" { Text(it.label.uppercased()).font(.system(size: 12, weight: .heavy)).foregroundColor(fg.opacity(0.55)).padding(.leading, 12).padding(.top, 14).padding(.bottom, 4).frame(maxWidth: .infinity, alignment: .leading) }
+        else {
+            let n = it.badge.isEmpty ? 0 : Int(app.get(it.badge)?.number ?? 0), on = it.kind == "page" && it.to == app.currentPage
+            Button {
+                if it.kind == "toggle" { app.set(it.to, .b(!(app.get(it.to)?.isOn ?? false))) }
+                else if it.kind == "page" { close(); app.go(it.to) }
+                else { close(); print("TODO: the Side Menu sends \"\(it.to)\"") }
+            } label: {
+                HStack(spacing: 14) {
+                    if !it.icon.isEmpty { BarIcon(name: it.icon, size: 22) }
+                    Text(app.fill(it.label)).font(.system(size: 16, weight: .semibold)).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)
+                    if it.kind == "toggle" { Toggle("", isOn: Binding(get: { app.get(it.to)?.isOn ?? false }, set: { app.set(it.to, .b($0)) })).labelsHidden().tint(acc) }
+                    else if n > 0 { Text(n > 99 ? "99+" : String(n)).font(.system(size: 11, weight: .heavy)).foregroundColor(.white).padding(.horizontal, 7).padding(.vertical, 2).background(Capsule().fill(p.resolve(app.menu?.badge) ?? p.danger)) }
+                }
+                .foregroundColor(on ? acc : fg).padding(.horizontal, 12).frame(minHeight: 48)
+                .background(RoundedRectangle(cornerRadius: 14).fill(on ? acc.opacity(0.18) : Color.clear))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+    var body: some View {
+        let p = app.palette(scheme), m = app.menu ?? SideMenuStyle(), bg = p.resolve(m.bg) ?? p.card, fg = p.resolve(m.text) ?? p.text, acc = p.resolve(m.accent) ?? p.accent
+        ZStack(alignment: m.side == "right" ? .trailing : .leading) {
+            Color.black.opacity(0.45).ignoresSafeArea().onTapGesture { close() }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack { Spacer(); Button { close() } label: { Image(systemName: "xmark").foregroundColor(fg.opacity(0.7)).padding(10) } }
+                    if m.header != "none" {
+                        if m.social {
+                            Button { close(); app.go(m.profilePage) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Avatar(name: app.meName, seed: app.me, size: 52)
+                                    Text(app.meName).font(.system(size: 18, weight: .heavy)).foregroundColor(fg)
+                                    Text("@\(app.me)").foregroundColor(fg.opacity(0.65))
+                                }.padding(.leading, 10).padding(.bottom, 14)
+                            }.buttonStyle(.plain)
+                        } else {
+                            let tc = m.header == "banner" ? Color.white : fg
+                            VStack(alignment: .leading, spacing: 4) {
+                                if !m.avatar.isEmpty { if artIcons[m.avatar] != nil { BarIcon(name: m.avatar, size: 34).foregroundColor(tc) } else { Text(m.avatar).font(.system(size: 34)) } }
+                                Text(app.fill(m.title)).font(.system(size: 18, weight: .heavy)).foregroundColor(tc)
+                                if !m.subtitle.isEmpty { Text(app.fill(m.subtitle)).foregroundColor(tc.opacity(0.65)) }
+                            }
+                            .padding(12).frame(maxWidth: .infinity, alignment: .leading)
+                            .background(RoundedRectangle(cornerRadius: 16).fill(m.header == "banner" ? acc : Color.clear)).padding(.bottom, 8)
+                        }
+                    }
+                    ForEach(Array(m.items.enumerated()), id: \.offset) { _, it in row(it, p, fg, acc) }
+                    if !m.footer.isEmpty {
+                        Divider().background(fg.opacity(0.2)).padding(.vertical, 6)
+                        ForEach(Array(m.footer.enumerated()), id: \.offset) { _, it in row(it, p, fg, acc) }
+                    }
+                    if !m.footerText.isEmpty { Text(app.fill(m.footerText)).font(.system(size: 12)).foregroundColor(fg.opacity(0.5)).padding(.leading, 12).padding(.top, 8) }
+                }
+                .padding(.horizontal, 8)
+            }
+            .frame(maxWidth: min(m.width, 330), maxHeight: .infinity)
+            .background(bg.ignoresSafeArea())
+            .shadow(color: .black.opacity(0.3), radius: 15)
+        }
     }
 }
 
@@ -568,7 +666,8 @@ struct PocketBar: ViewModifier {
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbar {
                 if brand { ToolbarItem(placement: .principal) { Text(app.name).font(.system(size: 22, weight: .black)).foregroundColor(p.resolve(b.text) ?? p.text) } }
-                if b.avatar && !back { ToolbarItem(placement: .navigationBarLeading) { Avatar(name: app.barName.isEmpty ? "?" : app.barName, seed: "?", size: 32) } }
+                if b.avatar && !back { ToolbarItem(placement: .navigationBarLeading) { Avatar(name: app.barName.isEmpty ? "?" : app.barName, seed: "?", size: 32).onTapGesture { if app.menuOn { app.menuOpen = true } } } } // (opens the Side Menu)
+                else if app.menuOn && !back { ToolbarItem(placement: .navigationBarLeading) { Button { app.menuOpen = true } label: { BarIcon(name: "menu", sf: "line.3.horizontal", size: 22).foregroundColor(ic) } } }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
                     ForEach(Array(acts.enumerated()), id: \.offset) { _, a in
                         let n = a.badge.isEmpty ? 0 : Int(app.get(a.badge)?.number ?? 0)

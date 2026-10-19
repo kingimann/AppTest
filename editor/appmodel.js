@@ -96,9 +96,23 @@ export function appModel(game) {
     look: barP.look || 'standard', brandPages: String(barP.brandPages ?? 'home').split(',').map((x) => x.trim()).filter(Boolean),
     align: barP.titleAlign && barP.titleAlign !== 'auto' ? barP.titleAlign : barP.style === 'centered' || (barP.look && !['standard', 'facebook', 'instagram'].includes(barP.look)) ? 'center' : 'left',
     avatar: barP.leftAvatar === 'yes' || ((barP.leftAvatar || 'for the look') === 'for the look' && barP.look === 'x'),
+    left: barP.left || 'back, else menu', menuMessage: barP.menuMessage || 'menu', // (☰ / your avatar opens the Side Menu)
     circles: barP.iconStyle && barP.iconStyle !== 'for the look' ? barP.iconStyle : barP.look === 'facebook' ? 'circles' : 'plain', // icon buttons: plain, circles or outlined circles
     actions: rows(barP.actions ?? 'bell | notifications | unread\nsearch | search').map(([icon, does = '', badge = '', only = '']) => ({ icon, does, badge, only: only.split(',').map((x) => x.trim()).filter(Boolean) })).slice(0, 5),
     bg: barP.bg || '#12141f', text: barP.text || '#ffffff', icon: barP.iconColor || barP.text || '#ffffff', border: barP.border !== false, size: +barP.titleSize || 19, // (the App Bar's own default colours)
+  } : null;
+  // the Side Menu: its header and rows (a page, a message, or a switch for a variable), opened from the App Bar's avatar / ☰
+  const side = ents.map((e) => beh(e, 'uiSideBar')).find(Boolean), sideP = P(side);
+  const menuRows = (v) => String(v ?? '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+    if (l === '-') return { kind: 'line' };
+    if (l.startsWith('#')) return { kind: 'section', label: l.replace(/^#+\s*/, '') };
+    const [label = '', icon = '', to = '', badge = ''] = l.split('|').map((x) => x.trim());
+    return to.startsWith('toggle:') ? { kind: 'toggle', label, icon, var: to.slice(7) } : to.startsWith('msg:') || to.startsWith('url:') || to.startsWith('button:') ? { kind: 'msg', label, icon, msg: to, badge } : { kind: 'page', label, icon, page: to, badge };
+  });
+  const menu = side ? {
+    side: sideP.side || 'left', message: sideP.message || 'menu', title: sideP.title ?? 'My Game', subtitle: sideP.subtitle || '', avatar: sideP.avatar ?? '🙂', header: sideP.header || 'simple', social: !!sideP.social,
+    profilePage: sideP.profilePage || 'profile', items: menuRows(sideP.items), footer: menuRows(sideP.footer), footerText: sideP.footerText || '',
+    bg: sideP.bg || '#151826', text: sideP.text || '#e8eaf2', accent: sideP.accent || '#4fa3ff', badge: sideP.badgeColor || '#ff3b5c', width: +sideP.width || 290,
   } : null;
   const navStyle = navP.style || 'pill', navLabels = navP.labels && navP.labels !== 'auto' ? navP.labels : { minimal: 'never', bubble: 'selected only', 'raised center': 'always', curved: 'selected only', dock: 'never', outline: 'never' }[navStyle] || 'always';
   const navs = nav ? { style: navStyle, labels: navLabels, margin: +(navP.margin ?? 14), bar: navP.barColor || '#12141f', active: navP.activeColor || '#4fa3ff', idle: navP.idleColor || '#8b90a5', on: navP.onColor || '#ffffff' } : null; // (the Bottom Nav's own defaults)
@@ -140,7 +154,7 @@ export function appModel(game) {
   for (const p of pages) p.items.forEach(walk);
   return {
     name: game.settings?.appName || game.name || 'My App', accent: game.settings?.appAccent || '', theme: themeOf(game),
-    appBar: !!bar, bar: bars, nav: navs, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
+    appBar: !!bar, bar: bars, nav: navs, menu, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
   };
 }
 
@@ -195,6 +209,7 @@ export const ICONS = {
   mute: ['volume_off', 'speaker.slash'], repeat: ['repeat', 'repeat'], shuffle: ['shuffle', 'shuffle'], hourglass: ['hourglass_empty', 'hourglass'], podium: ['leaderboard', 'chart.bar'], news: ['newspaper', 'newspaper'],
   paw: ['pets', 'pawprint'], leaf: ['eco', 'leaf'], drop: ['water_drop', 'drop'], coffee: ['local_cafe', 'cup.and.saucer'], media: ['perm_media', 'photo.on.rectangle'],
 };
-/** The icons the App Bar and Bottom Nav show (they're drawn with the editor's own line icons). */
-export const barIcons = (model) => [...new Set([...model.tabs.map((t) => t.icon), ...(model.bar?.actions || []).flatMap((a) => (a.icon === 'theme' || /dark mode/.test(a.does) ? ['sun', 'moon', a.icon] : [a.icon]))])].filter(Boolean);
+/** The icons the App Bar, Bottom Nav and Side Menu show (they're drawn with the editor's own line icons). */
+export const barIcons = (model) => [...new Set([...model.tabs.map((t) => t.icon), ...(model.bar?.actions || []).flatMap((a) => (a.icon === 'theme' || /dark mode/.test(a.does) ? ['sun', 'moon', a.icon] : [a.icon])),
+  ...(model.menu ? ['menu', model.menu.avatar, ...[...model.menu.items, ...model.menu.footer].map((i) => i.icon)] : [])])].filter(Boolean);
 export const iconFor = (name, i) => (ICONS[String(name || '').toLowerCase()] || ICONS.circle)[i];

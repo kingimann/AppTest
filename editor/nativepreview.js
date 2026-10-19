@@ -401,7 +401,33 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       h('input', { class: 'npv-input', 'data-k': 'compose', placeholder: x.placeholder, value: show(entry.draft), oninput: (e) => { entry.draft = e.target.value; }, onkeydown: (e) => { if (e.key === 'Enter') post(); } }),
       h('button', { class: 'npv-pbtn filled small', 'data-post': '', onclick: post }, 'Post'));
   }
-  let story = null;
+  let story = null, menuOpen = false;
+  // ---------- the Side Menu: opened from the App Bar's avatar or ☰ ----------
+  const menuOn = () => !!model.menu && model.bar?.left !== 'none' && model.bar?.left !== 'back';
+  function sideMenu(P) {
+    const M = model.menu, page = (() => { const st = A.stack(); return st.length ? st[st.length - 1].page : model.tabs.length ? model.tabs[A.tab].page : model.home; })();
+    const close = () => { menuOpen = false; drawPhone(); };
+    const row = (it) => {
+      if (it.kind === 'line') return h('hr', { class: 'npv-mline' });
+      if (it.kind === 'section') return h('div', { class: 'npv-msec' }, it.label);
+      const n = it.badge ? num(A.vars[it.badge]) || 0 : 0, on = it.kind === 'page' && it.page === page;
+      return h('button', { class: 'npv-mrow' + (on ? ' on' : ''), 'data-menu': it.page || it.var || it.msg, onclick: () => {
+        if (it.kind === 'toggle') { A.set(it.var, !isOn(A.vars[it.var])); drawPhone(); return; }
+        if (it.kind === 'page') { menuOpen = false; A.go(it.page); drawPhone(); return; }
+        menuOpen = false; note = `“${it.msg}” is a message: the native code has a TODO there`; drawPhone(); } },
+        it.icon && navIcon(it.icon), h('span', {}, A.fill(it.label)),
+        it.kind === 'toggle' ? h('i', { class: 'npv-msw' + (isOn(A.vars[it.var]) ? ' on' : '') }) : n > 0 ? h('b', { class: 'npv-mbadge' }, n > 99 ? '99+' : n) : null);
+    };
+    const head = M.header === 'none' ? null : M.social
+      ? h('button', { class: 'npv-mhead', onclick: () => { menuOpen = false; A.go(M.profilePage); drawPhone(); } }, avatar(meName(), me(), 52), h('b', {}, meName()), h('small', {}, '@' + me()))
+      : h('div', { class: 'npv-mhead' + (M.header === 'banner' ? ' banner' : '') }, M.avatar && h('span', { class: 'npv-memo' }, /^[a-z][a-z-]+$/.test(M.avatar) ? navIcon(M.avatar) : M.avatar), h('b', {}, A.fill(M.title)), M.subtitle && h('small', {}, A.fill(M.subtitle)));
+    return h('div', { class: 'npv-mwrap ' + M.side, onclick: (e) => { if (e.target === e.currentTarget) close(); } },
+      h('nav', { class: 'npv-menu', style: `background:${col(M.bg, P) || P.card};color:${col(M.text, P) || P.text};--macc:${col(M.accent, P) || P.accent};--mbadge:${col(M.badge, P) || '#ff3b5c'};width:min(${M.width}px, 82%)` },
+        h('button', { class: 'npv-mclose', 'aria-label': 'Close menu', onclick: close }, '✕'), head,
+        h('div', { class: 'npv-mitems' }, M.items.map(row)),
+        M.footer.length ? h('div', { class: 'npv-mfoot' }, M.footer.map(row)) : null,
+        M.footerText && h('small', { class: 'npv-mfine' }, A.fill(M.footerText))));
+  }
   /** One bubble per person (newest first), "Your story" first. */
   function stories(x) {
     const by = new Map(); for (const r of A.query(x.collection)) if (!by.has(show(r.handle) || show(r.author))) by.set(show(r.handle) || show(r.author), r);
@@ -485,7 +511,8 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     const acts = B.actions.filter((a) => !a.only.length || a.only.includes(page.value)).reverse(); // (the first sits at the right edge)
     return h('div', { class: 'npv-bar ' + (ios || B.align === 'center' ? 'center' : 'left') + (B.border ? ' line' : '') + (B.circles === 'circles' ? ' circ' : B.circles === 'outlined circles' ? ' ocirc' : ''), style: `background:${col(B.bg, P) || P.card};color:${col(B.text, P) || P.text};--ic:${col(B.icon, P) || P.text}` },
       h('div', { class: 'npv-bl' }, stack.length ? h('button', { class: 'npv-back', 'aria-label': 'Back', onclick: () => { A.back(); drawPhone(); } }, svgIcon('back'), ios ? 'Back' : '')
-        : B.avatar ? avatar(barName() || '?', '', 32) : null),
+        : B.avatar ? h('button', { class: 'npv-mbtn', 'aria-label': 'Menu', onclick: () => { if (menuOn()) { menuOpen = true; drawPhone(); } } }, avatar(barName() || '?', '', 32))
+        : menuOn() ? h('button', { class: 'npv-back npv-mbtn', 'aria-label': 'Menu', onclick: () => { menuOpen = true; drawPhone(); } }, navIcon('menu')) : null),
       h('b', { class: 'npv-btitle' + (brand ? ' brand' : ''), style: `font-size:${B.size}px` }, brand ? model.name : A.fill(page.title)),
       h('div', { class: 'npv-br' }, acts.map((a) => { const n = a.badge ? num(A.vars[a.badge]) || 0 : 0;
         return h('button', { class: 'npv-bact', 'aria-label': a.icon, 'data-act': a.does, onclick: () => tap(a) }, navIcon(icon(a)), n > 0 && h('i', {}, n > 99 ? '99+' : n)); })));
@@ -514,6 +541,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       page.fab && h('button', { class: 'npv-fab', 'aria-label': 'Add', onclick: () => act(page.fab.action, page.fab.value, page.fab.amount) }, '+'),
       overlay(),
       model.tabs.length && !stack.length && navBar(P),
+      menuOpen && model.menu && sideMenu(P),
     ].filter((c) => c && c.nodeType));
     root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;
     if (focus) { const el = phone.querySelector(`[data-k="${CSS.escape(focus)}"]`); if (el) { el.focus(); try { el.setSelectionRange(sel[0], sel[1]); } catch { /* number inputs */ } } }

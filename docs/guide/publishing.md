@@ -212,6 +212,7 @@ What becomes native code:
 | Pages (Show If on `page`) | one widget / view per page, with Back |
 | App Bar titles | the page title in the navigation bar |
 | Bottom Nav | Flutter and Compose `NavigationBar` / SwiftUI `TabView` (badges too); floating styles (Floating, Glass, Segmented, Dock) as a rounded bar inset from the edges |
+| Side Menu | opened by the App Bar's ☰ or your avatar: a Flutter `Drawer`, a Compose / SwiftUI panel over the app, with its header (you, or a title and picture), rows that open pages, switches for variables (Dark mode…), badges, sections, lines and footer; message rows are TODOs |
 | Text with `{variables}` and `{record_field}` | text that fills them in |
 | Buttons: go to page, go back, new record, edit / delete the opened record, set / add to a variable | the same, through `app.run(...)` |
 | Data List (search, filter, sort, checkbox, open a page, swipe to delete) | `RecordList` |

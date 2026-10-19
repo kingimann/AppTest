@@ -27,7 +27,7 @@ const btnExtras = (x, sep, q) => [tokenColor(x.fill) && !x.plain && ['bg', q(x.f
 /** Where a thing sits in a card (see Pin in the runtimes). */
 export const pinArgs = (q, sep, f = (v) => v) => [['fx', f(q.fx)], ['fy', f(q.fy)], ['x', f(q.x)], ['y', f(q.y)], q.w && ['w', f(q.w)], q.h && ['h', f(q.h)], q.align && q.align !== 'center' && ['align', JSON.stringify(q.align)], q.m >= 0 && ['m', f(q.m)], q.wrap && ['wrap', f(q.wrap)], q.cells && ['cell', q.cell], q.cells && ['cells', q.cells]]
   .filter(Boolean).map(([k, v]) => `${k}${sep}${v}`).join(', ');
-export { btnExtras, tok as tokOr };
+export { btnExtras, tok as tokOr, menuTo };
 /** A thing narrower than the page, on its own line (left / centre / right). */
 export const placeOf = (x) => (x.pin && x.pin.m < 0 && x.pin.w && ['box', 'button', 'image', 'avatar'].includes(x.kind) ? { fx: x.pin.fx, w: x.kind === 'button' ? Math.max(x.pin.w, labelW(x)) : x.pin.w } : null);
 /** About how wide a button's words are (so a link like “Forgot password?” is never cut short). */
@@ -123,7 +123,12 @@ ${parts.map((c) => '        ' + c + ',').join('\n')}
 }
 
 const dartBar = (m) => { const b = m.bar; if (!b) return 'const BarStyle()';
-  return `const BarStyle(look: ${ds(b.look)}, brandPages: [${b.brandPages.map(ds).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, circles: ${ds(b.circles || 'plain')}, actions: [${b.actions.map((a) => `BarAction(${ds(a.icon)}, ${ds(a.does)}${a.badge ? `, badge: ${ds(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ds).join(', ')}]` : ''})`).join(', ')}], bg: ${ds(tok(b.bg, '@bar'))}, text: ${ds(tok(b.text, '@text'))}, icon: ${ds(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
+  return `const BarStyle(look: ${ds(b.look)}, brandPages: [${b.brandPages.map(ds).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, left: ${ds(b.left || 'back, else menu')}, circles: ${ds(b.circles || 'plain')}, actions: [${b.actions.map((a) => `BarAction(${ds(a.icon)}, ${ds(a.does)}${a.badge ? `, badge: ${ds(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ds).join(', ')}]` : ''})`).join(', ')}], bg: ${ds(tok(b.bg, '@bar'))}, text: ${ds(tok(b.text, '@text'))}, icon: ${ds(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
+/** A Side Menu row's target: the page, the message, or the variable a switch changes. */
+const menuTo = (i) => i.page ?? i.msg ?? i.var ?? '';
+const dartMenu = (m) => { const M = m.menu; if (!M) return 'null';
+  const it = (i) => `MenuItem(${ds(i.kind)}, ${ds(i.label || '')}${i.icon ? `, icon: ${ds(i.icon)}` : ''}${menuTo(i) ? `, to: ${ds(menuTo(i))}` : ''}${i.badge ? `, badge: ${ds(i.badge)}` : ''})`;
+  return `const SideMenuStyle(side: ${ds(M.side)}, title: ${ds(M.title)}, subtitle: ${ds(M.subtitle)}, avatar: ${ds(M.avatar)}, header: ${ds(M.header)}, social: ${M.social}, profilePage: ${ds(M.profilePage)}, items: [${M.items.map(it).join(', ')}], footer: [${M.footer.map(it).join(', ')}], footerText: ${ds(M.footerText)}, bg: ${ds(tok(M.bg, '@card'))}, text: ${ds(tok(M.text, '@text'))}, accent: ${ds(tok(M.accent, '@accent'))}, badge: ${ds(tok(M.badge, '#ff3b5c'))}, width: ${M.width})`; };
 const dartNav = (m) => (m.nav ? `const NavStyle(style: ${ds(m.nav.style)}, labels: ${ds(m.nav.labels || 'always')}, margin: ${+m.nav.margin || 0}, on: ${ds(tok(m.nav.on, '#ffffff'))}, bar: ${ds(tok(m.nav.bar, '@bar'))}, active: ${ds(tok(m.nav.active, '@accent'))}, idle: ${ds(tok(m.nav.idle, '@sub'))})` : 'const NavStyle()');
 
 function dartMain(model, N) {
@@ -152,6 +157,7 @@ Future<void> main() async {
     collections: const [${model.collections.map((c) => `\n      Collection(${ds(c.name)}, [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n    ' : ''}],
     bar: ${dartBar(model)},
     nav: ${dartNav(model)},
+    menu: ${dartMenu(model)},
     stats: const [${model.stats.map((s) => `\n      Stat(${ds(s.var)}, ${ds(s.collection)}, ${ds(s.how)}${s.field && s.field !== 'field' ? `, field: ${ds(s.field)}` : ''}${s.filter ? `, filter: ${ds(s.filter)}` : ''}${s.format === 'money' ? ', money: true' : ''}),`).join('')}${model.stats.length ? '\n    ' : ''}],
   );
   await app.load();
@@ -337,8 +343,11 @@ function swiftElement(x, ind) {
   }
 }
 
+const swiftMenu = (m) => { const M = m.menu; if (!M) return 'nil';
+  const it = (i) => `MenuItem(kind: ${ss(i.kind)}, label: ${ss(i.label || '')}${i.icon ? `, icon: ${ss(i.icon)}` : ''}${menuTo(i) ? `, to: ${ss(menuTo(i))}` : ''}${i.badge ? `, badge: ${ss(i.badge)}` : ''})`;
+  return `SideMenuStyle(side: ${ss(M.side)}, title: ${ss(M.title)}, subtitle: ${ss(M.subtitle)}, avatar: ${ss(M.avatar)}, header: ${ss(M.header)}, social: ${M.social}, profilePage: ${ss(M.profilePage)}, items: [${M.items.map(it).join(', ')}], footer: [${M.footer.map(it).join(', ')}], footerText: ${ss(M.footerText)}, bg: ${ss(tok(M.bg, '@card'))}, text: ${ss(tok(M.text, '@text'))}, accent: ${ss(tok(M.accent, '@accent'))}, badge: ${ss(tok(M.badge, '#ff3b5c'))}, width: ${M.width})`; };
 const swiftBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
-  return `BarStyle(look: ${ss(b.look)}, brandPages: [${b.brandPages.map(ss).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, circles: ${ss(b.circles || 'plain')}, actions: [${b.actions.map((a) => `BarAction(icon: ${ss(a.icon)}, does: ${ss(a.does)}${a.badge ? `, badge: ${ss(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ss).join(', ')}]` : ''})`).join(', ')}], bg: ${ss(tok(b.bg, '@bar'))}, text: ${ss(tok(b.text, '@text'))}, icon: ${ss(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
+  return `BarStyle(look: ${ss(b.look)}, brandPages: [${b.brandPages.map(ss).join(', ')}], center: ${b.align === 'center'}, avatar: ${b.avatar}, left: ${ss(b.left || 'back, else menu')}, circles: ${ss(b.circles || 'plain')}, actions: [${b.actions.map((a) => `BarAction(icon: ${ss(a.icon)}, does: ${ss(a.does)}${a.badge ? `, badge: ${ss(a.badge)}` : ''}${a.only.length ? `, only: [${a.only.map(ss).join(', ')}]` : ''})`).join(', ')}], bg: ${ss(tok(b.bg, '@bar'))}, text: ${ss(tok(b.text, '@text'))}, icon: ${ss(tok(b.icon, '@text'))}, border: ${b.border}, size: ${b.size})`; };
 
 function swiftPage(p, cls, model) {
   const fills = p.items.some((x) => x.fill && (x.kind === 'list' || x.kind === 'form'));
@@ -387,7 +396,8 @@ struct ${appName}: App {
         collections: [${model.collections.map((c) => `\n            Collection(name: ${ss(c.name)}, fields: [${c.fields.map(field).join(', ')}]${c.rows.length ? `, sample: [${c.rows.map(row).join(', ')}]` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}],
         stats: [${model.stats.map((s) => `\n            Stat(variable: ${ss(s.var)}, collection: ${ss(s.collection)}, how: ${ss(s.how)}${s.field && s.field !== 'field' ? `, field: ${ss(s.field)}` : ''}${s.filter ? `, filter: ${ss(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}],
         bar: ${swiftBar(model)},
-        nav: ${model.nav ? `NavStyle(style: ${ss(model.nav.style)}, bar: ${ss(tok(model.nav.bar, '@bar'))}, active: ${ss(tok(model.nav.active, '@accent'))}, idle: ${ss(tok(model.nav.idle, '@sub'))}, labels: ${ss(model.nav.labels || 'always')}, margin: ${+model.nav.margin || 0}, on: ${ss(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'}
+        nav: ${model.nav ? `NavStyle(style: ${ss(model.nav.style)}, bar: ${ss(tok(model.nav.bar, '@bar'))}, active: ${ss(tok(model.nav.active, '@accent'))}, idle: ${ss(tok(model.nav.idle, '@sub'))}, labels: ${ss(model.nav.labels || 'always')}, margin: ${+model.nav.margin || 0}, on: ${ss(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'},
+        menu: ${swiftMenu(model)}
     )
 
     init() { artIcons = [${barIcons(model).filter((n) => NAV_ART[n]).map((n) => `\n        ${ss(n)}: [${NAV_ART[n].map(ss).join(', ')}],`).join('') || ':'}${barIcons(model).some((n) => NAV_ART[n]) ? '\n    ' : ''}] } // the App Bar's and Bottom Nav's icons, drawn like the editor's

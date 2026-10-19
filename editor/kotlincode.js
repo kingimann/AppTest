@@ -4,7 +4,7 @@
 // runtime (editor/native/kotlin/Pocket.kt); anything else is a TODO placeholder.
 import { appModel, PALETTES, barIcons } from './appmodel.js';
 import { NAV_ART } from './navart.js';
-import { nativeReadme, names, listExtras, pinArgs, placeOf, btnExtras } from './nativecode.js';
+import { nativeReadme, names, listExtras, pinArgs, placeOf, btnExtras, menuTo } from './nativecode.js';
 import { pbxproj, plist } from './native.js';
 
 /** Versions that go together (built and checked with these). */
@@ -92,8 +92,11 @@ ${parts.map((c) => '        ' + c).join('\n')}
 }
 
 const tok = (c, fb) => tokenColor(c) || fb;
+const kMenu = (m) => { const M = m.menu; if (!M) return 'null';
+  const it = (i) => `MenuItem(${ks(i.kind)}, ${ks(i.label || '')}${i.icon ? `, icon = ${ks(i.icon)}` : ''}${menuTo(i) ? `, to = ${ks(menuTo(i))}` : ''}${i.badge ? `, badge = ${ks(i.badge)}` : ''})`;
+  return `SideMenuStyle(side = ${ks(M.side)}, title = ${ks(M.title)}, subtitle = ${ks(M.subtitle)}, avatar = ${ks(M.avatar)}, header = ${ks(M.header)}, social = ${M.social}, profilePage = ${ks(M.profilePage)}, items = listOf(${M.items.map(it).join(', ')}), footer = listOf(${M.footer.map(it).join(', ')}), footerText = ${ks(M.footerText)}, bg = ${ks(tok(M.bg, '@card'))}, text = ${ks(tok(M.text, '@text'))}, accent = ${ks(tok(M.accent, '@accent'))}, badge = ${ks(tok(M.badge, '#ff3b5c'))}, width = ${Math.round(M.width)})`; };
 const kBar = (m) => { const b = m.bar; if (!b) return 'BarStyle()';
-  return `BarStyle(look = ${ks(b.look)}, brandPages = listOf(${b.brandPages.map(ks).join(', ')}), center = ${b.align === 'center'}, avatar = ${b.avatar}, circles = ${ks(b.circles || 'plain')}, actions = listOf(${b.actions.map((a) => `BarAction(${ks(a.icon)}, ${ks(a.does)}${a.badge ? `, badge = ${ks(a.badge)}` : ''}${a.only.length ? `, only = listOf(${a.only.map(ks).join(', ')})` : ''})`).join(', ')}), bg = ${ks(tok(b.bg, '@bar'))}, text = ${ks(tok(b.text, '@text'))}, icon = ${ks(tok(b.icon, '@text'))}, border = ${b.border}, size = ${Math.round(b.size)})`; };
+  return `BarStyle(look = ${ks(b.look)}, brandPages = listOf(${b.brandPages.map(ks).join(', ')}), center = ${b.align === 'center'}, avatar = ${b.avatar}, left = ${ks(b.left || 'back, else menu')}, circles = ${ks(b.circles || 'plain')}, actions = listOf(${b.actions.map((a) => `BarAction(${ks(a.icon)}, ${ks(a.does)}${a.badge ? `, badge = ${ks(a.badge)}` : ''}${a.only.length ? `, only = listOf(${a.only.map(ks).join(', ')})` : ''})`).join(', ')}), bg = ${ks(tok(b.bg, '@bar'))}, text = ${ks(tok(b.text, '@text'))}, icon = ${ks(tok(b.icon, '@text'))}, border = ${b.border}, size = ${Math.round(b.size)})`; };
 
 function kApp(model, N, pkg) {
   const argb = (h) => '0xFF' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();
@@ -125,6 +128,7 @@ fun setupApp() {
         tabs = listOf(${model.tabs.map((t) => `\n            NavTab(${ks(t.label)}, ${NAV_ART[t.icon] ? `PocketIcons.nav(${ks(t.icon)})` : iconK(t.icon)}, ${ks(t.page)}${t.badge ? `, badge = ${ks(t.badge)}` : ''}),`).join('')}${model.tabs.length ? '\n        ' : ''}),
         collections = listOf(${model.collections.map((c) => `\n            Collection(${ks(c.name)}, listOf(${c.fields.map(field).join(', ')})${c.rows.length ? `, sample = listOf(${c.rows.map(row).join(', ')})` : ''}),`).join('')}${model.collections.length ? '\n        ' : ''}),
         bar = ${kBar(model)},
+        menu = ${kMenu(model)},
         nav = ${model.nav ? `NavStyle(${ks(model.nav.style)}, ${ks(tok(model.nav.bar, '@bar'))}, ${ks(tok(model.nav.active, '@accent'))}, ${ks(tok(model.nav.idle, '@sub'))}, labels = ${ks(model.nav.labels || 'always')}, margin = ${Math.round(+model.nav.margin || 0)}, on = ${ks(tok(model.nav.on, '#ffffff'))})` : 'NavStyle()'},
         stats = listOf(${model.stats.map((s) => `\n            Stat(${ks(s.var)}, ${ks(s.collection)}, ${ks(s.how)}${s.field && s.field !== 'field' ? `, field = ${ks(s.field)}` : ''}${s.filter ? `, filter = ${ks(s.filter)}` : ''}),`).join('')}${model.stats.length ? '\n        ' : ''}),
     )

@@ -169,7 +169,9 @@ function makeApp(model) {
 }
 
 /** opts: { game, files(kind) → Promise<[{name, data}]>, download(kind), toast(msg) } */
-export function openNativePreview({ game, files, download, toast = () => {}, host = null }) {
+export function openNativePreview({ game, files, download, toast = () => {}, host = null, onSelect = null }) {
+  // edit mode: tap a part of the app to pick it (the editor selects its object and shows it in the Inspector)
+  let editing = !!onSelect && (() => { try { return localStorage.getItem('pocket.npv.edit') !== '0'; } catch { return true; } })(), selId = null;
   const read = () => (typeof game === 'function' ? game() : game);
   /** The model, with the records saved on this device (what the editor's scene shows after you've tried the app). */
   const build = () => { const g = read(), m = appModel(g);
@@ -195,6 +197,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       seg([['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI'], ['rn', 'React Native']], kind, (k) => { kind = k; codeFiles = null; drawAll(); }),
       seg([['app', 'App'], ['code', 'Code']], view, (k) => { view = k; drawAll(); }),
       h('div', { class: 'npv-acts' },
+        onSelect && h('button', { class: 'npv-btn npv-editbtn' + (editing ? ' on' : ''), 'aria-pressed': String(editing), title: editing ? 'Editing: tap a part of the app to change it in the Inspector (tap here to use the app instead)' : 'Tap here, then tap a part of the app to change it', onclick: () => { editing = !editing; try { localStorage.setItem('pocket.npv.edit', editing ? '1' : '0'); } catch { /* private mode */ } drawHead(); drawPhone(); } }, editing ? '✎ Editing' : '✎ Edit'),
         zoom.controls,
         h('button', { class: 'npv-btn', title: 'Read the project again and start with the sample data', onclick: () => refresh(true) }, '↺ Reset'),
         h('button', { class: 'npv-btn primary', onclick: () => download(kind) }, '⬇ Download'),
@@ -204,7 +207,13 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   }
 
   // ---------- the app ----------
+  /** Every part remembers the object it's made from (data-src), so edit mode can pick it. */
   function element(x, P, entry) {
+    const n = element0(x, P, entry);
+    if (n && n.nodeType === 1 && x.src && !n.dataset.src) n.dataset.src = x.src;
+    return n;
+  }
+  function element0(x, P, entry) {
     switch (x.kind) {
       case 'text': return h('div', { class: 'npv-text', style: `font-size:${Math.round(x.size)}px;font-weight:${parseInt(x.weight, 10) || 600};color:${col(x.color, P) || P.text};text-align:${x.align || 'left'}` }, A.fill(x.value));
       case 'button': { // filled, outlined or plain (a link), in the project's colours
@@ -739,7 +748,35 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     const pg = phone.querySelector('.npv-page'); if (pg && keep && keep.page === page.value) pg.scrollTop = keep.top; // (redrawing keeps the page where it was scrolled)
     root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : kind === 'rn' ? 'React Native (Expo)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;
     if (focus) { const el = phone.querySelector(`[data-k="${CSS.escape(focus)}"]`); if (el) { el.focus(); try { el.setSelectionRange(sel[0], sel[1]); } catch { /* number inputs */ } } }
+    phone.classList.toggle('editing', editing);
+    markSel();
     if (view === 'code' && codeFiles) markPage();
+  }
+
+  // ---------- edit mode: picking parts of the app ----------
+  function markSel() {
+    for (const el of phone.querySelectorAll('.npv-sel')) el.classList.remove('npv-sel');
+    if (!selId) return;
+    const els = phone.querySelectorAll(`[data-src="${CSS.escape(selId)}"]`);
+    els.forEach((el) => el.classList.add('npv-sel'));
+    els[0]?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }
+  /** The page an object's part is on (to show it when it's picked in the editor). */
+  const pageWith = (id) => { const has = (x) => x.src === id || (x.children || []).some(has) || (x.box && has(x.box)); return model.pages.find((p) => p.items.some(has) || (p.fab && has(p.fab))); };
+  const pick = (ev) => {
+    if (!editing) return;
+    const el = ev.target.closest?.('[data-src]'); if (!el || !phone.contains(el)) return;
+    ev.preventDefault(); ev.stopPropagation();
+    if (ev.type !== 'click') return;
+    selId = el.dataset.src; markSel(); onSelect?.(selId);
+  };
+  for (const t of ['click', 'pointerdown', 'mousedown', 'touchstart']) phone.addEventListener(t, pick, { capture: true, passive: false });
+  /** The editor picked an object: light it up here (and show its page). */
+  function selectFromEditor(id) {
+    selId = id || null;
+    const pg = selId && pageWith(selId), st = A.stack(), cur = st.length ? st[st.length - 1].page : model.tabs.length ? model.tabs[A.tab].page : model.home;
+    if (pg && pg.value !== cur) { A.go(pg.value); drawPhone(); return; }
+    markSel();
   }
 
   // ---------- the code ----------
@@ -783,14 +820,14 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
     note = ''; drawAll();
   }
   let soon = 0;
-  const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 700); };
+  const refreshSoon = () => { clearTimeout(soon); soon = setTimeout(() => { if (root.isConnected) refresh(); }, 250); };
   const onKey = (e) => { if (e.key === 'Escape' && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || '')) close(); };
   let onClose = null;
   function close() { clearTimeout(soon); clearInterval(clock); zoom.stop(); root.remove(); removeEventListener('keydown', onKey); onClose?.(); }
   addEventListener('keydown', onKey);
   A.listeners.push((m) => hear(m)); for (const x of overlaysOf()) if (x.startOpen) popups.add(x);
   where.place(!!host);
-  return { root, close, get app() { return A; }, refresh, refreshSoon, go: (pg) => { A.go(pg); drawPhone(); }, set onClose(f) { onClose = f; } };
+  return { root, close, get app() { return A; }, refresh, refreshSoon, go: (pg) => { A.go(pg); drawPhone(); }, select: selectFromEditor, set onClose(f) { onClose = f; } };
 }
 
 // =============================================================================================================

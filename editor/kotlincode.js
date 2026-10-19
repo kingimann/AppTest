@@ -27,7 +27,7 @@ const kf = (v) => `${+v}f`, kd = (v) => (Number.isInteger(+v) ? `${+v}.0` : Stri
 /** Number arguments by name: Double (1.0), Float (1f) or Int (1, the rest), as the runtime's parameter is. */
 const KN = (by) => (v, k) => String((by[k] || Math.round)(v));
 
-function kElement(x, ind, fill) {
+export function kElement(x, ind, fill) {
   const pad = ' '.repeat(ind), mod = fill ? ', modifier = Modifier.weight(1f)' : '';
   switch (x.kind) {
     case 'text': return `PText(${ks(x.value)}${x.size !== 16 ? `, size = ${Math.round(x.size)}` : ''}${x.weight !== '600' ? `, weight = ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color = ${ks(tokenColor(x.color))}` : ''}${x.align && x.align !== 'left' ? `, align = ${ks(x.align)}` : ''})`;

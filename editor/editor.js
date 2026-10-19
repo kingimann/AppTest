@@ -29,14 +29,14 @@ import { storeFiles, makeZip, suggestAppId, validAppId } from './stores.js';
 import * as CM from './codemagic.js';
 import { expoFiles, BRIDGE } from './expo.js';
 import { xcodeFiles, androidFiles, xcodeShell, codeName } from './native.js';
-import { flutterNativeFiles, swiftNativeFiles, nativeReadme } from './nativecode.js';
+import { flutterNativeFiles, swiftNativeFiles, nativeReadme, dartElement, swiftElement } from './nativecode.js';
 import { appModel } from './appmodel.js';
-import { kotlinNativeFiles, kotlinGameFiles } from './kotlincode.js';
-import { reactNativeFiles } from './rncode.js';
+import { kotlinNativeFiles, kotlinGameFiles, kElement } from './kotlincode.js';
+import { reactNativeFiles, rnElement } from './rncode.js';
 import { PREFABS_2D, PREFABS_3D, OBJECTS_2D, OBJECTS_3D } from './presets.js';
 import { openNativePreview, openGamePreview } from './nativepreview.js';
 import { flutterFiles } from './flutter.js';
-import { gameReport, flutterGameFiles, kotlinGameNativeFiles } from './gamecode.js';
+import { gameReport, flutterGameFiles, kotlinGameNativeFiles, NATIVE_GAME_COMPONENTS } from './gamecode.js';
 import { STORE_CATEGORIES, LIMITS, listingSheet, privacyPolicy, itchPage, opaquePNG } from './storekit.js';
 
 const $ = (s, el = document) => el.querySelector(s);
@@ -2116,6 +2116,7 @@ function select(id, { fromScene = false } = {}) {
   if (colliderEdit && colliderEdit !== selectedId) colliderEdit = null;
   if (!hierarchySelect(prevSel, selectedId)) renderHierarchy();
   renderInspector();
+  nativeView?.select?.(selectedId); // (the native preview lights up the same part)
   updateCtxBar();
   markTabs();
   if (selectedId && fromScene && dockTab === 'hierarchy' && sheetState() !== 'peek') setDock('inspector');
@@ -4317,10 +4318,58 @@ function renderInspector() {
   }
   const pins = pinsOf(j.id).filter((pth) => inspReg.has(pth));
   if (pins.length) { const card = comp('Pinned', pins.map((pth) => control(T, pth, { ...inspReg.get(pth) })), { icon: 'flag', key: 'pinned', summary: `${pins.length} setting${pins.length === 1 ? '' : 's'}` }); card.classList.add('pinned-card'); (box.querySelector(':scope > .comp-tools') || box.querySelector(':scope > .comp'))?.before(card); }
+  const nat = nativeCard(j); if (nat) box.querySelector(':scope > .comp')?.before(nat);
+  nativeBadges(box);
   if (freshSel && foldAllPref) foldAll(box, true);
   syncFoldBtn(box);
   compJump(box);
   box.scrollTop = scrollTo;
+}
+// ---- Native code in the Inspector: how the selected part becomes Flutter, Kotlin, SwiftUI and React Native code ----
+const NATIVE_TABS = [['flutter', 'Flutter'], ['kotlin', 'Kotlin'], ['swift', 'SwiftUI'], ['rn', 'React Native']];
+const APP_SHELL = { uiAppBar: 'the App Bar', uiBottomNav: 'the Bottom Nav (tabs)', uiSideBar: 'the Side Menu', uiNotifications: 'pop-up notifications', uiShowIf: 'a page' };
+let nativeTab = 'flutter', nativeModel = { at: 0, m: null };
+/** The app as the native exports see it (worked out again at most a few times a second while you edit). */
+function nativeAppModel() {
+  if (Date.now() - nativeModel.at > 600) { try { nativeModel = { at: Date.now(), m: appModel(buildGameJSON().game) }; } catch { nativeModel = { at: Date.now(), m: null }; } }
+  return nativeModel.m;
+}
+function nativeCard(j) {
+  if (!root.settings?.app || !j.ui) return null;
+  const m = nativeAppModel(); if (!m) return null;
+  const shell = (j.behaviors || []).map((b) => b.type).find((t) => APP_SHELL[t]);
+  const find = (list) => { for (const x of list) { if (x.src === j.id) return x; const k = find([...(x.children || []), ...(x.box ? [x.box] : [])]); if (k) return k; } return null; };
+  const x = m.pages.map((p) => find([...p.items, ...(p.fab ? [p.fab] : [])])).find(Boolean);
+  if (!x && !shell) return null;
+  const types = (j.behaviors || []).map((b) => b.type), gap = m.todo.find((t) => t.name === (j.name || t.type) && types.includes(t.type));
+  const status = !x ? ['ok', `Native in every target: it's ${APP_SHELL[shell]}.`]
+    : x.kind === 'todo' ? ['bad', `A placeholder in the native code: ${Behaviors[x.type]?.label || x.type} has no native version yet.`]
+      : gap ? ['part', `Drawn as its card in the native code (its look, text and what's inside are kept): ${Behaviors[gap.type]?.label || gap.type} has no native version yet.`]
+        : ['ok', 'Native in Flutter, Kotlin, SwiftUI and React Native.'];
+  const code = () => { try { return { flutter: () => dartElement(x, 0), kotlin: () => kElement(x, 0, false), swift: () => swiftElement(x, 0), rn: () => rnElement(x, 0) }[nativeTab](); } catch (err) { return '// could not write it: ' + err.message; } };
+  const pre = x && h('pre', { class: 'nat-code' }, code());
+  const tabs = x && h('div', { class: 'seg nat-tabs' }, NATIVE_TABS.map(([k, l]) => h('button', { class: k === nativeTab ? 'on' : '', 'data-k': k, onclick: (e) => { nativeTab = k; for (const b of e.currentTarget.parentElement.children) b.classList.toggle('on', b === e.currentTarget); pre.textContent = code(); } }, l)));
+  const card = comp('Native code', [
+    h('div', { class: 'nat-status ' + status[0] }, status[0] === 'ok' ? '✓ ' : status[0] === 'part' ? '◐ ' : '○ ', status[1]),
+    tabs, pre,
+    h('div', { class: 'btns' },
+      x && h('button', { class: 'btn', onclick: async () => { try { await navigator.clipboard.writeText(pre.textContent); toast('Copied the ' + NATIVE_TABS.find((t) => t[0] === nativeTab)[1] + ' code'); } catch { toast('Select the code to copy it'); } } }, icon('copy'), 'Copy'),
+      h('button', { class: 'btn', onclick: () => { if (!nativeView) openNativeApp(); setTimeout(() => nativeView?.select?.(j.id), 400); } }, icon('play'), 'Show in the native preview')),
+    h('p', { class: 'desc' }, 'Tip: in the native preview, turn on ✎ Edit and tap any part of the app to select it here.'),
+  ], { icon: 'script', key: 'native', summary: status[0] === 'ok' ? 'native everywhere' : status[0] === 'part' ? 'drawn as its card' : 'placeholder' });
+  if (!openNative.has(j.id)) card.classList.add('closed');
+  card.querySelector('.comp-h').addEventListener('click', () => { if (card.classList.contains('closed')) openNative.delete(j.id); else openNative.add(j.id); });
+  return card;
+}
+const openNative = new Set();
+/** Games: a chip on each component saying whether the native (Flutter / Kotlin) game has it. */
+function nativeBadges(box) {
+  if (root.settings?.app || is3D()) return;
+  for (const c of box.querySelectorAll(':scope > .comp[data-key^="b"]')) {
+    const type = (c.dataset.key || '').replace(/^b\d+/, ''); if (!Behaviors[type]) continue;
+    const ok = NATIVE_GAME_COMPONENTS.has(type);
+    c.querySelector('.comp-h .t')?.append(h('span', { class: 'nat-chip ' + (ok ? 'ok' : 'no'), title: ok ? 'The native Flutter and Kotlin game has this component' : 'Not in the native Flutter / Kotlin game yet: it works in the web view projects' }, ok ? 'native' : 'web view only'));
+  }
 }
 /** A row of chips, one per component (or Game Settings section), that stays at the top of the Inspector: tap one to jump there. */
 function compJump(box) {
@@ -7237,7 +7286,9 @@ function openNativeApp() {
   nativeView?.close();
   saveNow();
   const so = nativeOpts(); if (!validAppId(so.appId)) so.appId = suggestAppId(buildOpts().author, so.name);
-  dockNative(openNativePreview({ game: () => buildGameJSON().game, host: $('#viewport'), toast, download: (kind) => exportNative(kind), files: async (kind) => (await nativeFilesFor(kind, so, buildGameJSON().game, new Uint8Array(0))).files }));
+  dockNative(openNativePreview({ game: () => buildGameJSON().game, host: $('#viewport'), toast, download: (kind) => exportNative(kind), files: async (kind) => (await nativeFilesFor(kind, so, buildGameJSON().game, new Uint8Array(0))).files,
+    onSelect: (id) => { if (!ent(id)) return; select(id); if (dockTab !== 'inspector') setDock('inspector'); } })); // (✎ Edit: tap a part of the app to change it here)
+  if (selectedId) setTimeout(() => nativeView?.select?.(selectedId), 50);
 }
 const kotlinWrapper = async () => {
   const get = (p) => fetch(new URL(p, import.meta.url)).then((r) => { if (!r.ok) throw new Error('could not load ' + p); return r; });

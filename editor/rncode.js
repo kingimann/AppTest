@@ -29,7 +29,7 @@ const COMP = {
 const NAMED = new Set(['chart', 'carousel', 'pager', 'photogrid', 'like', 'ticker', 'timer', 'skeleton', 'colors', 'keypad', 'selector', 'overlay']);
 /** Parts that fill the rest of the page (it doesn't scroll as a whole then). */
 const FILLS = ['list', 'form', 'inbox', 'chat', 'market', 'activity', 'people'];
-const SKIP = new Set(['kind', 'children', 'pin', 'start', 'fab']);
+const SKIP = new Set(['kind', 'children', 'pin', 'start', 'fab', 'src']);
 
 /** A JSX attribute: name="text", name={1}, name (true), name={{…}}. */
 const attr = (k, v) => {
@@ -42,7 +42,7 @@ const ON_BY_DEFAULT = new Set(['swipeDelete', 'doneLook', 'yours', 'border', 'va
 const attrs = (x, extra = {}) => Object.entries({ ...x, ...extra }).filter(([k, v]) => !SKIP.has(k) && v !== '' && v != null && (v !== false || ON_BY_DEFAULT.has(k)) && !(Array.isArray(v) && !v.length && k !== 'options')).map(([k, v]) => attr(k, v));
 
 /** One element as JSX (cards with things inside get their children with where each sits). */
-function rnElement(x, ind, inBox = false) {
+export function rnElement(x, ind, inBox = false) {
   const pad = ' '.repeat(ind), comp = COMP[x.kind] || 'TodoBox';
   const own = NAMED.has(x.kind) ? (({ name, type, box, ...rest }) => rest)(x) : x; // (the name and type are for placeholders; a popup's card is its child)
   const a = [...attrs(x.kind === 'todo' || !COMP[x.kind] ? { name: x.name || x.type, type: x.type || x.kind } : own), ...(inBox && x.pin ? [attr('pin', x.pin)] : [])];

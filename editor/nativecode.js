@@ -50,7 +50,7 @@ function dartValue(v) { return lit(v) ?? (v == null ? 'null' : ds(v)); }
 const SN = (v, k) => (['points', 'columns', 'lines', 'maxLength'].includes(k) ? String(Math.round(v)) : String(v));
 export const optArgs = (pairs, eq, str, num = (v) => String(v)) => pairs.filter(([, v, d]) => v != null && v !== d).map(([k, v]) => `, ${k}${eq}${typeof v === 'string' ? str(v) : typeof v === 'number' ? num(v, k) : v}`).join(''); // (num gets the name too: Kotlin's Int / Double / Float)
 
-function dartElement(x, ind) {
+export function dartElement(x, ind) {
   const pad = ' '.repeat(ind);
   switch (x.kind) {
     case 'text': return `PText(${ds(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ds(tokenColor(x.color))}` : ''}${x.align && x.align !== 'left' ? `, align: ${ds(x.align)}` : ''})`;
@@ -318,7 +318,7 @@ void main() {
 
 const swiftVal = (v) => (typeof v === 'number' ? `.n(${v})` : typeof v === 'boolean' ? `.b(${v})` : `.s(${ss(v ?? '')})`);
 
-function swiftElement(x, ind) {
+export function swiftElement(x, ind) {
   const pad = ' '.repeat(ind);
   switch (x.kind) {
     case 'text': return `PText(${ss(x.value)}${x.size !== 16 ? `, size: ${x.size}` : ''}${x.weight !== '600' ? `, weight: ${parseInt(x.weight, 10) || 600}` : ''}${tokenColor(x.color) ? `, color: ${ss(tokenColor(x.color))}` : ''}${x.align && x.align !== 'left' ? `, align: ${ss(x.align)}` : ''})`;

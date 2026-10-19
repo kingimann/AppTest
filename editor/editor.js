@@ -4044,12 +4044,31 @@ function renderInspector() {
       t === 'path' && [C('shape.path', { label: 'Path (SVG "d")', type: 'code', def: '' }), C('shape.view', { label: 'View box (x y width height)', def: '0 0 100 100' })],
       t === 'bubble' && C('shape.tail', { label: 'Tail', type: 'select', options: [['left', 'Left'], ['center', 'Middle'], ['right', 'Right']], def: 'left' }),
       t === 'blob' && C('shape.seed', { label: 'Blob shape (try numbers)', type: 'number', def: 1, step: 1 }),
+      t === 'star' && [C('shape.starPoints', { label: 'Points', type: 'number', def: 5, range: [3, 24], step: 1 }), C('shape.inner', { label: 'Point depth (inner size)', type: 'number', def: 0.4, range: [0.1, 0.95], step: 0.05 })],
+      t === 'ngon' && C('shape.sides', { label: 'Sides', type: 'number', def: 6, range: [3, 24], step: 1 }),
       t === 'emoji' && h('div', { class: 'row' }, h('label', {}, 'Sprite'), h('button', { class: 'btn', style: 'font-size:30px', onclick: () => pickEmoji((em) => { j.shape.emoji = em; changed({ inspector: true }); }) }, j.shape.emoji || '⭐', h('span', { style: 'font-size:15px' }, 'Change…'))),
       t === 'circle' || t === 'ring' ? C('shape.r', { label: 'Radius', type: 'number', def: 20 }) : [C('shape.w', { label: 'Width', type: 'number', def: 40 }), C('shape.h', { label: t === 'emoji' ? 'Size' : 'Height', type: 'number', def: 40 })],
       (t === 'rect' || ['bubble', 'ticket', 'tag', 'bookmark', 'shield', 'cut', 'wave'].includes(t)) && C('shape.radius', { label: t === 'cut' ? 'Corner cut' : 'Corner Radius', type: 'number', def: t === 'rect' ? 0 : 12, structure: true }),
       t === 'rect' && +j.shape.radius > 0 && C('shape.corners', { label: 'Rounded corners', type: 'select', options: [['', 'All four'], ['top', 'Top only'], ['bottom', 'Bottom only'], ['left', 'Left only'], ['right', 'Right only']], def: '' }),
       t !== 'emoji' && C('shape.fill', { label: 'Fill', type: 'color', optional: true }),
       t !== 'emoji' && C('shape.stroke', { label: 'Outline', type: 'color', optional: true, structure: true }),
+      C('shape.opacity', { label: 'Opacity', type: 'number', def: 1, range: [0, 1], step: 0.05 }),
+      fold('shape:adjust', 'Colour, flip, order & blend', [
+        h('div', { class: 'row' }, h('label', {}, 'Flip'), h('div', { class: 'pair' }, [['flipX', 'Left ↔ right'], ['flipY', 'Upside down']].map(([k, l]) =>
+          h('label', { class: 'chk' }, h('input', { type: 'checkbox', checked: !!j.shape[k], onchange: (e) => { if (e.target.checked) j.shape[k] = true; else delete j.shape[k]; changed(); pushHistory(); } }), l)))),
+        C('shape.rot', { label: 'Turn the shape (°, the object stays put)', type: 'number', def: 0, range: [-180, 180], step: 5 }),
+        C('shape.hue', { label: 'Hue shift (°)', type: 'number', def: 0, range: [-180, 180], step: 5 }),
+        C('shape.bright', { label: 'Brightness (%)', type: 'number', def: 100, range: [0, 200], step: 5 }),
+        C('shape.sat', { label: 'Saturation (%)', type: 'number', def: 100, range: [0, 200], step: 5, infoText: '0 = grey. Hue, brightness and saturation work on gradients, patterns and outlines too.' }),
+        C('shape.order', { label: 'Order in layer (higher = in front)', type: 'number', def: 0, step: 1, infoText: 'Draws it above or below other objects without moving it in the Hierarchy. Same number: the Hierarchy order.' }),
+        C('shape.blend', { label: 'Blend mode', type: 'select', options: [['normal', 'Normal'], ['add', 'Add (glowing light)'], ['screen', 'Screen (lighten)'], ['multiply', 'Multiply (shadow, tint)'], ['overlay', 'Overlay'], ['darken', 'Darken'], ['lighten', 'Lighten']], def: 'normal' }),
+        t !== 'emoji' && j.shape.stroke && C('shape.lineJoin', { label: 'Outline corners', type: 'select', options: [['', 'Sharp'], ['round', 'Round'], ['bevel', 'Cut']], def: '' }),
+      ], !!(j.shape.flipX || j.shape.flipY || +j.shape.rot || +j.shape.hue || (j.shape.bright != null && +j.shape.bright !== 100) || (j.shape.sat != null && +j.shape.sat !== 100) || +j.shape.order || (j.shape.blend && j.shape.blend !== 'normal'))),
+      fold('shape:anim', 'Animated look', [
+        C('shape.anim', { label: 'Animation', type: 'select', options: [['none', 'None'], ['pulse', 'Pulse (grow and shrink)'], ['blink', 'Blink'], ['spin', 'Spin'], ['wobble', 'Wobble'], ['float', 'Float up and down'], ['rainbow', 'Rainbow colours'], ['shimmer', 'Shimmer (a shine sweeps across)']], def: 'none', structure: true,
+          infoText: 'Loops while the game plays. Only the look moves: the collider and position stay put.' }),
+        j.shape.anim && j.shape.anim !== 'none' && C('shape.animSpeed', { label: 'Speed ×', type: 'number', def: 1, range: [0.1, 5], step: 0.1 }),
+      ], !!(j.shape.anim && j.shape.anim !== 'none')),
       fold('shape:more', 'More looks', [
       t !== 'emoji' && j.shape.stroke && C('shape.lineWidth', { label: 'Outline Width', type: 'number', def: 2 }),
       t !== 'emoji' && j.shape.stroke && C('shape.dash', { label: 'Dashed outline', type: 'number', def: 0, range: [0, 30], step: 1 }),
@@ -4078,6 +4097,7 @@ function renderInspector() {
       C('sprite.w', { label: 'Width', type: 'number', def: 64 }),
       C('sprite.h', { label: 'Height', type: 'number', def: 64 }),
       C('sprite.radius', { label: 'Round corners', type: 'number', def: 0, range: [0, 100], step: 1 }),
+      C('sprite.order', { label: 'Order in layer (higher = in front)', type: 'number', def: 0, step: 1 }),
       C('sprite.slice', { label: '9-slice border (px)', type: 'number', def: 0, range: [0, 128], step: 1, structure: true, infoText: 'For framed panels and buttons: the picture\'s corners stay sharp and only the middle stretches, so one image fits any size. 0 = stretch the whole picture.' }),
       j.sprite.slice > 0 && C('sprite.sliceScale', { label: 'Border size', type: 'number', def: 1, range: [0.25, 4], step: 0.25 }),
     ], { icon: 'image', key: 'sprite', menu: removeMenu(() => { delete j.sprite; changed({ structure: true }); }, 'sprite') }));
@@ -4297,6 +4317,15 @@ function renderInspector() {
       editColliderBtn(),
       h('div', { class: 'row side' }, h('label', {}, 'Material'), h('select', { onchange: (e) => { const m = MATERIALS[e.target.value]; if (m) { j.collider.bounce = m.bounce; j.collider.friction = m.friction; changed({ inspector: true }); pushHistory(); } } },
         h('option', { value: '' }, materialOf({ bounce: j.collider.bounce || 0, friction: j.collider.friction || 0, drag: 0 })), Object.keys(MATERIALS).map((k) => h('option', { value: k }, k)))),
+      !threeD && C('collider.friction', { label: 'Friction', type: 'number', def: 0, range: [0, 2], step: 0.05, infoText: 'How much things slow down sliding over it. The Material list fills this and Bounciness in one tap.' }),
+      !threeD && C('collider.bounce', { label: 'Bounciness', type: 'number', def: 0, range: [0, 1.2], step: 0.05 }),
+      !threeD && C('collider.hitPct', { label: 'Hitbox size (%)', type: 'number', def: 100, range: [20, 200], step: 5, infoText: 'Smaller than 100 makes hits forgiving (a near miss doesn’t count), bigger makes pickups easy to grab. The look doesn’t change.' }),
+      !threeD && C('collider.ignore', { label: 'Pass through tags', type: 'text', def: '', suggest: 'tags', infoText: 'Things with these tags go straight through it (e.g. player for a ghost wall, bullet for a fence).' }),
+      !threeD && fold('collider:surface', 'Surface: conveyor, bounce pad, debug', [
+        C('collider.conveyor', { label: 'Conveyor belt speed (+ right, − left)', type: 'number', def: 0, step: 20, infoText: 'Carries whatever stands on it.' }),
+        C('collider.launch', { label: 'Bounce pad launch speed (0 = off)', type: 'number', def: 0, step: 50, infoText: 'Anything landing on it is thrown up (about 900 for a big jump). The game hears a launch event.' }),
+        C('collider.debug', { label: 'Show the hitbox while playing', type: 'bool', def: false, infoText: 'A dashed outline in Play (green = solid, yellow = trigger), to see what touches what.' }),
+      ], !!(+j.collider.conveyor || +j.collider.launch || j.collider.debug)),
       !j.body && C('collider.layer', { label: 'Physics layer', type: 'select', options: layerNames().map((n, i) => [String(i), n]), def: '0' }),
       !j.body && C('collider.oneWay', { label: 'One-way platform (jump up through)', type: 'bool', def: false }),
       !j.body && h('p', { class: 'desc' }, 'On its own it\'s solid but never moves. Add a Rigidbody to make it fall and get pushed.'),
@@ -4555,7 +4584,7 @@ function openFontPicker(onPick) {
 }
 const STYLE_KEYS = { shape: ['fill', 'fill2', 'gradDir', 'stroke', 'stroke2', 'strokeDir', 'lineWidth', 'dash', 'radius', 'corners', 'glow', 'shadow', 'shadowBlur', 'shadowX', 'shadowY', 'inner', 'innerBlur', 'innerY', 'pattern', 'patternColor', 'patternSize', 'blur'], text: ['size', 'color', 'color2', 'font', 'weight', 'italic', 'case', 'spacing', 'lineHeight', 'outline', 'outlineWidth', 'shadow', 'shadowColor'], sprite: ['radius', 'slice', 'sliceScale'] };
 // ---- Shapes: a picture gallery, your own drawn or pasted shapes ----
-const SHAPE_KINDS = [['Basic', [['rect', 'Rectangle'], ['capsule', 'Capsule'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['squircle', 'Squircle'], ['cut', 'Cut corners'], ['slanted', 'Slanted'], ['triangle', 'Triangle'], ['diamond', 'Diamond'], ['pentagon', 'Pentagon'], ['hexagon', 'Hexagon'], ['octagon', 'Octagon']]],
+const SHAPE_KINDS = [['Basic', [['rect', 'Rectangle'], ['capsule', 'Capsule'], ['circle', 'Circle'], ['ellipse', 'Ellipse'], ['squircle', 'Squircle'], ['cut', 'Cut corners'], ['slanted', 'Slanted'], ['triangle', 'Triangle'], ['diamond', 'Diamond'], ['pentagon', 'Pentagon'], ['hexagon', 'Hexagon'], ['octagon', 'Octagon'], ['ngon', 'Polygon (any sides)']]],
   ['UI', [['bubble', 'Speech bubble'], ['ticket', 'Ticket'], ['tag', 'Price tag'], ['ribbon', 'Ribbon'], ['chevron', 'Step arrow'], ['bookmark', 'Bookmark'], ['shield', 'Shield'], ['wave', 'Wavy edge'], ['ring', 'Ring']]],
   ['Fun', [['star', 'Star'], ['burst', 'Starburst'], ['scallop', 'Badge'], ['heart', 'Heart'], ['blob', 'Blob'], ['cloud', 'Cloud'], ['drop', 'Drop'], ['leaf', 'Leaf'], ['bolt', 'Lightning'], ['moon', 'Moon'], ['cross', 'Plus'], ['arrow', 'Arrow']]]];
 const SHAPE_OPTIONS = () => [...SHAPE_KINDS.flatMap(([, l]) => l), ['path', 'Your own (drawn or SVG)'], ['emoji', 'Emoji (text)']];
@@ -4787,6 +4816,7 @@ function renderSceneSettings(box) {
     C('background', { label: 'Background', type: 'color' }),
     h('p', { class: 'desc' }, threeD ? 'Gravity is in Physics below: about -25 is normal.' : 'Gravity is in Physics below: 0 for top-down games, about 1600 for platformers.'),
     !threeD && vecRow(() => (project.view ||= { width: 400, height: 700 }), 'Screen Size', ['width', 'height'], [400, 700], 10),
+    !threeD && C('settings.ySort', { label: 'Lower objects draw in front (top-down depth)', type: 'bool', def: false, infoText: 'For top-down games: a character walking below a tree is drawn over it, above it behind it. Order in layer (Shape Renderer / Image) still comes first.' }),
   ], { icon: 'sun', key: 's-env' }));
   box.append(comp('Orientation', [
     orientationRow(),

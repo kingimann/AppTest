@@ -2257,6 +2257,7 @@ function collide(e, other, m) {
 /** A key's name for scripts: 'space', 'arrowup', 'a', 'enter'… (also accepts Space, Up, ArrowUp, A). */
 /** Default keys and controller buttons for the player's actions (Game Settings › Keyboard & controller changes them). */
 const KEY_DEFAULTS = { jump: 'space, pad:a', fire: 'j, enter, pad:b', dash: 'x, k, pad:x', run: 'shift, pad:rb' };
+const PAD_NAMES = ['a', 'b', 'x', 'y', 'lb', 'rb', 'lt', 'rt', 'start', 'select', 'up', 'down', 'left', 'right', 'ls', 'rs']; // (for scripts: the buttons without pad:)
 const PAD_BUTTONS = ['pad:a', 'pad:b', 'pad:x', 'pad:y', 'pad:lb', 'pad:rb', 'pad:lt', 'pad:rt', 'pad:select', 'pad:start', 'pad:ls', 'pad:rs', 'pad:up', 'pad:down', 'pad:left', 'pad:right']; // the standard layout
 export function keyName(k) {
   const q = String(k ?? '').toLowerCase();
@@ -2912,6 +2913,7 @@ export class Input {
 
   down(e) {
     this.engine.audio.unlock();
+    this.padActive = false; // a finger again: the touch controls come back
     if (!this.enabled) return;
     this.engine.onFirstGesture?.();
     const p = this.local(e);
@@ -3075,18 +3077,31 @@ export class Input {
     const st = this.engine.scene?.settings || {};
     let pad = null;
     if (st.gamepad !== false && typeof navigator !== 'undefined' && navigator.getGamepads) { try { pad = [...navigator.getGamepads()].find((q) => q && q.connected !== false) || null; } catch { pad = null; } }
-    this.padKeys ||= new Set(); this.padAxis = null;
-    const now = new Set();
+    this.padKeys ||= new Set(); this.padAxis = null; this.padAxis2 = null;
+    const now = new Set(), was = !!this.pad;
+    this.pad = pad;
+    if (!!pad !== was) { // plugged in / switched on, or gone
+      this.padConnected = !!pad; if (!pad) this.padActive = false;
+      const s = this.engine.scene; s?.emit?.('padConnect', !!pad);
+      if (pad && !this.padSeen) { this.padSeen = true; s?.emit?.('gamepad', pad.id || 'controller'); }
+      if (s && !this.engine.editing && st.padNotice !== false) s.message(pad ? '🎮 Controller connected' : 'Controller disconnected', 1.6);
+    }
     if (pad) {
-      if (!this.padSeen) { this.padSeen = true; this.engine.scene?.emit?.('gamepad', pad.id || 'controller'); }
       PAD_BUTTONS.forEach((n, i) => { const b = pad.buttons?.[i]; if (n && b && (b.pressed || b.value > 0.5)) now.add(n); });
-      const dz = clamp(+(st.gamepadDeadZone ?? 0.2), 0, 0.9); let x = +pad.axes?.[0] || 0, y = +pad.axes?.[1] || 0; const l = Math.hypot(x, y);
-      if (l < dz) { x = 0; y = 0; } else { const m = Math.min(1, (l - dz) / (1 - dz)); x = x / l * m; y = y / l * m; }
-      this.padAxis = { x, y };
+      const dz = clamp(+(st.gamepadDeadZone ?? 0.2), 0, 0.9);
+      const stick = (ax, ay) => { let x = +pad.axes?.[ax] || 0, y = +pad.axes?.[ay] || 0; const l = Math.hypot(x, y); if (l < dz) return { x: 0, y: 0 }; const m = Math.min(1, (l - dz) / (1 - dz)); return { x: x / l * m, y: y / l * m }; };
+      this.padAxis = stick(0, 1); this.padAxis2 = stick(2, 3);
+      this.padTrig = { l: +pad.buttons?.[6]?.value || 0, r: +pad.buttons?.[7]?.value || 0 };
+      if (now.size || this.padAxis.x || this.padAxis.y || this.padAxis2.x || this.padAxis2.y) this.padActive = true; // playing with the controller: the touch controls step aside
     }
     for (const k of now) if (!this.padKeys.has(k)) { this.keysDown.push(k); this.keys.add(k); }
     for (const k of this.padKeys) if (!now.has(k)) { this.keys.delete(k); this.keysUp.push(k); }
     this.padKeys = now;
+  }
+  /** A rumble on the controller (when it has motors and is being played with). */
+  rumble(ms = 120, strong = 0.6, weak = 0.4) {
+    const a = this.pad?.vibrationActuator; if (!a || !this.padActive) return false;
+    try { (a.playEffect ? a.playEffect('dual-rumble', { duration: Math.round(ms), strongMagnitude: clamp(strong, 0, 1), weakMagnitude: clamp(weak, 0, 1) }) : a.pulse?.(clamp(strong, 0, 1), ms))?.catch?.(() => {}); return true; } catch { return false; }
   }
   /** The keys (and controller buttons) for an action: Game Settings › Keyboard & controller (keyJump, keyFire, keyDash, keyRun), or the defaults. */
   binds(action) {
@@ -3202,6 +3217,7 @@ export class Audio {
       case 'win': [523, 659, 784, 1047].forEach((f, i) => T({ freq: f, dur: 0.18, delay: i * 0.1, vol: 0.1, type: 'triangle' })); break;
       case 'lose': [392, 330, 262].forEach((f, i) => T({ freq: f, to: f * 0.9, dur: 0.22, delay: i * 0.14, vol: 0.12, type: 'sawtooth' })); break;
       case 'click': T({ freq: 1200, dur: 0.04, vol: 0.05 }); break;
+      case 'tick': T({ freq: 1700, dur: 0.025, vol: 0.03 }); break; // (moving between buttons)
       default: if (name) this.play(this.clips[name] || name); // an imported sound by name, or a URL
     }
   }
@@ -5160,6 +5176,19 @@ function layoutStack(pg, scene) {
   for (const r of rows) { const d = at - r.top; for (const it of r.items) { const q = it.q, y = q._y0 + d, B = q._animBase; if (B) { q.y += y - B.y; B.y = y; } else q.y = y; q._ys = y; } at += r.bot - r.top + gap; } // (arriving with an animation: it lands in its place)
   for (const q of fill) q.marginTop = rows.length ? at : q.marginTop; // the feed fills what is left under them
 }
+/** The controller's highlight on a menu: a glowing outline around the button it's on. */
+function drawPadFocus(engine) {
+  if (!engine.padFocus || !engine.input?.padActive) return;
+  const r = (engine.padRects || []).find((t) => t.key === engine.padFocus); if (!r) return;
+  const sb = typeof r.key === 'string' && r.key.startsWith('s:') ? (engine.screenBtns || []).find((q) => 's:' + q.id === r.key) : null; // (the built-in screens' buttons move as they animate in)
+  const x = sb ? sb.x + sb.w / 2 : r.x, y = sb ? sb.y + sb.h / 2 : r.y, w = (sb ? sb.w : r.w) + 10, h = (sb ? sb.h : r.h) + 10;
+  const ctx = engine.uiCtx, t = (performance.now() - (engine.padPulse || 0)) / 1000, grow = Math.max(0, 1 - t * 4) * 6;
+  ctx.save(); ctx.setTransform(engine.uiDpr, 0, 0, engine.uiDpr, 0, 0);
+  ctx.strokeStyle = THEME?.accent || '#8fc3ff'; ctx.lineWidth = 3; ctx.shadowColor = ctx.strokeStyle; ctx.shadowBlur = 10 + Math.sin(performance.now() / 250) * 4;
+  ctx.globalAlpha = 0.85 + Math.sin(performance.now() / 250) * 0.15;
+  ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x - w / 2 - grow, y - h / 2 - grow, w + grow * 2, h + grow * 2, Math.min(16, h / 2)) : ctx.rect(x - w / 2, y - h / 2, w, h); ctx.stroke();
+  ctx.restore();
+}
 /** Controls drawn on the canvas (the title / pause / end screens' buttons, the pause and sound buttons) get real, labelled, invisible buttons on top,
  * so screen readers and the keyboard can find and press them. They let taps through, so touch and mouse play is unchanged. */
 const A11Y_NAMES = { start: 'Play', resume: 'Resume', restart: 'Restart', sound: 'Sound', app: 'Back to app', mods: 'Mods', share: 'Share score', next: 'Next level', again: 'Play again', menu: 'Menu' };
@@ -5273,10 +5302,11 @@ function renderUI(engine, scene) {
   if (scene.state === 'play' && !engine.paused && !scene.loading && !scene.modal) { // (a Loading Screen, side menu or popup hides the touch controls)
     ctx.save();
     ctx.globalAlpha = clamp((+scene.settings.controlsOpacity || 1) * (engine.prefs?.opacity ?? 1), 0.1, 1);
-    const st = scene.settings, useStick = st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
+    const st = scene.settings, padHide = inp.padActive && st.padHideTouch !== false, useStick = !padHide && st.joystick && (!st.controls || st.controls === 'auto' || st.controls === 'joystick');
     if (useStick) drawJoystick(ctx, engine, scene, inp, tint, pulse);
     for (const b of inp.buttons) {
-      if (b.hidden || b.off) continue; // UI Touch Buttons draw themselves (a pause button is off on app pages)
+      if (b.hidden || b.off) continue;
+      if (padHide && b.action !== 'pause' && b.action !== 'mute') continue; // (a controller is being used: only pause and sound stay) // UI Touch Buttons draw themselves (a pause button is off on app pages)
       if (b.hotbar) { // square inventory slot: block colour, white frame when picked, count in the corner
         const x = b.x - b.w / 2, y = b.y - b.h / 2;
         ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, b.w, b.h);
@@ -22533,6 +22563,15 @@ Object.assign(NODE_TYPES, {
   onKey: { cat: 'Input', label: 'On Key', outs: ['then'], params: [txt('key', 'Space', 'key (Space, Up, A, Enter…)'), opt('when', ['pressed', 'released', 'held'], 'pressed', 'when')] },
   keyHeld: { cat: 'Input', label: 'Key Is Held', value: 'bool', params: [txt('key', 'Space', 'key')] },
   keyAxis: { cat: 'Input', label: 'Arrow Keys / WASD', value: 'number', params: [opt('axis', ['left / right', 'up / down'], 'left / right', 'axis')] },
+  // game controllers (Bluetooth / USB, on phones too)
+  onPadButton: { cat: 'Input', label: 'On Controller Button', outs: ['then'], params: [opt('button', [...PAD_NAMES, 'any'], 'a', 'button'), opt('when', ['pressed', 'released', 'held'], 'pressed', 'when')] },
+  padHeld: { cat: 'Input', label: 'Controller Button Held', value: 'bool', params: [opt('button', [...PAD_NAMES, 'any'], 'a', 'button')] },
+  padStick: { cat: 'Input', label: 'Controller Stick', value: 'number', params: [opt('stick', ['left', 'right'], 'left', 'stick'), opt('give', ['x (left / right)', 'y (up / down)', 'push (0–1)', 'angle (degrees)'], 'x (left / right)', 'give')] },
+  padTrigger: { cat: 'Input', label: 'Controller Trigger', value: 'number', params: [opt('trigger', ['right (RT)', 'left (LT)'], 'right (RT)', 'trigger')] },
+  padConnected: { cat: 'Input', label: 'Controller Connected', value: 'bool' },
+  usingPad: { cat: 'Input', label: 'Playing With Controller', value: 'bool' },
+  onPadConnect: { cat: 'Input', label: 'On Controller Connected', outs: ['connected', 'disconnected'] },
+  padRumble: { cat: 'Input', label: 'Controller Rumble', exec: true, outs: ['then'], params: [num('strength', 0.6, 'strength (0–1)'), num('seconds', 0.25, 'seconds')] },
   tiltValue: { cat: 'Input', label: 'Phone Tilt', value: 'number', params: [opt('axis', ['left / right', 'forward / back'], 'left / right', 'axis')] },
   calibrateTilt: { cat: 'Input', label: 'Calibrate Tilt', exec: true, outs: ['then'] },
   onShake: { cat: 'Input', label: 'On Phone Shaken', outs: ['then'] },
@@ -23966,6 +24005,11 @@ registerBehavior('graph', {
         case 'clock': { const d = new Date(); switch (P('part')) { case 'minute': return d.getMinutes(); case 'second': return d.getSeconds(); case 'weekday (0 = Sun)': return d.getDay(); case 'day of month': return d.getDate(); case 'month': return d.getMonth() + 1; case 'year': return d.getFullYear(); case 'day of year': return Math.floor((d - new Date(d.getFullYear(), 0, 0)) / 864e5); case 'seconds since 1970': return Math.floor(d.getTime() / 1000); default: return d.getHours(); } }
         case 'timeSince': { const t = +store.get(savedVarKey(s, '@time.' + (P('key') || 'lastPlayed')), 0); return t ? Math.max(0, (Date.now() - t) / 1000) : 0; }
         case 'keyHeld': return s.engine.input.keys.has(keyName(P('key')));
+        case 'padHeld': { const k = s.engine.input.keys, b = P('button') || 'a'; return b === 'any' ? [...k].some((q) => q.startsWith('pad:')) : k.has('pad:' + b); }
+        case 'padStick': { const inp = s.engine.input, a = (P('stick') === 'right' ? inp.padAxis2 : inp.padAxis) || { x: 0, y: 0 }, g = P('give') || ''; return g.startsWith('y') ? a.y : g.startsWith('push') ? Math.min(1, Math.hypot(a.x, a.y)) : g.startsWith('angle') ? (a.x || a.y ? Math.atan2(a.y, a.x) * 180 / Math.PI : 0) : a.x; }
+        case 'padTrigger': { const t = s.engine.input.padTrig || { l: 0, r: 0 }; return String(P('trigger')).startsWith('left') ? t.l : t.r; }
+        case 'padConnected': return !!s.engine.input.padConnected;
+        case 'usingPad': return !!s.engine.input.padActive;
         case 'keyAxis': { const k = s.engine.input.keys, has = (...a) => a.some((q) => k.has(q)); return P('axis') === 'up / down' ? (has('arrowdown', 's') ? 1 : 0) - (has('arrowup', 'w') ? 1 : 0) : (has('arrowright', 'd') ? 1 : 0) - (has('arrowleft', 'a') ? 1 : 0); }
         case 'tiltValue': { const inp = s.engine.input; inp.wantMotion = true; const t = inp.tiltAxis; return t ? (P('axis') === 'forward / back' ? t.y : t.x) : 0; }
         case 'dragAmount': { const d = s.engine.input.drag; return P('axis') === 'y' ? d.dy : P('axis') === 'distance' ? Math.hypot(d.dx, d.dy) : d.dx; }
@@ -24566,6 +24610,7 @@ registerBehavior('graph', {
         case 'groupAdd': case 'groupRemove': { const g2 = s.find(P('group')), w = P('who'), t = w === 'other' ? ctx.other : w === 'object' ? s.find(P('object')) : e; if (!g2 || !t) break; if (n.type === 'groupAdd') g2._groupAdd?.(t, +I('weight') || 1, +I('radius') || 0); else g2._groupRemove?.(t); break; }
         case 'camPriority': { const c = s.find(P('camera')); if (c) c.data.camPriority = +I('priority') || 0; break; }
         case 'camTarget': { const c = s.find(P('camera')); if (c) c.data.camTarget = P('tag') || null; break; }
+        case 'padRumble': { const k = clamp(+P('strength') || 0.6, 0, 1); if (s.engine.prefs?.vibration !== false) s.engine.input.rumble((+P('seconds') || 0.25) * 1000, k, k * 0.7); break; }
         case 'camImpulse': { const k = +I('strength') || 12; if (P('from') === 'everywhere') { s.camera.shake = Math.max(s.camera.shake, k); s.engine.vibrate(Math.min(60, k * 3)); } else s.impulse(k, e); break; }
         case 'camNoise': { const c = s.find(P('camera')); if (c) c.data.camNoise = +I('amount') || 0; break; }
         case 'camRecenter': s.find(P('camera'))?._camRecenter?.(); break;
@@ -24954,8 +24999,10 @@ registerBehavior('graph', {
           const hit = list.find((q) => q.visible && inp.taps.some((t) => hitTest(s, q, t.x, t.y)));
           if (hit) follow(n, 'then', { s, e, other: hit, steps: 0 });
         }
-        if (has('onKey', 'onShake', 'onScreenTouch')) {
+        if (has('onKey', 'onShake', 'onScreenTouch', 'onPadButton', 'onPadConnect')) {
           for (const n of g.nodes) {
+            if (n.type === 'onPadButton') { const b = param(n, 'button') || 'a', w = param(n, 'when'), list = w === 'held' ? [...inp.keys] : w === 'released' ? inp.keysUp : inp.keysDown, k = list.find((q) => b === 'any' ? q.startsWith('pad:') : q === 'pad:' + b); if (k) follow(n, 'then', { s, e, steps: 0, dt, eventValue: k.slice(4) }); continue; }
+            if (n.type === 'onPadConnect') { const on = !!inp.padConnected, was = state.get(n.id + ':pc'); state.set(n.id + ':pc', on); if (was !== undefined && was !== on) follow(n, on ? 'connected' : 'disconnected', { s, e, steps: 0 }); continue; }
             if (n.type === 'onKey') { const k = keyName(param(n, 'key')), w = param(n, 'when'); if (w === 'held' ? inp.keys.has(k) : (w === 'released' ? inp.keysUp : inp.keysDown).includes(k)) follow(n, 'then', { s, e, steps: 0, dt }); }
             else if (n.type === 'onShake' && inp.shook) follow(n, 'then', { s, e, steps: 0 });
             else if (n.type === 'onScreenTouch' && inp.downs.length) {
@@ -26245,7 +26292,11 @@ export class Engine {
   /** Show a notification: { type, title, text, icon, image, buttons: 'Label > message, …', duration }. */
   notify(o) { return this.notifier.push(o); }
   /** Buzz the phone (ms or a pattern). Player Settings › Vibration turns it off; muting sound doesn't. */
-  vibrate(p, style) { if (this.prefs?.vibration === false || this.editing) return false; return Haptics.play(p, style); }
+  vibrate(p, style) {
+    if (this.prefs?.vibration === false || this.editing) return false;
+    if (this.input?.padActive && this.scene?.settings?.padRumble !== false) { const ms = Array.isArray(p) ? p.filter((_, i) => i % 2 === 0).reduce((a, b) => a + (+b || 0), 0) : +p || 18; if (ms >= 12) this.input.rumble(Math.max(40, ms * 2), clamp(ms / 40, 0.2, 1), clamp(ms / 60, 0.1, 0.8)); } // (tiny UI ticks don't rumble)
+    return Haptics.play(p, style);
+  }
 
   frame(now) {
     if (!this.running) return;
@@ -26291,6 +26342,7 @@ export class Engine {
     this.navTick(s);
     s.stepSprings(dt * (s.settings.motionSpeed > 0 ? +s.settings.motionSpeed : 1));
     if (this.paused !== this._wasPaused) { if (this._wasPaused !== undefined && !this.editing) s.emit('pauseChanged', !!this.paused); this._wasPaused = this.paused; } // On Paused / Resumed nodes
+    this.padNav(s, dt);
     this.online.update(dt);
     this.notifier.taps(inp); // taps on a notification's card or buttons don't reach the game
     if (s.snack && this.snackRect && inp.taps.length) { // the snackbar's action (Undo…)
@@ -26366,6 +26418,60 @@ export class Engine {
     if (s.kids.length) s.syncHierarchy(false);
   }
 
+  /** What a controller can move between on a menu: the built-in screens' buttons, or tappable UI (buttons, cards…) on screen. */
+  padTargets(s, playing) {
+    const out = [];
+    for (const r of this.screenBtns || []) out.push({ key: 's:' + r.id, x: r.x + r.w / 2, y: r.y + r.h / 2, w: r.w, h: r.h });
+    if (out.length) return out;
+    const menu = s.modal?.ui ? s.modal : s.tapOwner?.ui && !s.tapOwner.dead ? s.tapOwner : null;
+    if (playing && !menu && !appPageNow(s) && s.settings?.padUiNav !== 'always') return out; // playing: the D-pad and A move and jump the player
+    const W = this.width, H = this.height, k = uiK(this.safe);
+    for (const e of s.tapTargets || []) {
+      if (!e.ui || e.dead || e.visible === false) continue;
+      const o = uiOrigin(e, W, H, this.safe), ex = e.extents(), x = o.x + (e.x + (ex.ox || 0)) * k, y = o.y + (e.y + (ex.oy || 0)) * k;
+      if (!hitTest(s, e, x, y)) continue; // hidden, on another screen, under an open menu
+      out.push({ key: e, x, y, w: (ex.sphere ? ex.r : ex.hx) * 2 * k, h: (ex.sphere ? ex.r : ex.hy) * 2 * k });
+    }
+    return out.sort((a, b) => a.y - b.y || a.x - b.x);
+  }
+  /** A game controller on menus: the D-pad or left stick moves a highlight between buttons, A presses it, B goes back, Start pauses / resumes. */
+  padNav(s, dt) {
+    const inp = this.input, st = s.settings || {};
+    if (!inp.padActive || this.editing || st.padMenus === false) { this.padFocus = null; return; }
+    const kd = inp.keysDown, hit = (q) => kd.includes(q), eat = (q) => { const i = kd.indexOf(q); if (i >= 0) kd.splice(i, 1); };
+    const playing = s.state === 'play' && !this.paused && !s.loading;
+    if (hit('pad:start') && (this.paused || (playing && !appPageNow(s) && !s.modal))) { inp.justPressed.add('btn:pause'); this.padFocus = null; return; } // Start: pause / resume
+    if (hit('pad:b')) {
+      if (this.paused) { inp.justPressed.add('btn:pause'); return; } // B: back to the game
+      if (typeof document !== 'undefined' && this.root?.querySelector('[data-pocket-sheet]:not([data-closing])')) { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); return; } // (and closes a sheet)
+    }
+    const T = this.padTargets(s, playing);
+    this.padRects = T;
+    if (!T.length) { this.padFocus = null; if (!playing && !s.loading && (hit('pad:a') || hit('pad:start'))) inp.injectTap(this.width / 2, this.height / 2); return; } // (a screen with no buttons: A does what a tap does)
+    let cur = T.find((t) => t.key === this.padFocus);
+    if (!cur) { cur = T[0]; this.padFocus = cur.key; this.padPulse = performance.now(); }
+    // which way: a D-pad press, or the stick pushed (repeating while held)
+    let dx = (hit('pad:right') ? 1 : 0) - (hit('pad:left') ? 1 : 0), dy = (hit('pad:down') ? 1 : 0) - (hit('pad:up') ? 1 : 0);
+    for (const q of ['pad:up', 'pad:down', 'pad:left', 'pad:right']) eat(q);
+    const a = inp.padAxis || { x: 0, y: 0 }, far = Math.hypot(a.x, a.y) > 0.6;
+    if (!dx && !dy && far) {
+      this.padRep = (this.padRep ?? 0) - dt;
+      if (!this.padHeld || this.padRep <= 0) { if (Math.abs(a.x) > Math.abs(a.y)) dx = Math.sign(a.x); else dy = Math.sign(a.y); this.padRep = this.padHeld ? 0.16 : 0.4; }
+    }
+    this.padHeld = far; if (!far) this.padRep = 0;
+    if (dx || dy) {
+      let best = null, bs = Infinity;
+      for (const t of T) {
+        if (t === cur) continue;
+        const ox = t.x - cur.x, oy = t.y - cur.y, along = ox * dx + oy * dy;
+        if (along <= 4) continue;
+        const sc = along + Math.abs(ox * dy - oy * dx) * 2;
+        if (sc < bs) { bs = sc; best = t; }
+      }
+      if (best) { this.padFocus = best.key; cur = best; this.padPulse = performance.now(); this.audio.sfx('tick'); }
+    }
+    if (hit('pad:a') || (!playing && hit('pad:start'))) { eat('pad:a'); inp.injectTap(cur.x, cur.y); this.vibrate(8); }
+  }
   /** Which button of the built-in title / pause / end screens a tap is on (null: somewhere else). */
   screenHit(t) {
     if (!t) return null;
@@ -26438,7 +26544,7 @@ export class Engine {
       layoutUI(this, this.scene); // nav bars for this screen
       const c = this.uiCtx; c.save(); if (F.clip) { c.beginPath(); c.rect(F.clip.x, F.clip.y, F.clip.w, F.clip.h); c.clip(); } // what's off the game's screen stays hidden
       try { renderUI(this, this.scene); } finally { c.restore(); [this.width, this.height, this.safe, this.uiView] = keep; }
-    } else { renderUI(this, this.scene); syncA11y(this); }
+    } else { renderUI(this, this.scene); drawPadFocus(this); syncA11y(this); }
     this.onRenderUI?.(this.uiCtx, this.scene);
     if (this.photoWanted) { const cbs = this.photoWanted; this.photoWanted = null; try { const c = document.createElement('canvas'); c.width = this.canvas.width; c.height = this.canvas.height; const g = c.getContext('2d'); g.drawImage(this.canvas, 0, 0); if (this.uiCanvas) g.drawImage(this.uiCanvas, 0, 0, c.width, c.height); const url = c.toDataURL('image/png'); for (const f of cbs) f(url); } catch { for (const f of cbs) f(null); } } // Take Photo: the frame just drawn, game + UI
   }

@@ -58,7 +58,7 @@ function elementOf(e, kids, todo, ctx = {}) {
   if ((b = B('uiCounter'))) { const p = P(b); return { kind: 'text', value: `${p.prefix || ''}{${p.var || 'score'}}${p.suffix || ''}`, size: text?.size || 32, weight: String(text?.weight || '800'), color: text?.color || '', align: text?.align || 'center' }; }
   if (e.bar) return { kind: 'bar', var: e.bar.var || 'xp', max: +e.bar.max || 100, h: +e.bar.h || 12, fill: color(e.bar.fill) || '@accent', bg: color(e.bar.bg) || '@line', radius: e.bar.radius ?? 6 };
   if ((b = B('uiList'))) { const p = P(b); if ((p.source || 'these items') === 'these items') return { kind: 'items', items: String(p.items || '').split('\n').map((s) => s.trim()).filter(Boolean) }; }
-  // components with a Flutter and Kotlin version (SwiftUI and React Native show a placeholder for them for now: LATER_KINDS)
+  // more components: charts, carousels, swipe pages, timers, keypads, popups… (each export has its own version)
   const named = (b, more) => ({ name: e.name || b.type, type: b.type, ...more });
   const th = (v, game, token = '') => { const c = color(v); return !c || c.toLowerCase() === game ? token : c; }; // (the component's game colour, untouched → the app's theme colour)
   const yes = (v, d = true) => (v == null || v === '' ? d : v !== false && v !== 'false' && v !== 'no');
@@ -188,16 +188,9 @@ export function appModel(game) {
   for (const p of pages) p.items.forEach(walk);
   return {
     name: game.settings?.appName || game.name || 'My App', accent: game.settings?.appAccent || '', theme: themeOf(game),
-    appBar: !!bar, bar: bars, nav: navs, menu, notify: ctx.notify || null, later: laterOf(pages), tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
+    appBar: !!bar, bar: bars, nav: navs, menu, notify: ctx.notify || null, tabs: tabs.filter((t) => pages.some((p) => p.value === t.page)), pages, home, titles, collections, stats, vars, todo,
   };
 }
-
-/** The kinds only the Flutter and Kotlin code have so far: SwiftUI and React Native draw a placeholder for them. */
-export const LATER_KINDS = new Set(['chart', 'carousel', 'pager', 'photogrid', 'like', 'ticker', 'timer', 'skeleton', 'colors', 'keypad', 'selector', 'overlay']);
-const laterOf = (pages) => { const out = []; const walk = (x) => { if (LATER_KINDS.has(x.kind)) out.push({ name: x.name, type: x.type }); (x.children || []).forEach(walk); (x.box?.children || []).forEach(walk); };
-  for (const p of pages) { p.items.forEach(walk); if (p.fab) walk(p.fab); } return out; };
-/** The parts a target's code shows as placeholders: kind is flutter, kotlin, swift or rn. */
-export const todoFor = (model, kind) => (kind === 'flutter' || kind === 'kotlin' ? model.todo : [...model.todo, ...model.later]);
 
 /** Light or dark, the way the editor decides: the darkMode variable, else the theme picked, else (none picked) the background's brightness. */
 function themeOf(game) {

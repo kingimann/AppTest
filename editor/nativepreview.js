@@ -2,7 +2,7 @@
 // code, right in the editor. The preview runs the same model and the same rules as the native runtimes (lib/pocket.dart,
 // Pocket.kt, Pocket.swift): pages, tabs, back, Data Lists, Forms, stats, {variables}. Material look for Flutter and Kotlin,
 // iOS look for SwiftUI. Nothing is compiled here: Download gives the real project.
-import { appModel, PALETTES, LATER_KINDS } from './appmodel.js';
+import { appModel, PALETTES } from './appmodel.js';
 import { names, labelW } from './nativecode.js';
 import { SPRITE_ART } from '../engine/pocket.js';
 
@@ -248,8 +248,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       case 'achievements': return achievements();
       case 'trending': return trending(x);
       case 'chart': case 'carousel': case 'pager': case 'photogrid': case 'like': case 'ticker': case 'timer': case 'skeleton': case 'colors': case 'keypad': case 'selector': case 'overlay':
-        if (kind === 'flutter' || kind === 'kotlin') return more(x, P, entry);
-      // falls through: SwiftUI and React Native have a placeholder for these for now
+        return more(x, P, entry);
       default: return h('div', { class: 'npv-todo' }, h('b', {}, x.name), h('small', {}, `${x.type}: a TODO placeholder in the native code`));
     }
   }
@@ -510,7 +509,7 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
   }
   function act(action, value, amount) { const msg = A.run(action, value, amount); note = msg; drawPhone(); }
 
-  // ---------- more components (Flutter and Kotlin): charts, carousels, swipe pages, timers, keypads, popups, notifications ----------
+  // ---------- more components: charts, carousels, swipe pages, timers, keypads, popups, notifications ----------
   let live = new Map(), popups = new Set(), toasts = [];
   /** Each component's own state (a timer's time, a carousel's card), kept while the page redraws. */
   const stateOf = (x, init) => { if (!live.has(x)) live.set(x, init()); return live.get(x); };
@@ -734,8 +733,8 @@ export function openNativePreview({ game, files, download, toast = () => {}, hos
       overlay(),
       model.tabs.length && !stack.length && navBar(P),
       menuOpen && model.menu && sideMenu(P),
-      (kind === 'flutter' || kind === 'kotlin') && popupLayer(P, entry),
-      (kind === 'flutter' || kind === 'kotlin') && toastLayer(P),
+      popupLayer(P, entry),
+      toastLayer(P),
     ].filter((c) => c && c.nodeType));
     const pg = phone.querySelector('.npv-page'); if (pg && keep && keep.page === page.value) pg.scrollTop = keep.top; // (redrawing keeps the page where it was scrolled)
     root.querySelector('.npv-note').textContent = note || `Running the ${kind === 'swift' ? 'SwiftUI' : kind === 'kotlin' ? 'Kotlin (Compose)' : kind === 'rn' ? 'React Native (Expo)' : 'Flutter'} app's rules: tap around, add and edit records. ${kind === 'swift' ? 'iOS look' : 'Material look (Android and iOS)'}.`;

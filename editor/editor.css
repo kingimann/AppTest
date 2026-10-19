@@ -2801,3 +2801,6 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .npv-quest em u { display: block; height: 100%; }
 .npv-quest.ok span { opacity: .5; text-decoration: line-through; }
 .npv-quest small { font-size: 12px; font-weight: 800; opacity: .8; }
+/* the game preview holds an iframe: WebKit (Safari, iPhone) applies CSS zoom to the iframe's page a second time, so the game
+   filled only part of the phone. Scale it with a transform instead (the margins give back the space the scaling frees). */
+.npv-phone.game { zoom: 1; transform: scale(var(--npv-zoom, 1)); transform-origin: top center; margin: 0 calc(380px * (var(--npv-zoom, 1) - 1) / 2) calc(740px * (var(--npv-zoom, 1) - 1)); }

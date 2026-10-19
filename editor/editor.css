@@ -2760,3 +2760,44 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 .nat-chip { margin-left: 6px; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 8px; vertical-align: middle; letter-spacing: .2px; }
 .nat-chip.ok { background: rgba(60, 207, 122, .18); color: #3ccf7a; }
 .nat-chip.no { background: rgba(255, 176, 46, .16); color: #ffb02e; }
+/* native preview: game-style parts in apps (shop, daily reward, prize wheel, skill button, radial menu, level map, quest log) */
+.npv-gi { font-size: 30px; line-height: 1; }
+.npv-shop { display: grid; gap: 10px; }
+.npv-shopcard { border: 0; border-radius: 16px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 3px; font: inherit; cursor: pointer; min-height: 150px; justify-content: center; }
+.npv-shop.list .npv-shopcard { flex-direction: row; min-height: 64px; text-align: left; }
+.npv-shop.list .npv-shopcard b { flex: 1; }
+.npv-shopcard small { opacity: .6; font-size: 11px; }
+.npv-buy { font-style: normal; color: #fff; font-weight: 900; font-size: 13px; padding: 7px 12px; border-radius: 99px; margin-top: 6px; }
+.npv-dgrid { display: grid; gap: 8px; }
+.npv-dday { position: relative; border: 0; border-radius: 14px; aspect-ratio: .9; display: flex; flex-direction: column; align-items: center; justify-content: space-evenly; font: inherit; }
+.npv-dday small { font-size: 11px; font-weight: 800; opacity: .75; }
+.npv-dday.done .npv-gi { opacity: .5; }
+.npv-dday i { position: absolute; top: 5px; right: 5px; width: 18px; height: 18px; border-radius: 50%; color: #fff; font-style: normal; font-size: 11px; display: grid; place-items: center; }
+.npv-dnote { display: block; text-align: center; margin-top: 8px; font-weight: 800; opacity: .7; }
+.npv-wheel { position: relative; border-radius: 50%; margin: 0 auto; padding: 8px; box-sizing: border-box; }
+.npv-wdisc { width: 100%; height: 100%; border-radius: 50%; border: 0; position: relative; cursor: pointer; }
+.npv-wdisc i { position: absolute; left: 50%; top: 50%; font-style: normal; font-weight: 900; font-size: 13px; translate: -50% -50%; }
+.npv-wpin { position: absolute; left: 50%; top: -6px; translate: -50% 0; color: #fff; font-size: 24px; text-shadow: 0 2px 4px #0006; }
+.npv-skill { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.npv-skill button { position: relative; border: 0; border-radius: 50%; display: grid; place-items: center; overflow: hidden; cursor: pointer; }
+.npv-skill button.sq { border-radius: 25%; }
+.npv-sweep { position: absolute; inset: 0; display: grid; place-items: center; color: #fff; font-style: normal; font-weight: 900; font-size: 22px; }
+.npv-radial { position: relative; display: grid; place-items: center; width: max-content; margin: 0 auto; }
+.npv-rdim { position: fixed; inset: 0; z-index: 4; }
+.npv-rbtn, .npv-ritem { border: 0; border-radius: 50%; display: grid; place-items: center; cursor: pointer; z-index: 5; }
+.npv-ritem { position: absolute; width: 60px; height: 60px; font: inherit; }
+.npv-ritem small { font-size: 9px; font-weight: 800; }
+.npv-levelmap.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.npv-levelmap.path { display: flex; flex-direction: column-reverse; overflow: auto; gap: 18px; }
+.npv-lvl { border: 0; background: none; display: flex; flex-direction: column; align-items: center; gap: 2px; font: inherit; color: inherit; }
+.npv-lvl b { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 19px; }
+.npv-lvl.cur b { width: 60px; height: 60px; }
+.npv-quests { padding: 12px; border-radius: 18px; display: flex; flex-direction: column; gap: 10px; }
+.npv-qtitle { font-size: 17px; }
+.npv-quest { display: flex; align-items: center; gap: 10px; }
+.npv-quest > i { width: 24px; height: 24px; border-radius: 50%; background: rgba(127,127,127,.18); color: #fff; font-style: normal; display: grid; place-items: center; flex: none; }
+.npv-quest > div { flex: 1; display: flex; flex-direction: column; gap: 5px; }
+.npv-quest em { display: block; height: 6px; border-radius: 3px; background: rgba(127,127,127,.18); overflow: hidden; }
+.npv-quest em u { display: block; height: 100%; }
+.npv-quest.ok span { opacity: .5; text-decoration: line-through; }
+.npv-quest small { font-size: 12px; font-weight: 800; opacity: .8; }

@@ -2424,3 +2424,435 @@ class _PPopupState extends State<PPopup> with Listens<PPopup> {
   @override
   Widget build(BuildContext context) => const SizedBox.shrink();
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Game-style parts that work in apps too: a shop, a daily reward calendar, a prize wheel, a skill button,
+// a radial menu, a level map and a quest log (all kept in the app's variables, so games share them).
+// ---------------------------------------------------------------------------------------------------------------
+
+/// An icon from the project: an emoji (drawn as text) or one of the editor's icon names.
+Widget gameIcon(String icon, {double size = 28, Color color = Colors.white}) {
+  final emoji = icon.isNotEmpty && icon.runes.any((r) => r > 0x2000);
+  return emoji ? Text(icon, style: TextStyle(fontSize: size * 0.9, height: 1)) : barIcon(icon.isEmpty ? 'star' : icon, color: color, size: size);
+}
+
+/// 15300 → 15.3K (as the engine shows prices and amounts).
+String gameNum(num v) {
+  final a = v.abs();
+  if (a < 10000) return v == v.roundToDouble() ? v.round().toString() : v.toStringAsFixed(1);
+  for (final (n, u) in const [(1e9, 'B'), (1e6, 'M'), (1e3, 'K')]) { if (a >= n) return '${(v / n * 10).floor() / 10}$u'; }
+  return '$v';
+}
+
+class ShopItem { const ShopItem(this.name, this.icon, this.price, this.id, [this.note = '']); final String name, icon, id, note; final num price; }
+
+/// Shop: buy items with a currency variable (coins, gems). Bought ones stay owned (owned_ID) and can be equipped (equipVar);
+/// ids starting with item: are given each time (a give message for the game's inventory).
+class PShop extends StatefulWidget {
+  const PShop(this.items, {super.key, this.currency = 'coins', this.currencyIcon = '🪙', this.equipVar = 'outfit', this.layout = 'grid', this.columns = 2, this.confirm = true, this.message = 'bought', this.card = '@card', this.text = '', this.accent = '@good', this.owned = '@accent'});
+  final List<ShopItem> items;
+  final String currency, currencyIcon, equipVar, layout, message, card, text, accent, owned;
+  final int columns;
+  final bool confirm;
+  @override
+  State<PShop> createState() => _PShopState();
+}
+class _PShopState extends State<PShop> {
+  int? armed;
+  Timer? _disarm;
+  @override
+  void dispose() { _disarm?.cancel(); super.dispose(); }
+  void _tap(ShopItem it, int i) {
+    final w = widget, item = it.id.startsWith('item:');
+    final has = !item && app.get('owned_${it.id}') == true;
+    if (has) { if (w.equipVar.isNotEmpty) app.set(w.equipVar, it.id); return; }
+    final cash = nv(app.get(w.currency));
+    if (cash < it.price) { app.send('not enough'); return; }
+    if (w.confirm && armed != i) { setState(() => armed = i); _disarm?.cancel(); _disarm = Timer(const Duration(milliseconds: 2200), () { if (mounted) setState(() => armed = null); }); return; }
+    setState(() => armed = null);
+    app.set(w.currency, cash - it.price);
+    if (item) { app.send('give ${it.id.substring(5).trim()}|1'); } else { app.set('owned_${it.id}', true); if (w.equipVar.isNotEmpty) app.set(w.equipVar, it.id); }
+    if (w.message.isNotEmpty) app.send(w.message);
+  }
+  @override
+  Widget build(BuildContext context) {
+    final w = widget, p = pal(context), fg = p.resolve(w.text) ?? p.text, cash = nv(app.get(w.currency)), grid = w.layout != 'list';
+    Widget card(int i) {
+      final it = w.items[i], item = it.id.startsWith('item:'), has = !item && app.get('owned_${it.id}') == true, eq = has && w.equipVar.isNotEmpty && AppState.show(app.get(w.equipVar)) == it.id;
+      final can = cash >= it.price, isArmed = armed == i;
+      final label = eq ? '✓ Equipped' : has ? (w.equipVar.isNotEmpty ? 'Equip' : '✓ Owned') : isArmed ? 'Buy?' : '${w.currencyIcon} ${gameNum(it.price)}'.trim();
+      final ownC = p.resolve(w.owned) ?? p.accent, btn = has ? ownC.withValues(alpha: eq ? 0.35 : 0.9) : isArmed ? const Color(0xFFFF9F43) : can ? (p.resolve(w.accent) ?? const Color(0xFF3CCF7A)) : fg.withValues(alpha: 0.12);
+      final button = Container(height: 32, alignment: Alignment.center, padding: const EdgeInsets.symmetric(horizontal: 12), decoration: BoxDecoration(color: btn, borderRadius: BorderRadius.circular(16)),
+          child: Text(label, style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w900, color: has || can || isArmed ? Colors.white : fg.withValues(alpha: 0.5))));
+      final body = grid
+          ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+              gameIcon(it.icon, size: 40, color: fg), const SizedBox(height: 6),
+              Text(it.name, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: fg)),
+              if (it.note.isNotEmpty) Text(it.note, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: fg.withValues(alpha: 0.6))),
+              const SizedBox(height: 8), button,
+            ])
+          : Row(children: [
+              SizedBox(width: 48, child: Center(child: gameIcon(it.icon, size: 32, color: fg))),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.center, children: [
+                Text(it.name, style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: fg)),
+                if (it.note.isNotEmpty) Text(it.note, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: fg.withValues(alpha: 0.6))),
+              ])),
+              button,
+            ]);
+      return Semantics(button: true, label: '${it.name}, $label', child: GestureDetector(onTap: () => _tap(it, i), child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180), padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: p.resolve(w.card) ?? p.card, borderRadius: BorderRadius.circular(16), border: eq ? Border.all(color: ownC, width: 2.5) : null),
+        child: body,
+      )));
+    }
+    if (!grid) return Column(children: [for (var i = 0; i < w.items.length; i++) Padding(padding: const EdgeInsets.only(bottom: 10), child: SizedBox(height: 72, child: card(i)))]);
+    final cols = math.max(1, w.columns);
+    return LayoutBuilder(builder: (context, box) {
+      final cw = (box.maxWidth - 10 * (cols - 1)) / cols;
+      return Wrap(spacing: 10, runSpacing: 10, children: [for (var i = 0; i < w.items.length; i++) SizedBox(width: cw, height: math.min(cw * 1.2, 190), child: card(i))]);
+    });
+  }
+}
+
+class Reward { const Reward(this.label, this.icon, this.v, this.amount); final String label, icon, v; final num amount; }
+
+/// Daily Reward: a calendar of rewards, one claim a day; the streak grows when you come back (and resets if you miss a day). Kept on the phone.
+class DailyReward extends StatefulWidget {
+  const DailyReward(this.rewards, {super.key, this.resetIfMissed = true, this.columns = 4, this.message = 'daily claimed', this.card = '@card', this.text = '', this.accent = '#ffd23d', this.claimed = '@good'});
+  final List<Reward> rewards;
+  final bool resetIfMissed;
+  final int columns;
+  final String message, card, text, accent, claimed;
+  @override
+  State<DailyReward> createState() => _DailyRewardState();
+}
+class _DailyRewardState extends State<DailyReward> {
+  int streak = 0;
+  String last = '';
+  static String _day([int off = 0]) { final d = DateTime.now().add(Duration(days: off)); return '${d.year}-${d.month}-${d.day}'; }
+  @override
+  void initState() {
+    super.initState();
+    try { final s = jsonDecode(app._prefs?.getString('pocket.daily') ?? '{}') as Map; streak = nv(s['streak']).toInt(); last = '${s['last'] ?? ''}'; } catch (_) {}
+    if (widget.resetIfMissed && last.isNotEmpty && last != _day() && last != _day(-1)) streak = 0;
+    if (streak >= widget.rewards.length && last != _day()) streak = 0; // (a full week claimed: start again)
+  }
+  bool get canClaim => last != _day();
+  void _claim() {
+    if (!canClaim || streak >= widget.rewards.length) return;
+    final r = widget.rewards[streak];
+    if (r.v.startsWith('item:')) { app.send('give ${r.v.substring(5).trim()}|${r.amount}'); } else { app.set(r.v, nv(app.get(r.v)) + r.amount); }
+    setState(() { streak++; last = _day(); });
+    app._prefs?.setString('pocket.daily', jsonEncode({'streak': streak, 'last': last}));
+    app.send(widget.message);
+  }
+  @override
+  Widget build(BuildContext context) {
+    final w = widget, p = pal(context), fg = p.resolve(w.text) ?? p.text, ac = p.resolve(w.accent) ?? const Color(0xFFFFD23D), cl = p.resolve(w.claimed) ?? const Color(0xFF3CCF7A), cols = math.max(1, w.columns);
+    return Column(mainAxisSize: MainAxisSize.min, children: [
+      LayoutBuilder(builder: (context, box) {
+        final cw = (box.maxWidth - 8 * (cols - 1)) / cols;
+        return Wrap(spacing: 8, runSpacing: 8, children: [
+          for (var i = 0; i < w.rewards.length; i++)
+            Builder(builder: (_) {
+              final r = w.rewards[i], done = i < streak, today = i == streak && canClaim;
+              return Semantics(button: today, label: '${r.label}: ${r.amount} ${r.v}${done ? ', claimed' : today ? ', claim' : ''}', child: GestureDetector(onTap: today ? _claim : null, child: Container(
+                width: cw, height: cw * 1.1,
+                decoration: BoxDecoration(color: done ? cl.withValues(alpha: 0.18) : p.resolve(w.card) ?? p.card, borderRadius: BorderRadius.circular(14), border: today ? Border.all(color: ac, width: 3) : null),
+                child: Stack(children: [
+                  Positioned.fill(child: Column(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [
+                    Text(r.label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg.withValues(alpha: 0.75))),
+                    Opacity(opacity: done ? 0.5 : 1, child: gameIcon(r.icon, size: cw * 0.34, color: fg)),
+                    Text(today ? 'CLAIM' : '${r.v.startsWith('item:') ? '×' : '+'}${gameNum(r.amount)}', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, color: today ? ac : fg)),
+                  ])),
+                  if (done) Positioned(top: 5, right: 5, child: CircleAvatar(radius: 9, backgroundColor: cl, child: const Icon(Icons.check, size: 13, color: Colors.white))),
+                ]),
+              )));
+            }),
+        ]);
+      }),
+      if (!canClaim) Padding(padding: const EdgeInsets.only(top: 8), child: Text('Come back tomorrow!', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: fg.withValues(alpha: 0.7)))),
+    ]);
+  }
+}
+
+class WheelSeg { const WheelSeg(this.label, this.color, this.amount, [this.w = 1]); final String label, color; final num amount, w; }
+
+/// Prize Wheel: spins when tapped (or on a message) and lands on a prize (by weight): adds it to a variable and sends a message.
+class PrizeWheel extends StatefulWidget {
+  const PrizeWheel(this.segments, {super.key, this.variable = 'coins', this.resultVar = 'prize', this.spinOn = 'tapped', this.message = 'spin', this.doneMessage = 'prize won', this.duration = 4, this.spinsVar = '', this.text = '#ffffff', this.rim = '#ffd23d', this.size = 280});
+  final List<WheelSeg> segments;
+  final String variable, resultVar, spinOn, message, doneMessage, spinsVar, text, rim;
+  final double duration, size;
+  @override
+  State<PrizeWheel> createState() => _PrizeWheelState();
+}
+class _PrizeWheelState extends State<PrizeWheel> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(vsync: this);
+  double from = 0, to = 0;
+  int win = -1;
+  void Function()? _off;
+  double get angle => from + (to - from) * Curves.easeOutQuart.transform(_c.value);
+  @override
+  void initState() { super.initState(); _off = app.listen((m) { if (m == widget.message) spin(); }); }
+  @override
+  void dispose() { _off?.call(); _c.dispose(); super.dispose(); }
+  void spin() {
+    final w = widget, S = w.segments;
+    if (_c.isAnimating || S.isEmpty) return;
+    if (w.spinsVar.isNotEmpty) { if (nv(app.get(w.spinsVar)) <= 0) return; app.set(w.spinsVar, nv(app.get(w.spinsVar)) - 1); }
+    final total = S.fold<num>(0, (n, x) => n + x.w).toDouble();
+    var r = math.Random().nextDouble() * (total == 0 ? 1 : total);
+    win = S.length - 1;
+    for (var i = 0; i < S.length; i++) { r -= S[i].w; if (r < 0) { win = i; break; } }
+    final seg = math.pi * 2 / S.length, land = -(win + 0.5) * seg + (math.Random().nextDouble() - 0.5) * seg * 0.7;
+    from = angle % (math.pi * 2);
+    to = from - ((from - land) % (math.pi * 2) + math.pi * 2) % (math.pi * 2) - math.pi * 2 * (5 + w.duration.floor());
+    _c.duration = Duration(milliseconds: (w.duration * 1000).round());
+    _c.forward(from: 0).then((_) {
+      final s = S[win];
+      if (w.variable.isNotEmpty && s.amount != 0) app.set(w.variable, nv(app.get(w.variable)) + s.amount);
+      if (w.resultVar.isNotEmpty) app.set(w.resultVar, s.label);
+      app.send(w.doneMessage);
+    });
+  }
+  @override
+  Widget build(BuildContext context) {
+    final w = widget, p = pal(context);
+    return Semantics(button: true, label: 'Prize wheel, tap to spin', child: GestureDetector(
+      onTap: w.spinOn == 'message only' ? null : spin,
+      child: SizedBox(width: w.size, height: w.size, child: AnimatedBuilder(animation: _c, builder: (context, _) => CustomPaint(painter: _WheelPainter(w.segments, angle, p.resolve(w.text) ?? Colors.white, p.resolve(w.rim) ?? const Color(0xFFFFD23D), _c.isAnimating ? -1 : win))))),
+    );
+  }
+}
+class _WheelPainter extends CustomPainter {
+  _WheelPainter(this.segs, this.angle, this.text, this.rim, this.win);
+  final List<WheelSeg> segs;
+  final double angle;
+  final Color text, rim;
+  final int win;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final c = size.center(Offset.zero), R = math.min(size.width, size.height) / 2 - 10, n = math.max(1, segs.length), seg = math.pi * 2 / n;
+    canvas.drawCircle(c, R + 8, Paint()..color = rim);
+    for (var i = 0; i < segs.length; i++) {
+      final a0 = -math.pi / 2 + i * seg + angle;
+      final col = Color(int.parse('FF${segs[i].color.replaceFirst('#', '').padRight(6, '0').substring(0, 6)}', radix: 16));
+      canvas.drawArc(Rect.fromCircle(center: c, radius: R), a0, seg, true, Paint()..color = col);
+      if (i == win) canvas.drawArc(Rect.fromCircle(center: c, radius: R), a0, seg, true, Paint()..color = const Color(0x55FFFFFF));
+      final am = a0 + seg / 2, tp = TextPainter(text: TextSpan(text: segs[i].label, style: TextStyle(color: text, fontSize: R * 0.13, fontWeight: FontWeight.w900)), textDirection: TextDirection.ltr)..layout();
+      canvas.save(); canvas.translate(c.dx + math.cos(am) * R * 0.64, c.dy + math.sin(am) * R * 0.64); canvas.rotate(am + math.pi / 2); tp.paint(canvas, Offset(-tp.width / 2, -tp.height / 2)); canvas.restore();
+    }
+    for (var i = 0; i < n * 2; i++) { final a = i * math.pi / n + angle; canvas.drawCircle(c + Offset(math.cos(a), math.sin(a)) * (R + 4), 2.5, Paint()..color = i.isOdd ? Colors.white : Colors.white54); }
+    canvas.drawCircle(c, R * 0.14, Paint()..color = rim);
+    final path = Path()..moveTo(c.dx - 12, c.dy - R - 12)..lineTo(c.dx + 12, c.dy - R - 12)..lineTo(c.dx, c.dy - R + 10)..close();
+    canvas.drawPath(path, Paint()..color = Colors.white);
+  }
+  @override
+  bool shouldRepaint(_WheelPainter o) => true;
+}
+
+/// Skill Button: tap to use (sends a message), then it cools down with a sweeping shadow; charges and a cost are optional.
+class SkillButton extends StatefulWidget {
+  const SkillButton({super.key, this.icon = '⚡', this.label = '', this.message = 'skill', this.cooldown = 3, this.charges = 1, this.costVar = '', this.cost = 10, this.shape = 'circle', this.showTime = true, this.bg = '@card', this.ring = '#7fd3ff', this.size = 72});
+  final String icon, label, message, costVar, shape, bg, ring;
+  final double cooldown, cost, size;
+  final int charges;
+  final bool showTime;
+  @override
+  State<SkillButton> createState() => _SkillButtonState();
+}
+class _SkillButtonState extends State<SkillButton> with SingleTickerProviderStateMixin {
+  late int charges = widget.charges;
+  double cd = 0;
+  late final _ticker = createTicker(_tick);
+  Duration _last = Duration.zero;
+  void _tick(Duration now) {
+    final dt = (now - _last).inMicroseconds / 1e6; _last = now;
+    if (charges < widget.charges) { setState(() { cd += dt; if (cd >= widget.cooldown) { cd = 0; charges++; } }); } else { _ticker.stop(); _last = Duration.zero; }
+  }
+  @override
+  void dispose() { _ticker.dispose(); super.dispose(); }
+  bool get afford => widget.costVar.isEmpty || nv(app.get(widget.costVar)) >= widget.cost;
+  void _use() {
+    if (charges <= 0 || !afford) return;
+    setState(() { if (charges == widget.charges) cd = 0; charges--; });
+    if (widget.costVar.isNotEmpty) app.set(widget.costVar, nv(app.get(widget.costVar)) - widget.cost);
+    app.send(widget.message);
+    if (!_ticker.isActive && widget.cooldown > 0) _ticker.start();
+  }
+  @override
+  Widget build(BuildContext context) {
+    final w = widget, p = pal(context), ready = charges > 0 && afford, f = charges == 0 && w.cooldown > 0 ? 1 - cd / w.cooldown : 0.0;
+    final OutlinedBorder shape = w.shape == 'rounded square' ? RoundedRectangleBorder(borderRadius: BorderRadius.circular(w.size * 0.25)) : w.shape == 'hexagon' ? const StarBorder.polygon(sides: 6, rotation: 30) : const CircleBorder();
+    return Semantics(button: true, label: '${w.label.isEmpty ? w.message : w.label}${ready ? '' : ', cooling down'}', child: GestureDetector(onTap: _use, child: Column(mainAxisSize: MainAxisSize.min, children: [
+      SizedBox(width: w.size, height: w.size, child: Stack(alignment: Alignment.center, children: [
+        Container(decoration: ShapeDecoration(color: p.resolve(w.bg) ?? p.card, shape: shape, shadows: const [BoxShadow(color: Color(0x44000000), blurRadius: 8)])),
+        if (ready) Container(decoration: ShapeDecoration(shape: shape.copyWith(side: BorderSide(color: p.resolve(w.ring) ?? const Color(0xFF7FD3FF), width: 2.5)))),
+        gameIcon(w.icon, size: w.size * 0.5, color: p.text),
+        if (f > 0) ClipPath(clipper: ShapeBorderClipper(shape: shape), child: CustomPaint(size: Size.square(w.size), painter: _SweepPainter(f))),
+        if (f > 0 && w.showTime) Text('${(w.cooldown - cd).ceil()}', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: w.size * 0.32)),
+        if (w.charges > 1) Positioned(right: 0, bottom: 0, child: CircleAvatar(radius: 10, backgroundColor: p.accent, child: Text('$charges', style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w900)))),
+        if (!afford) Container(decoration: ShapeDecoration(color: const Color(0x59283CA0), shape: shape)),
+      ])),
+      if (w.label.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 4), child: Text(w.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: p.text))),
+    ])));
+  }
+}
+class _SweepPainter extends CustomPainter {
+  _SweepPainter(this.f);
+  final double f;
+  @override
+  void paint(Canvas canvas, Size size) => canvas.drawArc(Rect.fromCircle(center: size.center(Offset.zero), radius: size.width), -math.pi / 2, f * math.pi * 2, true, Paint()..color = const Color(0x8C000000));
+  @override
+  bool shouldRepaint(_SweepPainter o) => o.f != f;
+}
+
+class RadialItem { const RadialItem(this.label, this.icon, this.msg); final String label, icon, msg; }
+
+/// Radial Menu: a round button that opens a wheel of choices around it; hold and slide to one (or tap, then tap one): it sends that choice's message.
+class RadialMenu extends StatefulWidget {
+  const RadialMenu(this.items, {super.key, this.icon = '😀', this.open = 'hold and slide', this.radius = 110, this.dim = 0.35, this.labels = true, this.accent = '@accent', this.bg = '@card', this.size = 64});
+  final List<RadialItem> items;
+  final String icon, open, accent, bg;
+  final double radius, dim, size;
+  final bool labels;
+  @override
+  State<RadialMenu> createState() => _RadialMenuState();
+}
+class _RadialMenuState extends State<RadialMenu> {
+  OverlayEntry? _entry;
+  int hi = -1;
+  Offset centre = Offset.zero;
+  void _openAt() {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    centre = box.localToGlobal(box.size.center(Offset.zero));
+    _entry = OverlayEntry(builder: (ctx) => _wheel(ctx));
+    Overlay.of(context).insert(_entry!);
+  }
+  void _close([bool fire = false]) {
+    if (fire && hi >= 0 && hi < widget.items.length) app.send(widget.items[hi].msg);
+    _entry?.remove(); _entry = null; hi = -1;
+  }
+  int _pick(Offset g) {
+    final d = g - centre, l = d.distance;
+    if (l < widget.size * 0.45 || l > widget.radius * 1.6 || widget.items.isEmpty) return -1;
+    final a = (math.atan2(d.dy, d.dx) + math.pi / 2 + math.pi * 4) % (math.pi * 2), n = widget.items.length;
+    return ((a + math.pi / n) / (math.pi * 2 / n)).floor() % n;
+  }
+  Widget _wheel(BuildContext ctx) {
+    final w = widget, p = pal(context), n = math.max(1, w.items.length);
+    return Stack(children: [
+      Positioned.fill(child: GestureDetector(onTapUp: (d) { hi = _pick(d.globalPosition); _close(true); }, child: ColoredBox(color: Color.fromRGBO(0, 0, 0, w.dim)))),
+      for (var i = 0; i < w.items.length; i++)
+        Builder(builder: (_) {
+          final a = -math.pi / 2 + i * math.pi * 2 / n, at = centre + Offset(math.cos(a), math.sin(a)) * w.radius;
+          return Positioned(left: at.dx - 32, top: at.dy - 32, width: 64, height: 64, child: IgnorePointer(child: AnimatedScale(scale: hi == i ? 1.2 : 1, duration: const Duration(milliseconds: 120), child: Container(
+            decoration: BoxDecoration(color: hi == i ? (p.resolve(w.accent) ?? p.accent) : (p.resolve(w.bg) ?? p.card), shape: BoxShape.circle, boxShadow: const [BoxShadow(color: Color(0x55000000), blurRadius: 8)]),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [gameIcon(w.items[i].icon, size: 26, color: p.text), if (w.labels) Text(w.items[i].label, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: p.text))]),
+          ))));
+        }),
+    ]);
+  }
+  @override
+  void dispose() { _entry?.remove(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    final w = widget, p = pal(context);
+    final btn = Container(width: w.size, height: w.size, alignment: Alignment.center, decoration: BoxDecoration(color: p.resolve(w.bg) ?? p.card, shape: BoxShape.circle, boxShadow: const [BoxShadow(color: Color(0x44000000), blurRadius: 8)]), child: gameIcon(w.icon, size: w.size * 0.5, color: p.text));
+    if (w.open == 'tap') return Semantics(button: true, label: 'Open menu', child: GestureDetector(onTap: _openAt, child: btn));
+    return Semantics(button: true, label: 'Hold for menu', child: GestureDetector(
+      onLongPressStart: (_) => _openAt(),
+      onTapDown: (_) => _openAt(),
+      onTapUp: (_) => _close(),
+      onPanUpdate: (d) { final n = _pick(d.globalPosition); if (n != hi) { hi = n; _entry?.markNeedsBuild(); } },
+      onPanEnd: (_) => _close(true),
+      onLongPressMoveUpdate: (d) { final n = _pick(d.globalPosition); if (n != hi) { hi = n; _entry?.markNeedsBuild(); } },
+      onLongPressEnd: (_) => _close(true),
+      child: btn,
+    ));
+  }
+}
+
+/// Level Map: a path of level buttons with stars (stars_1, stars_2…) and locks (unlocked); tap an open level to play it (or send a message / set a variable).
+class LevelMap extends StatelessWidget {
+  const LevelMap({super.key, this.count = 12, this.unlockedVar = 'unlocked', this.allOpen = false, this.starsVar = 'stars_', this.layout = 'winding path', this.action = 'plays that level', this.message = 'level', this.spacing = 92, this.accent = '#ffd23d', this.node = '@accent', this.text = '', this.height = 480});
+  final int count;
+  final String unlockedVar, starsVar, layout, action, message, accent, node, text;
+  final bool allOpen;
+  final double spacing, height;
+  void _go(int n) {
+    if (action == 'sends a message') { app.send('$message $n'); app.send(message); }
+    else if (action == 'sets a variable') { app.set(message, n); }
+    else { app.set('level', n); app.send('play level $n'); app.send('play game'); }
+  }
+  @override
+  Widget build(BuildContext context) {
+    final p = pal(context), open = allOpen ? 1 << 30 : math.max(1, nv(app.get(unlockedVar)).toInt()), fg = p.resolve(text) ?? p.text;
+    Widget dot(int i) {
+      final n = i + 1, locked = n > open, cur = n == open, stars = nv(app.get('$starsVar$n')).round().clamp(0, 3);
+      return Semantics(button: !locked, label: 'Level $n${locked ? ', locked' : ', $stars stars'}', child: GestureDetector(onTap: locked ? null : () => _go(n), child: SizedBox(width: 76, height: 80, child: Column(children: [
+        Container(width: cur ? 60 : 52, height: cur ? 60 : 52, alignment: Alignment.center,
+          decoration: BoxDecoration(color: locked ? fg.withValues(alpha: 0.15) : (p.resolve(node) ?? p.accent), shape: BoxShape.circle, border: cur ? Border.all(color: p.resolve(accent) ?? const Color(0xFFFFD23D), width: 3) : null, boxShadow: locked ? null : const [BoxShadow(color: Color(0x44000000), blurRadius: 6)]),
+          child: locked ? Icon(Icons.lock, color: fg.withValues(alpha: 0.6)) : Text('$n', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 20))),
+        if (!locked) Row(mainAxisSize: MainAxisSize.min, children: [for (var s = 0; s < 3; s++) Icon(Icons.star, size: 14, color: s < stars ? (p.resolve(accent) ?? const Color(0xFFFFD23D)) : fg.withValues(alpha: 0.2))]),
+      ]))));
+    }
+    if (layout == 'grid') return Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [for (var i = 0; i < count; i++) dot(i)]);
+    return SizedBox(height: height, child: ListView.builder(
+      reverse: true, itemCount: count, itemExtent: spacing,
+      itemBuilder: (context, i) => Align(alignment: Alignment(layout == 'straight up' ? 0 : math.sin(i * 1.1) * 0.6, 0), child: dot(i)),
+    ));
+  }
+}
+
+class QuestGoal { const QuestGoal(this.text, this.v, this.target, [this.reward = '']); final String text, v, reward; final num target; }
+
+/// Quest Log: goals with progress bars; each follows a variable up to a target, ticks off when done (quest_done_N) and gives its reward ("gems 5").
+class QuestLog extends StatelessWidget {
+  const QuestLog(this.quests, {super.key, this.title = 'Quests', this.doneMessage = 'quest done', this.hideDone = true, this.text = '', this.accent = '@accent', this.done = '@good', this.bg = ''});
+  final List<QuestGoal> quests;
+  final String title, doneMessage, text, accent, done, bg;
+  final bool hideDone;
+  void _check() {
+    for (var i = 0; i < quests.length; i++) {
+      final q = quests[i], key = 'quest_done_$i';
+      if (app.get(key) == true || nv(app.get(q.v)) < q.target) continue;
+      app.set(key, true);
+      final r = q.reward.split(RegExp(r'\s+'));
+      if (r.length >= 2) app.set(r[0], nv(app.get(r[0])) + nv(r[1]));
+      app.send(doneMessage);
+    }
+  }
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _check());
+    final p = pal(context), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? p.accent, dn = p.resolve(done) ?? const Color(0xFF3CCF7A);
+    final order = [for (var i = 0; i < quests.length; i++) i];
+    if (hideDone) order.sort((a, b) => (app.get('quest_done_$a') == true ? 1 : 0) - (app.get('quest_done_$b') == true ? 1 : 0));
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: p.resolve(bg), borderRadius: BorderRadius.circular(18)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+        if (title.isNotEmpty) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w900, color: fg))),
+        for (final i in order)
+          Builder(builder: (_) {
+            final q = quests[i], ok = app.get('quest_done_$i') == true, f = (nv(app.get(q.v)) / q.target).clamp(0.0, 1.0).toDouble();
+            return Padding(padding: const EdgeInsets.symmetric(vertical: 6), child: Row(children: [
+              CircleAvatar(radius: 12, backgroundColor: ok ? dn : fg.withValues(alpha: 0.12), child: ok ? const Icon(Icons.check, size: 15, color: Colors.white) : null),
+              const SizedBox(width: 12),
+              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(q.text, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: ok ? fg.withValues(alpha: 0.5) : fg, decoration: ok ? TextDecoration.lineThrough : null)),
+                const SizedBox(height: 5),
+                ClipRRect(borderRadius: BorderRadius.circular(3), child: LinearProgressIndicator(value: ok ? 1 : f, minHeight: 6, color: ok ? dn : ac, backgroundColor: fg.withValues(alpha: 0.1))),
+              ])),
+              const SizedBox(width: 12),
+              Text(ok ? '✓' : '${gameNum(math.min(nv(app.get(q.v)), q.target))}/${gameNum(q.target)}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: fg.withValues(alpha: 0.7))),
+              if (q.reward.isNotEmpty) Padding(padding: const EdgeInsets.only(left: 8), child: Text('+${q.reward}', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: ac))),
+            ]));
+          }),
+      ]),
+    );
+  }
+}

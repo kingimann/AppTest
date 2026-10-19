@@ -24,9 +24,10 @@ const COMP = {
   chat: 'Chat', profile: 'ProfileHeader', market: 'Marketplace', activity: 'Activity', people: 'People', achievements: 'Achievements', trending: 'Trending', todo: 'TodoBox',
   chart: 'PChart', carousel: 'Carousel', pager: 'Pager', photogrid: 'PhotoGrid', like: 'LikeButton', ticker: 'Ticker', timer: 'PTimer', skeleton: 'Skeleton', colors: 'ColorSwatches',
   keypad: 'Keypad', selector: 'Selector', overlay: 'PPopup',
+  shop: 'PShop', daily: 'DailyReward', wheel: 'PrizeWheel', skill: 'SkillButton', radial: 'RadialMenu', levelmap: 'LevelMap', quests: 'QuestLog',
 };
 /** Kinds whose model carries the component's own name and type (only placeholders need them). */
-const NAMED = new Set(['chart', 'carousel', 'pager', 'photogrid', 'like', 'ticker', 'timer', 'skeleton', 'colors', 'keypad', 'selector', 'overlay']);
+const NAMED = new Set(['chart', 'carousel', 'pager', 'photogrid', 'like', 'ticker', 'timer', 'skeleton', 'colors', 'keypad', 'selector', 'overlay', 'shop', 'daily', 'wheel', 'skill', 'radial', 'levelmap', 'quests']);
 /** Parts that fill the rest of the page (it doesn't scroll as a whole then). */
 const FILLS = ['list', 'form', 'inbox', 'chat', 'market', 'activity', 'people'];
 const SKIP = new Set(['kind', 'children', 'pin', 'start', 'fab', 'src']);
@@ -38,7 +39,7 @@ const attr = (k, v) => {
   return `${k}={${JSON.stringify(v)}}`;
 };
 /** Settings that are on unless turned off (their false is written out; other false settings are just left out). */
-const ON_BY_DEFAULT = new Set(['swipeDelete', 'doneLook', 'yours', 'border', 'values', 'labels', 'grid', 'arrows', 'dots', 'autoStart', 'display', 'autoEnter', 'wrap', 'dim', 'handle']);
+const ON_BY_DEFAULT = new Set(['swipeDelete', 'doneLook', 'yours', 'border', 'values', 'labels', 'grid', 'arrows', 'dots', 'autoStart', 'display', 'autoEnter', 'wrap', 'dim', 'handle', 'confirm', 'resetIfMissed', 'showTime', 'hideDone']);
 const attrs = (x, extra = {}) => Object.entries({ ...x, ...extra }).filter(([k, v]) => !SKIP.has(k) && v !== '' && v != null && (v !== false || ON_BY_DEFAULT.has(k)) && !(Array.isArray(v) && !v.length && k !== 'options')).map(([k, v]) => attr(k, v));
 
 /** One element as JSX (cards with things inside get their children with where each sits). */

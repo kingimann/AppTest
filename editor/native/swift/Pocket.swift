@@ -2555,3 +2555,390 @@ struct ClearCover: ViewModifier {
         if #available(iOS 16.4, *) { content.presentationBackground(.clear) } else { content }
     }
 }
+
+// MARK: - Game-style parts that work in apps too: a shop, a daily reward calendar, a prize wheel, a skill button,
+// a radial menu, a level map and a quest log (all kept in the app's variables).
+
+/// An icon from the project: an emoji (drawn as text) or one of the editor's icon names.
+struct GameIcon: View {
+    let icon: String
+    var size: CGFloat = 28
+    var color: Color = .white
+    var body: some View {
+        if icon.unicodeScalars.contains(where: { $0.value > 0x2000 }) { Text(icon).font(.system(size: size * 0.9)) }
+        else { BarIcon(name: icon.isEmpty ? "star" : icon, size: size).foregroundColor(color) }
+    }
+}
+
+/// 15300 → 15.3K (as the engine shows prices and amounts).
+func gameNum(_ v: Double) -> String {
+    let a = abs(v)
+    if a < 10000 { return v == v.rounded() ? String(Int(v)) : String(format: "%.1f", v) }
+    for (n, u) in [(1e9, "B"), (1e6, "M"), (1e3, "K")] where a >= n { return String(format: "%g", (v / n * 10).rounded(.down) / 10) + u }
+    return String(v)
+}
+
+struct ShopItem: Hashable { let name, icon: String; let price: Double; let id: String; var note = "" }
+
+/// Shop: buy items with a currency variable (coins, gems). Bought ones stay owned (owned_ID) and can be equipped (equipVar).
+struct PShop: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let items: [ShopItem]
+    var currency = "coins", currencyIcon = "🪙", equipVar = "outfit", layout = "grid"
+    var columns = 2
+    var confirm = true
+    var message = "bought", card = "@card", text = "", accent = "@good", owned = "@accent"
+    @State private var armed = -1
+    init(_ items: [ShopItem], currency: String = "coins", currencyIcon: String = "🪙", equipVar: String = "outfit", layout: String = "grid", columns: Int = 2, confirm: Bool = true, message: String = "bought", card: String = "@card", text: String = "", accent: String = "@good", owned: String = "@accent") {
+        self.items = items; self.currency = currency; self.currencyIcon = currencyIcon; self.equipVar = equipVar; self.layout = layout; self.columns = columns; self.confirm = confirm; self.message = message; self.card = card; self.text = text; self.accent = accent; self.owned = owned
+    }
+    func isOwned(_ it: ShopItem) -> Bool { !it.id.hasPrefix("item:") && app.get("owned_\(it.id)") == .b(true) }
+    func tap(_ it: ShopItem, _ i: Int) {
+        if isOwned(it) { if !equipVar.isEmpty { app.set(equipVar, .s(it.id)) }; return }
+        let cash = app.get(currency)?.number ?? 0
+        if cash < it.price { app.send("not enough"); return }
+        if confirm && armed != i { armed = i; DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) { if armed == i { armed = -1 } }; return }
+        armed = -1
+        app.set(currency, .n(cash - it.price))
+        if it.id.hasPrefix("item:") { app.send("give \(it.id.dropFirst(5).trimmingCharacters(in: .whitespaces))|1") }
+        else { app.set("owned_\(it.id)", .b(true)); if !equipVar.isEmpty { app.set(equipVar, .s(it.id)) } }
+        if !message.isEmpty { app.send(message) }
+    }
+    var body: some View {
+        let p = app.palette(scheme), fg = p.resolve(text) ?? p.text, cash = app.get(currency)?.number ?? 0, grid = layout != "list"
+        let cols = Array(repeating: GridItem(.flexible(), spacing: 10), count: grid ? max(1, columns) : 1)
+        LazyVGrid(columns: cols, spacing: 10) {
+            ForEach(Array(items.enumerated()), id: \.offset) { i, it in
+                let has = isOwned(it), eq = has && !equipVar.isEmpty && app.get(equipVar)?.text == it.id, can = cash >= it.price, isArmed = armed == i
+                let label = eq ? "✓ Equipped" : has ? (equipVar.isEmpty ? "✓ Owned" : "Equip") : isArmed ? "Buy?" : "\(currencyIcon) \(gameNum(it.price))"
+                let ownC = p.resolve(owned) ?? p.accent
+                let btn: Color = has ? ownC.opacity(eq ? 0.35 : 0.9) : isArmed ? Color(red: 1, green: 0.62, blue: 0.26) : can ? (p.resolve(accent) ?? .green) : fg.opacity(0.12)
+                let button = Text(label).font(.system(size: 13.5, weight: .black)).foregroundColor(has || can || isArmed ? .white : fg.opacity(0.5)).padding(.horizontal, 12).frame(height: 32).background(Capsule().fill(btn))
+                Button { tap(it, i) } label: {
+                    Group {
+                        if grid {
+                            VStack(spacing: 4) {
+                                GameIcon(icon: it.icon, size: 40, color: fg)
+                                Text(it.name).font(.system(size: 14, weight: .heavy)).foregroundColor(fg).lineLimit(1)
+                                if !it.note.isEmpty { Text(it.note).font(.system(size: 11, weight: .semibold)).foregroundColor(fg.opacity(0.6)).lineLimit(1) }
+                                button.padding(.top, 4)
+                            }.frame(maxWidth: .infinity, minHeight: 150)
+                        } else {
+                            HStack {
+                                GameIcon(icon: it.icon, size: 32, color: fg).frame(width: 48)
+                                VStack(alignment: .leading) {
+                                    Text(it.name).font(.system(size: 15, weight: .heavy)).foregroundColor(fg)
+                                    if !it.note.isEmpty { Text(it.note).font(.system(size: 11.5, weight: .semibold)).foregroundColor(fg.opacity(0.6)) }
+                                }
+                                Spacer()
+                                button
+                            }.frame(height: 52)
+                        }
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 16).fill(p.resolve(card) ?? p.card))
+                    .overlay(RoundedRectangle(cornerRadius: 16).stroke(eq ? ownC : .clear, lineWidth: 2.5))
+                }.buttonStyle(.plain).accessibilityLabel("\(it.name), \(label)")
+            }
+        }
+    }
+}
+
+struct Reward: Hashable { let label, icon, v: String; let amount: Double }
+
+/// Daily Reward: a calendar of rewards, one claim a day; the streak grows when you come back (and resets if you miss a day). Kept on the phone.
+struct DailyReward: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let rewards: [Reward]
+    var resetIfMissed = true
+    var columns = 4
+    var message = "daily claimed", card = "@card", text = "", accent = "#ffd23d", claimed = "@good"
+    @State private var streak = 0
+    @State private var last = ""
+    init(_ rewards: [Reward], resetIfMissed: Bool = true, columns: Int = 4, message: String = "daily claimed", card: String = "@card", text: String = "", accent: String = "#ffd23d", claimed: String = "@good") {
+        self.rewards = rewards; self.resetIfMissed = resetIfMissed; self.columns = columns; self.message = message; self.card = card; self.text = text; self.accent = accent; self.claimed = claimed
+    }
+    static func day(_ off: Int = 0) -> String { let f = DateFormatter(); f.dateFormat = "yyyy-M-d"; return f.string(from: Date().addingTimeInterval(Double(off) * 86400)) }
+    var canClaim: Bool { last != DailyReward.day() }
+    func load() {
+        let s = (UserDefaults.standard.string(forKey: "pocket.daily") ?? "").split(separator: "|").map(String.init)
+        streak = Int(s.first ?? "") ?? 0; last = s.count > 1 ? s[1] : ""
+        if resetIfMissed && !last.isEmpty && last != DailyReward.day() && last != DailyReward.day(-1) { streak = 0 }
+        if streak >= rewards.count && last != DailyReward.day() { streak = 0 }
+    }
+    func claim() {
+        guard canClaim, streak < rewards.count else { return }
+        let r = rewards[streak]
+        if r.v.hasPrefix("item:") { app.send("give \(r.v.dropFirst(5))|\(gameNum(r.amount))") } else { app.set(r.v, .n((app.get(r.v)?.number ?? 0) + r.amount)) }
+        streak += 1; last = DailyReward.day()
+        UserDefaults.standard.set("\(streak)|\(last)", forKey: "pocket.daily")
+        app.send(message)
+    }
+    var body: some View {
+        let p = app.palette(scheme), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? .yellow, cl = p.resolve(claimed) ?? .green
+        VStack(spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: max(1, columns)), spacing: 8) {
+                ForEach(Array(rewards.enumerated()), id: \.offset) { i, r in
+                    let done = i < streak, today = i == streak && canClaim
+                    Button { if today { claim() } } label: {
+                        VStack(spacing: 6) {
+                            Text(r.label).font(.system(size: 11, weight: .heavy)).foregroundColor(fg.opacity(0.75))
+                            GameIcon(icon: r.icon, size: 30, color: fg).opacity(done ? 0.5 : 1)
+                            Text(today ? "CLAIM" : (r.v.hasPrefix("item:") ? "×" : "+") + gameNum(r.amount)).font(.system(size: 12.5, weight: .black)).foregroundColor(today ? ac : fg)
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 86)
+                        .background(RoundedRectangle(cornerRadius: 14).fill(done ? cl.opacity(0.18) : (p.resolve(card) ?? p.card)))
+                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(today ? ac : .clear, lineWidth: 3))
+                        .overlay(alignment: .topTrailing) { if done { Image(systemName: "checkmark.circle.fill").foregroundColor(cl).padding(5) } }
+                    }.buttonStyle(.plain).disabled(!today)
+                }
+            }
+            if !canClaim { Text("Come back tomorrow!").font(.system(size: 12.5, weight: .heavy)).foregroundColor(fg.opacity(0.7)) }
+        }.onAppear(perform: load)
+    }
+}
+
+struct WheelSeg: Hashable { let label, color: String; let amount: Double; var w = 1.0 }
+
+/// Prize Wheel: spins when tapped (or on a message) and lands on a prize (by weight): adds it to a variable and sends a message.
+struct PrizeWheel: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let segments: [WheelSeg]
+    var variable = "coins", resultVar = "prize", spinOn = "tapped", message = "spin", doneMessage = "prize won"
+    var duration = 4.0
+    var spinsVar = "", text = "#ffffff", rim = "#ffd23d"
+    var size: CGFloat = 280
+    @State private var angle = 0.0
+    @State private var spinning = false
+    @State private var win = -1
+    init(_ segments: [WheelSeg], variable: String = "coins", resultVar: String = "prize", spinOn: String = "tapped", message: String = "spin", doneMessage: String = "prize won", duration: Double = 4, spinsVar: String = "", text: String = "#ffffff", rim: String = "#ffd23d", size: CGFloat = 280) {
+        self.segments = segments; self.variable = variable; self.resultVar = resultVar; self.spinOn = spinOn; self.message = message; self.doneMessage = doneMessage; self.duration = duration; self.spinsVar = spinsVar; self.text = text; self.rim = rim; self.size = size
+    }
+    func spin() {
+        guard !spinning, !segments.isEmpty else { return }
+        if !spinsVar.isEmpty { let n = app.get(spinsVar)?.number ?? 0; if n <= 0 { return }; app.set(spinsVar, .n(n - 1)) }
+        let total = max(segments.reduce(0) { $0 + $1.w }, 1e-9)
+        var r = Double.random(in: 0..<total), w = segments.count - 1
+        for (i, s) in segments.enumerated() { r -= s.w; if r < 0 { w = i; break } }
+        let seg = 360.0 / Double(segments.count), land = -(Double(w) + 0.5) * seg + Double.random(in: -0.35...0.35) * seg
+        let from = angle.truncatingRemainder(dividingBy: 360)
+        let to = from - ((from - land).truncatingRemainder(dividingBy: 360) + 360).truncatingRemainder(dividingBy: 360) - 360 * Double(5 + Int(duration))
+        spinning = true; win = -1; angle = from
+        withAnimation(.timingCurve(0.25, 1, 0.5, 1, duration: duration)) { angle = to }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            spinning = false; win = w
+            let s = segments[w]
+            if !variable.isEmpty && s.amount != 0 { app.set(variable, .n((app.get(variable)?.number ?? 0) + s.amount)) }
+            if !resultVar.isEmpty { app.set(resultVar, .s(s.label)) }
+            app.send(doneMessage)
+        }
+    }
+    var body: some View {
+        let p = app.palette(scheme), n = max(1, segments.count), seg = 360.0 / Double(n)
+        ZStack {
+            Circle().fill(p.resolve(rim) ?? .yellow)
+            ZStack {
+                ForEach(Array(segments.enumerated()), id: \.offset) { i, s in
+                    Path { path in
+                        let c = CGPoint(x: size / 2, y: size / 2), R = size / 2 - 10
+                        path.move(to: c); path.addArc(center: c, radius: R, startAngle: .degrees(-90 + Double(i) * seg), endAngle: .degrees(-90 + Double(i + 1) * seg), clockwise: false); path.closeSubpath()
+                    }.fill(p.resolve(s.color) ?? .blue).overlay(i == win ? Color.white.opacity(0.0) : Color.clear)
+                    Text(s.label).font(.system(size: size * 0.06, weight: .black)).foregroundColor(p.resolve(text) ?? .white)
+                        .offset(y: -(size / 2 - 10) * 0.64).rotationEffect(.degrees(-90 + (Double(i) + 0.5) * seg + 90))
+                }
+            }.rotationEffect(.degrees(angle))
+            Circle().fill(p.resolve(rim) ?? .yellow).frame(width: size * 0.14, height: size * 0.14)
+            Image(systemName: "arrowtriangle.down.fill").font(.system(size: 26)).foregroundColor(.white).offset(y: -size / 2 + 4)
+        }
+        .frame(width: size, height: size)
+        .contentShape(Circle())
+        .onTapGesture { if spinOn != "message only" { spin() } }
+        .onReceive(app.messages) { m in if m == message { spin() } }
+        .accessibilityLabel("Prize wheel, tap to spin").accessibilityAddTraits(.isButton)
+    }
+}
+
+/// Skill Button: tap to use (sends a message), then it cools down with a sweeping shadow; charges and a cost are optional.
+struct SkillButton: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var icon = "⚡", label = "", message = "skill"
+    var cooldown = 3.0
+    var charges = 1
+    var costVar = ""
+    var cost = 10.0
+    var shape = "circle"
+    var showTime = true
+    var bg = "@card", ring = "#7fd3ff"
+    var size: CGFloat = 72
+    @State private var left = -1
+    @State private var cd = 0.0
+    let tick = Timer.publish(every: 0.05, on: .main, in: .common).autoconnect()
+    init(icon: String = "⚡", label: String = "", message: String = "skill", cooldown: Double = 3, charges: Int = 1, costVar: String = "", cost: Double = 10, shape: String = "circle", showTime: Bool = true, bg: String = "@card", ring: String = "#7fd3ff", size: CGFloat = 72) {
+        self.icon = icon; self.label = label; self.message = message; self.cooldown = cooldown; self.charges = charges; self.costVar = costVar; self.cost = cost; self.shape = shape; self.showTime = showTime; self.bg = bg; self.ring = ring; self.size = size
+    }
+    var afford: Bool { costVar.isEmpty || (app.get(costVar)?.number ?? 0) >= cost }
+    var body: some View {
+        let p = app.palette(scheme), have = left < 0 ? charges : left, ready = have > 0 && afford, f = have == 0 && cooldown > 0 ? 1 - cd / cooldown : 0
+        VStack(spacing: 4) {
+            ZStack {
+                RoundedRectangle(cornerRadius: shape == "rounded square" ? size * 0.25 : size / 2).fill(p.resolve(bg) ?? p.card)
+                if ready { RoundedRectangle(cornerRadius: shape == "rounded square" ? size * 0.25 : size / 2).stroke(p.resolve(ring) ?? .cyan, lineWidth: 2.5) }
+                GameIcon(icon: icon, size: size * 0.5, color: p.text)
+                if f > 0 {
+                    Path { path in let c = CGPoint(x: size / 2, y: size / 2); path.move(to: c); path.addArc(center: c, radius: size, startAngle: .degrees(-90), endAngle: .degrees(-90 + 360 * f), clockwise: false); path.closeSubpath() }
+                        .fill(Color.black.opacity(0.55)).clipShape(RoundedRectangle(cornerRadius: shape == "rounded square" ? size * 0.25 : size / 2))
+                    if showTime { Text("\(Int((cooldown - cd).rounded(.up)))").font(.system(size: size * 0.32, weight: .black)).foregroundColor(.white) }
+                }
+                if charges > 1 { Text("\(have)").font(.system(size: 11, weight: .black)).foregroundColor(.white).frame(width: 20, height: 20).background(Circle().fill(p.accent)).offset(x: size * 0.36, y: size * 0.36) }
+            }
+            .frame(width: size, height: size)
+            .onTapGesture {
+                guard have > 0 && afford else { return }
+                if have == charges { cd = 0 }
+                left = have - 1
+                if !costVar.isEmpty { app.set(costVar, .n((app.get(costVar)?.number ?? 0) - cost)) }
+                app.send(message)
+            }
+            .onReceive(tick) { _ in
+                guard left >= 0 && left < charges && cooldown > 0 else { return }
+                cd += 0.05; if cd >= cooldown { cd = 0; left += 1 }
+            }
+            if !label.isEmpty { Text(label).font(.system(size: 12, weight: .heavy)).foregroundColor(p.text) }
+        }.accessibilityElement(children: .combine).accessibilityLabel(label.isEmpty ? message : label).accessibilityAddTraits(.isButton)
+    }
+}
+
+struct RadialItem: Hashable { let label, icon, msg: String }
+
+/// Radial Menu: a round button that opens a wheel of choices around it; tap a choice to send its message.
+struct RadialMenu: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let items: [RadialItem]
+    var icon = "😀", open = "hold and slide"
+    var radius: CGFloat = 110
+    var dim = 0.35
+    var labels = true
+    var accent = "@accent", bg = "@card"
+    var size: CGFloat = 64
+    @State private var shown = false
+    init(_ items: [RadialItem], icon: String = "😀", open: String = "hold and slide", radius: CGFloat = 110, dim: Double = 0.35, labels: Bool = true, accent: String = "@accent", bg: String = "@card", size: CGFloat = 64) {
+        self.items = items; self.icon = icon; self.open = open; self.radius = radius; self.dim = dim; self.labels = labels; self.accent = accent; self.bg = bg; self.size = size
+    }
+    var body: some View {
+        let p = app.palette(scheme)
+        ZStack {
+            if shown {
+                Color.black.opacity(dim).frame(width: 4000, height: 4000).onTapGesture { shown = false }
+                ForEach(Array(items.enumerated()), id: \.offset) { i, it in
+                    let a = -Double.pi / 2 + Double(i) * 2 * Double.pi / Double(max(1, items.count))
+                    Button { shown = false; app.send(it.msg) } label: {
+                        VStack(spacing: 1) { GameIcon(icon: it.icon, size: 26, color: p.text); if labels { Text(it.label).font(.system(size: 9.5, weight: .heavy)).foregroundColor(p.text).lineLimit(1) } }
+                            .frame(width: 64, height: 64).background(Circle().fill(p.resolve(bg) ?? p.card))
+                    }.buttonStyle(.plain).offset(x: CGFloat(cos(a)) * radius, y: CGFloat(sin(a)) * radius)
+                }
+            }
+            Button { shown.toggle() } label: {
+                GameIcon(icon: icon, size: size * 0.5, color: p.text).frame(width: size, height: size).background(Circle().fill(shown ? (p.resolve(accent) ?? p.accent) : (p.resolve(bg) ?? p.card)))
+            }.buttonStyle(.plain).accessibilityLabel("Open menu")
+        }.zIndex(shown ? 10 : 0)
+    }
+}
+
+/// Level Map: a path of level buttons with stars (stars_1, stars_2…) and locks (unlocked); tap an open level to play it (or send a message / set a variable).
+struct LevelMap: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    var count = 12
+    var unlockedVar = "unlocked"
+    var allOpen = false
+    var starsVar = "stars_", layout = "winding path", action = "plays that level", message = "level"
+    var spacing: CGFloat = 92
+    var accent = "#ffd23d", node = "@accent", text = ""
+    var height: CGFloat = 480
+    func go(_ n: Int) {
+        switch action {
+        case "sends a message": app.send("\(message) \(n)"); app.send(message)
+        case "sets a variable": app.set(message, .n(Double(n)))
+        default: app.set("level", .n(Double(n))); app.send("play level \(n)"); app.send("play game")
+        }
+    }
+    func dot(_ i: Int, _ p: Palette) -> some View {
+        let n = i + 1, open = allOpen ? Int.max : max(1, Int(app.get(unlockedVar)?.number ?? 1)), locked = n > open, cur = n == open
+        let stars = min(3, max(0, Int((app.get("\(starsVar)\(n)")?.number ?? 0).rounded()))), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? .yellow
+        return Button { if !locked { go(n) } } label: {
+            VStack(spacing: 2) {
+                ZStack {
+                    Circle().fill(locked ? fg.opacity(0.15) : (p.resolve(node) ?? p.accent))
+                    if cur { Circle().stroke(ac, lineWidth: 3) }
+                    if locked { Image(systemName: "lock.fill").foregroundColor(fg.opacity(0.6)) } else { Text("\(n)").font(.system(size: 20, weight: .black)).foregroundColor(.white) }
+                }.frame(width: cur ? 60 : 52, height: cur ? 60 : 52)
+                if !locked { HStack(spacing: 1) { ForEach(0..<3, id: \.self) { s in Image(systemName: "star.fill").font(.system(size: 11)).foregroundColor(s < stars ? ac : fg.opacity(0.2)) } } }
+            }.frame(width: 76)
+        }.buttonStyle(.plain).disabled(locked).accessibilityLabel("Level \(n)\(locked ? ", locked" : ", \(stars) stars")")
+    }
+    var body: some View {
+        let p = app.palette(scheme)
+        if layout == "grid" {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 6) { ForEach(0..<count, id: \.self) { i in dot(i, p) } }
+        } else {
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach((0..<count).reversed(), id: \.self) { i in
+                        GeometryReader { g in dot(i, p).position(x: g.size.width / 2 + (layout == "straight up" ? 0 : CGFloat(sin(Double(i) * 1.1)) * g.size.width * 0.3), y: spacing / 2) }.frame(height: spacing)
+                    }
+                }
+            }.frame(height: height)
+        }
+    }
+}
+
+struct QuestGoal: Hashable { let text, v: String; let target: Double; var reward = "" }
+
+/// Quest Log: goals with progress bars; each follows a variable up to a target, ticks off when done (quest_done_N) and gives its reward ("gems 5").
+struct QuestLog: View {
+    @EnvironmentObject var app: AppState
+    @Environment(\.colorScheme) var scheme
+    let quests: [QuestGoal]
+    var title = "Quests", doneMessage = "quest done"
+    var hideDone = true
+    var text = "", accent = "@accent", done = "@good", bg = ""
+    init(_ quests: [QuestGoal], title: String = "Quests", doneMessage: String = "quest done", hideDone: Bool = true, text: String = "", accent: String = "@accent", done: String = "@good", bg: String = "") {
+        self.quests = quests; self.title = title; self.doneMessage = doneMessage; self.hideDone = hideDone; self.text = text; self.accent = accent; self.done = done; self.bg = bg
+    }
+    func check() {
+        for (i, q) in quests.enumerated() where app.get("quest_done_\(i)") != .b(true) && (app.get(q.v)?.number ?? 0) >= q.target {
+            app.set("quest_done_\(i)", .b(true))
+            let r = q.reward.split(separator: " ").map(String.init)
+            if r.count >= 2 { app.set(r[0], .n((app.get(r[0])?.number ?? 0) + (Double(r[1]) ?? 0))) }
+            app.send(doneMessage)
+        }
+    }
+    var body: some View {
+        let p = app.palette(scheme), fg = p.resolve(text) ?? p.text, ac = p.resolve(accent) ?? p.accent, dn = p.resolve(done) ?? .green
+        let order = quests.indices.sorted { (hideDone && app.get("quest_done_\($0)") == .b(true) ? 1 : 0) < (hideDone && app.get("quest_done_\($1)") == .b(true) ? 1 : 0) }
+        VStack(alignment: .leading, spacing: 10) {
+            if !title.isEmpty { Text(title).font(.system(size: 17, weight: .black)).foregroundColor(fg) }
+            ForEach(order, id: \.self) { i in
+                let q = quests[i], ok = app.get("quest_done_\(i)") == .b(true), have = app.get(q.v)?.number ?? 0
+                HStack(spacing: 12) {
+                    Image(systemName: ok ? "checkmark.circle.fill" : "circle").foregroundColor(ok ? dn : fg.opacity(0.3))
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(q.text).font(.system(size: 14, weight: .bold)).foregroundColor(ok ? fg.opacity(0.5) : fg).strikethrough(ok)
+                        ProgressView(value: ok ? 1 : min(1, have / q.target)).tint(ok ? dn : ac)
+                    }
+                    Text(ok ? "✓" : "\(gameNum(min(have, q.target)))/\(gameNum(q.target))").font(.system(size: 12, weight: .heavy)).foregroundColor(fg.opacity(0.7))
+                    if !q.reward.isEmpty { Text("+\(q.reward)").font(.system(size: 11, weight: .heavy)).foregroundColor(ac) }
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 18).fill(p.resolve(bg) ?? .clear))
+        .onAppear(perform: check)
+        .onChange(of: app.vars) { _ in check() }
+    }
+}

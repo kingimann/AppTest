@@ -1267,3 +1267,216 @@ const S = StyleSheet.create({
   field: { flexDirection: 'row', alignItems: 'center', gap: 8, borderRadius: 12, paddingHorizontal: 12 },
   input: { borderRadius: 12, paddingVertical: 13, paddingHorizontal: 12, fontSize: 15 },
 });
+
+// ---------------------------------------------------------------------------------------------------------------
+// Game-style parts that work in apps too: a shop, a daily reward calendar, a prize wheel, a skill button,
+// a radial menu, a level map and a quest log (all kept in the app's variables).
+// ---------------------------------------------------------------------------------------------------------------
+
+/** An icon from the project: an emoji (drawn as text) or one of the editor's icon names. */
+function GameIcon({ icon, size = 28, color = '#fff' }) {
+  return /[ -￿]|[\ud800-\udfff]/.test(icon || '') ? <Text style={{ fontSize: size * 0.9 }}>{icon}</Text> : <Icon name={icon || 'star'} color={color} size={size} />;
+}
+/** 15300 → 15.3K (as the engine shows prices and amounts). */
+const gameNum = (v) => { const a = Math.abs(v); if (a < 10000) return Number.isInteger(v) ? String(v) : v.toFixed(1); for (const [n, u] of [[1e9, 'B'], [1e6, 'M'], [1e3, 'K']]) if (a >= n) return Math.floor(v / n * 10) / 10 + u; return String(v); };
+const numOf = (v) => (Number.isFinite(+v) ? +v : 0);
+
+/** Shop: buy items with a currency variable (coins, gems). Bought ones stay owned (owned_ID) and can be equipped (equipVar). */
+export function PShop({ items = [], currency = 'coins', currencyIcon = '🪙', equipVar = 'outfit', layout = 'grid', columns = 2, confirm = true, message = 'bought', card = '@card', text = '', accent = '@good', owned = '@accent' }) {
+  useApp(); const P = usePal(), fg = col(text, P) || P.text, cash = numOf(app.vars[currency]), grid = layout !== 'list';
+  const [armed, setArmed] = useState(-1);
+  useEffect(() => { if (armed < 0) return undefined; const t = setTimeout(() => setArmed(-1), 2200); return () => clearTimeout(t); }, [armed]);
+  const tap = (it, i) => {
+    const item = it.id.startsWith('item:'), has = !item && app.vars['owned_' + it.id] === true;
+    if (has) { if (equipVar) app.set(equipVar, it.id); return; }
+    if (cash < it.price) { app.send('not enough'); return; }
+    if (confirm && armed !== i) { setArmed(i); return; }
+    setArmed(-1); app.set(currency, cash - it.price);
+    if (item) app.send(`give ${it.id.slice(5).trim()}|1`); else { app.set('owned_' + it.id, true); if (equipVar) app.set(equipVar, it.id); }
+    if (message) app.send(message);
+  };
+  return (
+    <View style={{ flexDirection: grid ? 'row' : 'column', flexWrap: 'wrap', gap: 10 }}>
+      {items.map((it, i) => {
+        const item = it.id.startsWith('item:'), has = !item && app.vars['owned_' + it.id] === true, eq = has && equipVar && show(app.vars[equipVar]) === it.id, can = cash >= it.price, isArmed = armed === i;
+        const label = eq ? '✓ Equipped' : has ? (equipVar ? 'Equip' : '✓ Owned') : isArmed ? 'Buy?' : `${currencyIcon} ${gameNum(it.price)}`.trim(), ownC = col(owned, P) || P.accent;
+        const btn = has ? ownC : isArmed ? '#ff9f43' : can ? col(accent, P) || '#3ccf7a' : 'rgba(127,127,127,0.18)';
+        const button = <View style={{ height: 32, borderRadius: 16, paddingHorizontal: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: btn, opacity: eq ? 0.5 : 1 }}><Text style={{ fontSize: 13.5, fontWeight: '900', color: has || can || isArmed ? '#fff' : fg }}>{label}</Text></View>;
+        return (
+          <Pressable key={i} accessibilityRole="button" accessibilityLabel={`${it.name}, ${label}`} onPress={() => tap(it, i)}
+            style={{ width: grid ? `${100 / Math.max(1, columns) - 3}%` : '100%', minHeight: grid ? 160 : 72, padding: 10, borderRadius: 16, backgroundColor: col(card, P) || P.card, borderWidth: eq ? 2.5 : 0, borderColor: ownC, flexDirection: grid ? 'column' : 'row', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+            <GameIcon icon={it.icon} size={grid ? 40 : 32} color={fg} />
+            <View style={{ flex: grid ? 0 : 1, alignItems: grid ? 'center' : 'flex-start' }}>
+              <Text numberOfLines={1} style={{ fontSize: grid ? 14 : 15, fontWeight: '800', color: fg }}>{it.name}</Text>
+              {it.note ? <Text numberOfLines={1} style={{ fontSize: 11, fontWeight: '600', color: fg, opacity: 0.6 }}>{it.note}</Text> : null}
+            </View>
+            {button}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+/** Daily Reward: a calendar of rewards, one claim a day; the streak grows when you come back (and resets if you miss a day). Kept on the phone. */
+export function DailyReward({ rewards = [], resetIfMissed = true, columns = 4, message = 'daily claimed', card = '@card', text = '', accent = '#ffd23d', claimed = '@good' }) {
+  useApp(); const P = usePal(), fg = col(text, P) || P.text, ac = col(accent, P) || '#ffd23d', cl = col(claimed, P) || '#3ccf7a';
+  const day = (off = 0) => { const d = new Date(Date.now() + off * 86400000); return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`; };
+  const [st, setSt] = useState({ streak: 0, last: '' });
+  useEffect(() => { AsyncStorage.getItem('pocket.daily').then((raw) => { let s = { streak: 0, last: '' }; try { s = { ...s, ...JSON.parse(raw || '{}') }; } catch { /* first time */ }
+    if (resetIfMissed && s.last && s.last !== day() && s.last !== day(-1)) s.streak = 0; if (s.streak >= rewards.length && s.last !== day()) s.streak = 0; setSt(s); }).catch(() => {}); }, []);
+  const can = st.last !== day();
+  const claim = () => {
+    if (!can || st.streak >= rewards.length) return;
+    const r = rewards[st.streak];
+    if (String(r.v).startsWith('item:')) app.send(`give ${r.v.slice(5).trim()}|${r.amount}`); else app.set(r.v, numOf(app.vars[r.v]) + r.amount);
+    const s = { streak: st.streak + 1, last: day() }; setSt(s); AsyncStorage.setItem('pocket.daily', JSON.stringify(s)).catch(() => {}); app.send(message);
+  };
+  return (
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+        {rewards.map((r, i) => {
+          const done = i < st.streak, today = i === st.streak && can;
+          return (
+            <Pressable key={i} disabled={!today} onPress={claim} accessibilityLabel={`${r.label}: ${r.amount} ${r.v}${done ? ', claimed' : today ? ', claim' : ''}`}
+              style={{ width: `${100 / Math.max(1, columns) - 3}%`, aspectRatio: 0.9, borderRadius: 14, alignItems: 'center', justifyContent: 'space-evenly', backgroundColor: done ? cl + '2e' : col(card, P) || P.card, borderWidth: today ? 3 : 0, borderColor: ac }}>
+              <Text style={{ fontSize: 11, fontWeight: '800', color: fg, opacity: 0.75 }}>{r.label}</Text>
+              <View style={{ opacity: done ? 0.5 : 1 }}><GameIcon icon={r.icon} size={28} color={fg} /></View>
+              <Text style={{ fontSize: 12.5, fontWeight: '900', color: today ? ac : fg }}>{today ? 'CLAIM' : (String(r.v).startsWith('item:') ? '×' : '+') + gameNum(r.amount)}</Text>
+              {done ? <View style={{ position: 'absolute', top: 5, right: 5, width: 18, height: 18, borderRadius: 9, backgroundColor: cl, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 11, fontWeight: '900' }}>✓</Text></View> : null}
+            </Pressable>
+          );
+        })}
+      </View>
+      {!can ? <Text style={{ textAlign: 'center', fontSize: 12.5, fontWeight: '800', color: fg, opacity: 0.7 }}>Come back tomorrow!</Text> : null}
+    </View>
+  );
+}
+
+/** Prize Wheel: spins when tapped (or on a message) and lands on a prize (by weight): adds it to a variable and sends a message. */
+export function PrizeWheel({ segments = [], var: v = 'coins', resultVar = 'prize', spinOn = 'tapped', message = 'spin', doneMessage = 'prize won', duration = 4, spinsVar = '', text = '#ffffff', rim = '#ffd23d', size = 280 }) {
+  useApp(); const P = usePal();
+  const rot = useRef(new Animated.Value(0)).current, cur = useRef(0), busy = useRef(false);
+  const spin = () => {
+    if (busy.current || !segments.length) return;
+    if (spinsVar) { if (numOf(app.vars[spinsVar]) <= 0) return; app.set(spinsVar, numOf(app.vars[spinsVar]) - 1); }
+    const total = segments.reduce((n, s) => n + s.w, 0) || 1; let r = Math.random() * total, w = segments.findIndex((s) => (r -= s.w) < 0); if (w < 0) w = segments.length - 1;
+    const seg = 360 / segments.length, land = -(w + 0.5) * seg + (Math.random() - 0.5) * seg * 0.7, from = cur.current % 360;
+    const to = from - (((from - land) % 360) + 360) % 360 - 360 * (5 + Math.floor(duration));
+    busy.current = true; rot.setValue(from);
+    Animated.timing(rot, { toValue: to, duration: duration * 1000, easing: (t) => 1 - Math.pow(1 - t, 4), useNativeDriver: true }).start(() => {
+      busy.current = false; cur.current = to; const s = segments[w];
+      if (v && s.amount) app.set(v, numOf(app.vars[v]) + s.amount); if (resultVar) app.set(resultVar, s.label); app.send(doneMessage);
+    });
+  };
+  useMessages((m) => { if (m === message) spin(); });
+  const n = Math.max(1, segments.length), R = size / 2 - 10, c = size / 2, seg = (Math.PI * 2) / n;
+  const arc = (i) => { const a0 = -Math.PI / 2 + i * seg, a1 = a0 + seg; return `M${c},${c} L${c + Math.cos(a0) * R},${c + Math.sin(a0) * R} A${R},${R} 0 ${seg > Math.PI ? 1 : 0} 1 ${c + Math.cos(a1) * R},${c + Math.sin(a1) * R} Z`; };
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel="Prize wheel, tap to spin" disabled={spinOn === 'message only'} onPress={spin} style={{ width: size, height: size, alignSelf: 'center' }}>
+      <View style={{ position: 'absolute', width: size, height: size, borderRadius: size / 2, backgroundColor: col(rim, P) || '#ffd23d' }} />
+      <Animated.View style={{ width: size, height: size, transform: [{ rotate: rot.interpolate({ inputRange: [-36000, 36000], outputRange: ['-36000deg', '36000deg'] }) }] }}>
+        <Svg width={size} height={size}>
+          {segments.map((s, i) => <Path key={i} d={arc(i)} fill={col(s.color, P) || s.color} />)}
+          {segments.map((s, i) => { const am = -Math.PI / 2 + (i + 0.5) * seg; return <SvgText key={'t' + i} x={c + Math.cos(am) * R * 0.64} y={c + Math.sin(am) * R * 0.64 + 5} fill={col(text, P) || '#fff'} fontSize={R * 0.13} fontWeight="900" textAnchor="middle">{s.label}</SvgText>; })}
+        </Svg>
+      </Animated.View>
+      <View style={{ position: 'absolute', left: c - R * 0.14, top: c - R * 0.14, width: R * 0.28, height: R * 0.28, borderRadius: R, backgroundColor: col(rim, P) || '#ffd23d' }} />
+      <Text style={{ position: 'absolute', top: -4, alignSelf: 'center', fontSize: 26, color: '#fff' }}>▼</Text>
+    </Pressable>
+  );
+}
+
+/** Skill Button: tap to use (sends a message), then it cools down with a sweeping shadow; charges and a cost are optional. */
+export function SkillButton({ icon = '⚡', label = '', message = 'skill', cooldown = 3, charges = 1, costVar = '', cost = 10, shape = 'circle', showTime = true, bg = '@card', ring = '#7fd3ff', size = 72 }) {
+  useApp(); const P = usePal();
+  const [left, setLeft] = useState(charges), [cd, setCd] = useState(0);
+  useEffect(() => { if (left >= charges || cooldown <= 0) return undefined; const t = setInterval(() => setCd((x) => { const n = x + 0.05; if (n >= cooldown) { setLeft((l) => Math.min(charges, l + 1)); return 0; } return n; }), 50); return () => clearInterval(t); }, [left]);
+  const afford = !costVar || numOf(app.vars[costVar]) >= cost, ready = left > 0 && afford, f = left === 0 && cooldown > 0 ? 1 - cd / cooldown : 0, r = shape === 'rounded square' ? size * 0.25 : size / 2;
+  const use = () => { if (!ready) return; if (left === charges) setCd(0); setLeft(left - 1); if (costVar) app.set(costVar, numOf(app.vars[costVar]) - cost); app.send(message); };
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={label || message} onPress={use} style={{ alignItems: 'center', gap: 4 }}>
+      <View style={{ width: size, height: size, borderRadius: r, backgroundColor: col(bg, P) || P.card, borderWidth: ready ? 2.5 : 0, borderColor: col(ring, P) || '#7fd3ff', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+        <GameIcon icon={icon} size={size * 0.5} color={P.text} />
+        {f > 0 ? <View style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: `${f * 100}%`, backgroundColor: 'rgba(0,0,0,0.55)' }} /> : null}
+        {f > 0 && showTime ? <Text style={{ position: 'absolute', color: '#fff', fontWeight: '900', fontSize: size * 0.32 }}>{Math.ceil(cooldown - cd)}</Text> : null}
+        {!afford ? <View style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'rgba(40,60,160,0.35)' }} /> : null}
+      </View>
+      {charges > 1 ? <Text style={{ position: 'absolute', right: -4, top: size - 16, minWidth: 20, textAlign: 'center', borderRadius: 10, overflow: 'hidden', backgroundColor: P.accent, color: '#fff', fontSize: 11, fontWeight: '900' }}>{left}</Text> : null}
+      {label ? <Text style={{ fontSize: 12, fontWeight: '800', color: P.text }}>{label}</Text> : null}
+    </Pressable>
+  );
+}
+
+/** Radial Menu: a round button that opens a wheel of choices around it; tap a choice to send its message. */
+export function RadialMenu({ items = [], icon = '😀', open = 'hold and slide', radius = 110, dim = 0.35, labels = true, accent = '@accent', bg = '@card', size = 64 }) {
+  useApp(); const P = usePal(); const [shown, setShown] = useState(false);
+  const btn = (on) => <View style={{ width: size, height: size, borderRadius: size / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: on ? col(accent, P) || P.accent : col(bg, P) || P.card }}><GameIcon icon={icon} size={size * 0.5} color={P.text} /></View>;
+  return (
+    <View>
+      <Pressable accessibilityRole="button" accessibilityLabel="Open menu" onPress={() => setShown(true)} onLongPress={() => setShown(true)}>{btn(false)}</Pressable>
+      <Modal transparent visible={shown} animationType="fade" onRequestClose={() => setShown(false)}>
+        <Pressable onPress={() => setShown(false)} style={{ flex: 1, backgroundColor: `rgba(0,0,0,${dim})`, alignItems: 'center', justifyContent: 'center' }}>
+          {items.map((it, i) => { const a = -Math.PI / 2 + i * (Math.PI * 2) / Math.max(1, items.length); return (
+            <Pressable key={i} accessibilityLabel={it.label} onPress={() => { setShown(false); app.send(it.msg); }}
+              style={{ position: 'absolute', transform: [{ translateX: Math.cos(a) * radius }, { translateY: Math.sin(a) * radius }], width: 64, height: 64, borderRadius: 32, backgroundColor: col(bg, P) || P.card, alignItems: 'center', justifyContent: 'center' }}>
+              <GameIcon icon={it.icon} size={26} color={P.text} />{labels ? <Text numberOfLines={1} style={{ fontSize: 9.5, fontWeight: '800', color: P.text }}>{it.label}</Text> : null}
+            </Pressable>
+          ); })}
+          {btn(true)}
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+/** Level Map: a path of level buttons with stars (stars_1, stars_2…) and locks (unlocked); tap an open level to play it (or send a message / set a variable). */
+export function LevelMap({ count = 12, unlockedVar = 'unlocked', allOpen = false, starsVar = 'stars_', layout = 'winding path', action = 'plays that level', message = 'level', spacing = 92, accent = '#ffd23d', node = '@accent', text = '', h = 480 }) {
+  useApp(); const P = usePal(), fg = col(text, P) || P.text, ac = col(accent, P) || '#ffd23d', open = allOpen ? Infinity : Math.max(1, numOf(app.vars[unlockedVar]) || 1);
+  const go = (n) => { if (action === 'sends a message') { app.send(`${message} ${n}`); app.send(message); } else if (action === 'sets a variable') app.set(message, n); else { app.set('level', n); app.send(`play level ${n}`); app.send('play game'); } };
+  const dot = (i) => {
+    const n = i + 1, locked = n > open, cur = n === open, stars = Math.max(0, Math.min(3, Math.round(numOf(app.vars[starsVar + n])))), d = cur ? 60 : 52;
+    return (
+      <Pressable key={i} disabled={locked} onPress={() => go(n)} accessibilityLabel={`Level ${n}${locked ? ', locked' : `, ${stars} stars`}`} style={{ width: 76, alignItems: 'center' }}>
+        <View style={{ width: d, height: d, borderRadius: d / 2, alignItems: 'center', justifyContent: 'center', backgroundColor: locked ? 'rgba(127,127,127,0.2)' : col(node, P) || P.accent, borderWidth: cur ? 3 : 0, borderColor: ac }}>
+          {locked ? <Text style={{ fontSize: 20 }}>🔒</Text> : <Text style={{ color: '#fff', fontWeight: '900', fontSize: 20 }}>{n}</Text>}
+        </View>
+        {!locked ? <Text style={{ fontSize: 13, color: ac }}>{'★'.repeat(stars)}<Text style={{ color: fg, opacity: 0.25 }}>{'★'.repeat(3 - stars)}</Text></Text> : null}
+      </Pressable>
+    );
+  };
+  if (layout === 'grid') return <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 6 }}>{Array.from({ length: count }, (_, i) => dot(i))}</View>;
+  return (
+    <ScrollView style={{ height: h }} contentContainerStyle={{ flexDirection: 'column-reverse' }}>
+      {Array.from({ length: count }, (_, i) => <View key={i} style={{ height: spacing, justifyContent: 'center', alignItems: 'center', transform: [{ translateX: layout === 'straight up' ? 0 : Math.sin(i * 1.1) * 100 }] }}>{dot(i)}</View>)}
+    </ScrollView>
+  );
+}
+
+/** Quest Log: goals with progress bars; each follows a variable up to a target, ticks off when done (quest_done_N) and gives its reward ("gems 5"). */
+export function QuestLog({ quests = [], title = 'Quests', doneMessage = 'quest done', hideDone = true, text = '', accent = '@accent', done = '@good', bg = '' }) {
+  useApp(); const P = usePal(), fg = col(text, P) || P.text, ac = col(accent, P) || P.accent, dn = col(done, P) || '#3ccf7a';
+  useEffect(() => {
+    quests.forEach((q, i) => {
+      if (app.vars['quest_done_' + i] === true || numOf(app.vars[q.v]) < q.target) return;
+      app.set('quest_done_' + i, true); const r = String(q.reward || '').split(/\s+/); if (r.length >= 2) app.set(r[0], numOf(app.vars[r[0]]) + numOf(r[1])); app.send(doneMessage);
+    });
+  });
+  const order = quests.map((_, i) => i).sort((a, b) => (hideDone ? (app.vars['quest_done_' + a] === true) - (app.vars['quest_done_' + b] === true) : 0));
+  return (
+    <View style={{ padding: 12, borderRadius: 18, backgroundColor: col(bg, P) || 'transparent', gap: 10 }}>
+      {title ? <Text style={{ fontSize: 17, fontWeight: '900', color: fg }}>{title}</Text> : null}
+      {order.map((i) => { const q = quests[i], ok = app.vars['quest_done_' + i] === true, have = numOf(app.vars[q.v]), f = Math.max(0, Math.min(1, have / q.target)); return (
+        <View key={i} style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <View style={{ width: 24, height: 24, borderRadius: 12, backgroundColor: ok ? dn : 'rgba(127,127,127,0.18)', alignItems: 'center', justifyContent: 'center' }}>{ok ? <Text style={{ color: '#fff', fontWeight: '900' }}>✓</Text> : null}</View>
+          <View style={{ flex: 1, gap: 5 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: fg, opacity: ok ? 0.5 : 1, textDecorationLine: ok ? 'line-through' : 'none' }}>{q.text}</Text>
+            <View style={{ height: 6, borderRadius: 3, backgroundColor: 'rgba(127,127,127,0.18)', overflow: 'hidden' }}><View style={{ width: `${(ok ? 1 : f) * 100}%`, height: 6, backgroundColor: ok ? dn : ac }} /></View>
+          </View>
+          <Text style={{ fontSize: 12, fontWeight: '800', color: fg, opacity: 0.7 }}>{ok ? '✓' : `${gameNum(Math.min(have, q.target))}/${gameNum(q.target)}`}</Text>
+          {q.reward ? <Text style={{ fontSize: 11, fontWeight: '800', color: ac }}>+{q.reward}</Text> : null}
+        </View>
+      ); })}
+    </View>
+  );
+}

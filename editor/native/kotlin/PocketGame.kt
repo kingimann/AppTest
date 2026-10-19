@@ -1371,13 +1371,13 @@ class Controller2D(p: JsonMap) : Component(p) {
     }
     /** After the movement: wrap around the edges, the dodge, and the looks. */
     private fun after(e: GameObject, dt: Double, g: PocketGame) {
-        val b = e.body ?: return
         if (on("wrapEdges")) {
             val v = g.viewBounds; val h = e.half
             if (e.x < v.left - h.w) e.x = v.right + h.w else if (e.x > v.right + h.w) e.x = v.left - h.w
             if (mode != "jetpack") { if (e.y < v.top - h.h) e.y = v.bottom + h.h else if (e.y > v.bottom + h.h) e.y = v.top - h.h }
         }
         if (on("dashInvuln") && mode != "platformer" && (inner as? Move)?.dashing == true) e.invuln = max(e.invuln, 0.06)
+        val b = e.body ?: return // (Move without a body: no velocity for the looks)
         juice(e, dt, g, b)
     }
     private fun juice(e: GameObject, dt: Double, g: PocketGame, b: Body) {

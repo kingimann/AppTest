@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Pocket Engine",
+    "slug": "pocket-engine",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0e1014",
+    "splash": { "image": "./assets/icon.png", "resizeMode": "contain", "backgroundColor": "#0e1014" },
+    "ios": { "bundleIdentifier": "com.pocketengine.app", "supportsTablet": true },
+    "android": { "package": "com.pocketengine.app", "adaptiveIcon": { "foregroundImage": "./assets/icon.png", "backgroundColor": "#0e1014" } },
+    "web": { "bundler": "metro" }
+  }
+}

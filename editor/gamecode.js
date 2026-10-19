@@ -3,8 +3,9 @@
 // runtime (editor/native/flutter/pocket_game.dart, editor/native/kotlin/PocketGame.kt) plays it with the engine's rules.
 // Components with no native version yet are listed in the README (and in Build Settings) and do nothing in the native game.
 import { dartName, FLUTTER_VERSIONS } from './flutter.js';
-import { dartSetup } from './nativecode.js';
-import { kotlinNativeFiles, kotlinPackage } from './kotlincode.js';
+import { dartSetup, dartElement } from './nativecode.js';
+import { hudModel, PALETTES } from './appmodel.js';
+import { kotlinNativeFiles, kotlinPackage, kElement } from './kotlincode.js';
 
 /** The components the native game runtimes have (the same in Dart and Kotlin). */
 export const NATIVE_GAME_COMPONENTS = new Set([
@@ -14,7 +15,13 @@ export const NATIVE_GAME_COMPONENTS = new Set([
   'orbit', 'checkpoint', 'follow', 'wander', 'path', 'turret', 'dropItem', 'emitter', 'particles', 'blink', 'forceZone', 'touchButton', 'button',
   'clickPopup', 'comboClicker', 'longPress', 'doubleTap', 'tapToggle', 'pressFeedback', 'tapToSpawn', 'dragLaunch', 'trigger', 'timer', 'condition',
   'waveSpawner', 'dayNight', 'typewriter', 'health', 'damager', 'hunger', 'thirst', 'car', 'savePoint', 'autoSave', 'saveManager', 'joint',
-  'navigator', 'enemyAI', 'loader']);
+  'navigator', 'enemyAI', 'loader', 'rules', 'uiPopup', 'uiSheet', 'uiPanel', 'uiLayout', 'uiScroll', 'uiPopover', 'uiAppBar', 'uiBottomNav',
+  'uiSideBar', 'uiBack', 'uiTabIndicator', 'uiCrosshair', 'uiOffscreen', 'uiScreenFX', 'uiSaveSlots', 'uiTutorial', 'uiShowIf', 'uiAnim',
+  'uiTooltip', 'uiNotifications', 'navItem', 'drawer', 'dataStat', 'netSync', 'pfLeaderboard', 'netRoomList', 'netChat', 'tween', 'tweenSequence',
+  'flipbook', 'animator', 'spriteSheet', 'cameraBrain', 'cameraSequence', 'cameraMixer', 'cameraTargetGroup', 'cameraZone', 'cameraSwitcher',
+  'gridMove', 'gridEnemy', 'gridUnit', 'squadControl', 'boardCell', 'turnAction', 'turnOpponent', 'inventoryItem', 'craftingStation', 'loot',
+  'resource', 'npc', 'dialogue', 'uiHotbar', 'uiInventoryGrid', 'uiEquipment', 'uiCrafting', 'uiQuestLog', 'uiQuestJournal', 'uiQuestTracker',
+  'triggers', 'fsm', 'graph']);
 /** Shapes the native runtimes draw (others are drawn as a rounded box). */
 const NATIVE_SHAPES = new Set(['rect', 'circle', 'ring', 'star', 'triangle', 'ellipse', 'diamond', 'emoji', 'hexagon', 'pentagon', 'cross', 'arrow', 'capsule', 'pill', 'heart', 'line', 'polygon']);
 
@@ -24,10 +31,10 @@ const ds = (s) => "'" + String(s ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\
 /** Can this game go native, and what's missing? { ok, three, levels, missing: [{type, names}], shapes: [...], sprites } */
 export function gameReport(game) {
   const ents = game.entities || [], three = game.mode === '3d' || ents.some((e) => e.mesh);
-  const miss = new Map(), shapes = new Set();
+  const miss = new Map(), shapes = new Set(), widgets = new Set(hudModel(game, NATIVE_GAME_COMPONENTS).map((h) => h.id)); // (HUD parts drawn by native app widgets)
   let sprites = 0;
   for (const e of ents) {
-    for (const b of e.behaviors || []) if (!NATIVE_GAME_COMPONENTS.has(b.type)) { if (!miss.has(b.type)) miss.set(b.type, new Set()); miss.get(b.type).add(e.name || e.id); }
+    for (const b of e.behaviors || []) if (!NATIVE_GAME_COMPONENTS.has(b.type) && !(widgets.has(e.id) && /^ui|^data/.test(b.type))) { if (!miss.has(b.type)) miss.set(b.type, new Set()); miss.get(b.type).add(e.name || e.id); }
     if (e.shape?.type && !NATIVE_SHAPES.has(e.shape.type)) shapes.add(e.shape.type);
     if (e.sprite?.src) sprites++;
   }
@@ -71,7 +78,42 @@ ${gaps.length ? `\n## Still to build\n\n${gaps.join('\n')}\n` : ''}`;
 }
 
 /** The Flutter project's files for a 2D game. runtime: the text of editor/native/flutter/pocket_game.dart. */
-export function flutterGameFiles(game, o, { runtime, icon }) {
+const hexArgb = (h) => '0xFF' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();
+/** main.dart's start when HUD parts are native widgets: the widgets' app state shares the game's variables and messages. */
+function hudSetup(game) {
+  const pal = (P) => `Palette({${Object.entries(P).map(([k, v]) => `${ds(k)}: Color(${hexArgb(v)})`).join(', ')}})`;
+  const accent = game.settings?.accent || PALETTES.dark.accent;
+  return `// the HUD's native widgets (lib/hud.dart) use the app building blocks in lib/pocket.dart: same variables, same messages
+  app = AppState(name: ${ds(game.name || 'Game')}, home: 'home', themeSetting: 'dark', light: const ${pal({ ...PALETTES.light, accent })}, dark: const ${pal({ ...PALETTES.dark, accent })}, vars: const {}, tabs: const [], collections: const [], stats: const []);
+  final game = PocketGame(jsonDecode(await rootBundle.loadString('assets/game.json')) as Map<String, dynamic>, vars: app.vars);
+  game.hudWidget = (o) => hudWidget(o.id);
+  game.hudIds = hudIds;
+  var relaying = false;
+  app.listen((m) { if (relaying) return; relaying = true; game.send(m); relaying = false; });
+  void bridge() => game.on((m) { if (relaying) return; relaying = true; app.send(m); relaying = false; });
+  bridge();
+  game.onReset.add(bridge);`;
+}
+/** lib/hud.dart: each HUD object that a native widget draws. */
+function hudDart(hud) {
+  return `// The game's HUD parts drawn by native Flutter widgets (made by Pocket Engine's native export): sliders, switches,
+// charts, carousels, timers, a shop… They read and change the game's variables and hear its messages.
+import 'package:flutter/material.dart';
+
+import 'pocket.dart';
+
+const hudIds = {${hud.flatMap((h) => [h.id, ...h.inside]).map(ds).join(', ')}};
+
+Widget? hudWidget(String id) => switch (id) {
+${hud.map((h) => `      ${ds(h.id)} => ${dartElement(h.el, 6)}, // ${String(h.el.name || h.el.kind).replace(/\n/g, ' ')}`).join('\n')}
+      _ => null,
+    };
+`;
+}
+
+/** runtime: editor/native/flutter/pocket_game.dart; appRuntime: editor/native/flutter/pocket.dart (for HUD parts drawn by native widgets). */
+export function flutterGameFiles(game, o, { runtime, appRuntime, icon }) {
+  const hud = appRuntime ? hudModel(game, NATIVE_GAME_COMPONENTS) : [], hasHud = hud.length > 0;
   const rep = gameReport(game), pkg = dartName(o.name || game.name || 'game'), dir = pkg + '_native/', V = FLUTTER_VERSIONS;
   const portrait = (game.settings?.orientation || 'portrait') === 'portrait', landscape = game.settings?.orientation === 'landscape';
   const files = [
@@ -114,22 +156,23 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'pocket_game.dart';
+import 'pocket_game.dart';${hasHud ? "\nimport 'pocket.dart';\nimport 'hud.dart';" : ''}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   ${portrait ? "await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);" : landscape ? "await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);" : '// (any orientation)'}
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-  final game = PocketGame(jsonDecode(await rootBundle.loadString('assets/game.json')) as Map<String, dynamic>);
+${hasHud ? hudSetup(game) : "final game = PocketGame(jsonDecode(await rootBundle.loadString('assets/game.json')) as Map<String, dynamic>);"}
   await game.load();
   runApp(MaterialApp(
     title: ${ds(o.name || game.name || 'Game')},
-    debugShowCheckedModeBanner: false,
+    debugShowCheckedModeBanner: false,${hasHud ? '\n    theme: pocketTheme(app.dark, Brightness.dark),' : ''}
     home: Scaffold(backgroundColor: game.background, body: PocketGameView(game: game)),
   ));
 }
 ` },
     { name: dir + 'lib/pocket_game.dart', data: runtime },
+    ...(hasHud ? [{ name: dir + 'lib/pocket.dart', data: appRuntime }, { name: dir + 'lib/hud.dart', data: hudDart(hud) }] : []),
     { name: dir + 'assets/game.json', data: gameJson(game) },
     { name: dir + 'tool/setup.dart', data: dartSetup({ ...o, name: o.name || game.name || 'Game' }, pkg) },
     { name: dir + 'test/game_test.dart', data: `// flutter test: the game loads, starts and runs a few seconds of play.
@@ -163,6 +206,32 @@ void main() {
 /** A Kotlin string literal. */
 const ks = (t) => '"' + String(t ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\$/g, '\\$').replace(/\n/g, '\\n') + '"';
 
+/** Hud.kt: the HUD objects drawn by Pocket.kt's native composables, and the app state they use. */
+function hudKotlin(game, hud, pkg) {
+  const argb = (h) => '0xFF' + String(h).replace('#', '').padEnd(6, '0').slice(0, 6).toUpperCase();
+  const pal = (P) => `Palette(mapOf(${Object.entries(P).map(([k, v]) => `${ks(k)} to Color(${argb(v)})`).join(', ')}))`;
+  const accent = game.settings?.accent || PALETTES.dark.accent;
+  return `// The game's HUD parts drawn by native Compose components (made by Pocket Engine's native export): sliders, switches,
+// charts, carousels, timers, a shop… They read and change the game's variables and hear its messages.
+package ${pkg}
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+
+val HUD_IDS = setOf(${hud.flatMap((h) => [h.id, ...h.inside]).map(ks).join(', ')})
+
+fun setupHud() {
+    app = AppState(name = ${ks(game.name || 'Game')}, home = "home", light = ${pal({ ...PALETTES.light, accent })}, dark = ${pal({ ...PALETTES.dark, accent })}, vars = mapOf(), tabs = listOf(), collections = listOf(), stats = listOf(), themeSetting = "dark")
+}
+
+fun hudWidget(id: String): (@Composable () -> Unit)? = when (id) {
+${hud.map((h) => `    ${ks(h.id)} -> { { ${kElement(h.el, 8, false)} } } // ${String(h.el.name || h.el.kind).replace(/\n/g, ' ')}`).join('\n')}
+    else -> null
+}
+`;
+}
+
 /** The Kotlin Multiplatform project's files for a 2D game: the app project's Gradle / Android / iOS shell, with the game in it.
  *  runtime: editor/native/kotlin/Pocket.kt (saving, Back), gameRuntime: editor/native/kotlin/PocketGame.kt. */
 export function kotlinGameNativeFiles(game, o, { runtime, gameRuntime, wrapper, icon }) {
@@ -171,6 +240,7 @@ export function kotlinGameNativeFiles(game, o, { runtime, gameRuntime, wrapper, 
   const dir = shell[0].name.split('/')[0] + '/', src = `${dir}composeApp/src/commonMain/kotlin/${pkg.replace(/\./g, '/')}/`, test = src.replace('commonMain', 'commonTest');
   const keep = shell.filter((f) => !f.name.startsWith(src + 'pages/') && f.name !== src + 'App.kt' && f.name !== dir + 'README.md' && !f.name.startsWith(test));
   const text = gameJson(game), chunks = text.match(/[\s\S]{1,20000}/g) || ['{}'];
+  const hud = hudModel(game, NATIVE_GAME_COMPONENTS), hasHud = hud.length > 0; // (HUD parts drawn by Pocket.kt's native composables)
   return { report: rep, files: [
     ...keep,
     { name: dir + 'README.md', data: gameReadme(game, o, rep, 'kotlin') },
@@ -178,15 +248,42 @@ export function kotlinGameNativeFiles(game, o, { runtime, gameRuntime, wrapper, 
 // GameData.kt is the game; PocketGame.kt plays it (no web view).
 package ${pkg}
 
+${hasHud ? `import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+
+@Composable
+fun App() {
+    val game = remember { makeGame() }
+    CompositionLocalProvider(LocalPalette provides app.dark) {
+        MaterialTheme(colorScheme = darkColorScheme(primary = app.dark.accent)) { PocketGameView(game) }
+    }
+}
+
+/** The game, sharing its variables and messages with the HUD's native composables (Hud.kt). */
+fun makeGame(): PocketGame {
+    setupHud()
+    val game = PocketGame(GAME_JSON, app.vars)
+    game.hudWidget = { o -> hudWidget(o.id) }
+    game.hudIds = HUD_IDS
+    var relaying = false
+    app.listen { m -> if (!relaying) { relaying = true; game.send(m); relaying = false } }
+    fun bridge() = game.on { m -> if (!relaying) { relaying = true; app.send(m); relaying = false } }
+    bridge()
+    game.onReset.add { bridge() }
+    return game
+}` : `import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 
 @Composable
 fun App() {
     val game = remember { PocketGame(GAME_JSON) }
     PocketGameView(game)
-}
+}`}
 ` },
+    ...(hasHud ? [{ name: src + 'Hud.kt', data: hudKotlin(game, hud, pkg) }] : []),
     { name: src + 'PocketGame.kt', data: gameRuntime.replace('package __PACKAGE__', 'package ' + pkg) },
     { name: src + 'GameData.kt', data: `// The game, exactly as Pocket Engine saved it (objects, shapes, text, components, settings).
 package ${pkg}

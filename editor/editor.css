@@ -2627,3 +2627,9 @@ textarea.longtext { min-height: 38px; resize: vertical; font: inherit; line-heig
 /* no scroll bars in the native preview (the phone scrolls by touch, wheel or drag, like a real phone) */
 .npv-app, .npv-phone, .npv-phone * { scrollbar-width: none; -ms-overflow-style: none; }
 .npv-app::-webkit-scrollbar, .npv-phone::-webkit-scrollbar, .npv-phone *::-webkit-scrollbar { display: none; width: 0; height: 0; }
+/* iPhone draws its own scroll indicator whatever the CSS says: each scrolling part reaches 24px past the edge that clips it, so
+   the indicator sits outside, out of sight (the content keeps its place: the extra width is padding) */
+.npv-body { overflow: hidden; }
+.npv-app { margin-right: -24px; padding-right: 40px; }
+.npv-page { margin-right: -24px; padding-right: 40px; }
+.npv-page.fills > .npv-list, .npv-page.fills > .npv-form { margin-right: -24px; padding-right: 24px; }

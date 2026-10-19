@@ -89,7 +89,11 @@ function elementOf(e, kids, todo, ctx = {}) {
   if ((b = B('uiPopover'))) todo.push({ name: (e.name || 'Popover') + ' (its menu)', type: 'uiPopover' });
   const PASS = ['uiShowIf', 'dataStat', 'uiAnim', 'uiTooltip', 'uiLayout', 'uiScroll', 'uiPopover']; // (they change how it moves or where its things go: the element itself is still drawn)
   const UI = (e.behaviors || []).filter((x) => /^ui|^data/.test(x.type) && !PASS.includes(x.type));
-  if (UI.length) { todo.push({ name: e.name || UI[0].type, type: UI[0].type }); return { kind: 'todo', name: e.name || UI[0].type, type: UI[0].type }; }
+  if (UI.length) { // no native version yet: it's drawn as its own card (shape, colours, text and what's inside), or a placeholder when it has none; the README lists it
+    todo.push({ name: e.name || UI[0].type, type: UI[0].type });
+    if (kids.length || text || (e.shape && (sh.fill || sh.stroke) && sh.type !== 'line')) return box();
+    return { kind: 'todo', name: e.name || UI[0].type, type: UI[0].type };
+  }
   if (e.sprite?.src && /^(https?:|data:image)/.test(e.sprite.src)) return { kind: 'image', src: e.sprite.src, h: Math.round((e.sprite.h || e.shape?.h || 160)) };
   if (kids.length || (e.shape && (sh.fill || sh.stroke) && sh.type !== 'line')) return box(); // a card, a badge, a divider line, a picture box
   if (text) return { kind: 'text', ...text };

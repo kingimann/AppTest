@@ -185,7 +185,7 @@ ${model.pages.map((p) => `    ${ds(p.value)}: (_) => const ${N[p.value]}(),`).jo
 }
 
 /** tool/setup.dart for the native app: flutter create, then the app ID, name and icon. */
-function dartSetup(o, pkg) {
+export function dartSetup(o, pkg) {
   const org = String(o.appId).split('.').slice(0, -1).join('.') || 'com.example';
   return `// Run once after unzipping:   dart run tool/setup.dart     (needs Flutter on your PATH; safe to run again)
 import 'dart:io';
@@ -225,7 +225,7 @@ Future<void> main() async {
 
 function nativeReadme(model, o, kind) {
   const parts = model.todo;
-  const todo = parts.length ? `\n## Still to build\n\nThese parts of your app have no native version yet. Each shows a placeholder (search the code for \`TODO\`):\n\n${[...new Map(parts.map((t) => [t.name, t])).values()].map((t) => `- **${t.name}** (${t.type})`).join('\n')}\n` : '';
+  const todo = parts.length ? `\n## Still to build\n\nThese parts of your app have no native version yet. Each is drawn as its card (its shape, colours, text and what's inside) without its own behaviour, or as a placeholder (search the code for \`TODO\`) when it has no card:\n\n${[...new Map(parts.map((t) => [t.name, t])).values()].map((t) => `- **${t.name}** (${t.type})`).join('\n')}\n` : '';
   const flutter = kind === 'flutter';
   return `# ${model.name} (native ${flutter ? 'Flutter' : 'SwiftUI'} code)
 

@@ -433,6 +433,17 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     var noTapJump = false
     /** Keys pressed this frame. */
     val keysDown = mutableSetOf<Key>()
+    // game controllers (Bluetooth / USB): their buttons arrive as keys (pad:a, pad:b…); Android turns the left stick into D-pad keys.
+    /** Playing with the controller: the touch controls step aside until the screen is touched. */
+    var padActive = false
+    var padConnected = false
+    /** Analog sticks (−1…1) and triggers (0…1), fed by padAxes() from platform code that reads joystick motion (zeros otherwise). */
+    var padX = 0.0; var padY = 0.0; var pad2X = 0.0; var pad2Y = 0.0; var padLT = 0.0; var padRT = 0.0
+    /** The HUD button the controller's highlight is on (menus). */
+    var padFocus: GameObject? = null
+    private var padHeldDir = false; private var padRep = 0.0
+    /** A controller rumble (milliseconds, strength 0–1): the phone's haptics unless platform code sets the controller's motors. */
+    var rumble: (Double, Double) -> Unit = { _, k -> haptic(k > 0.5) }
     /** Where a fixed joystick sits (null: where the thumb lands). */
     var stickBase: Offset? = null
     /** Panels components show over the game (a dialogue box, a shop…), drawn after the canvas. */
@@ -558,7 +569,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     fun popText(screenAt: Offset, text: String, color: Color, size: Double = 24.0) { floats.add(FloatText(screenAt, text, color, size)) }
     /** "+10" over an object. */
     fun popOver(o: GameObject, text: String, color: Color, size: Double = 22.0) = popText(if (o.ui) uiRect(o).center else toScreen(o.x, o.y - o.half.h), text, color, size)
-    fun buzz(hard: Boolean = false) = haptic(hard)
+    fun buzz(hard: Boolean = false) { haptic(hard); if (hard) padRumble(120.0, 0.7) }
     /** The engine's sounds (coin, jump, hit, power, win, lose, click): a tap of the phone's haptics. */
     fun sfx(name: String) { if (name.isEmpty() || name == "none") return; haptic(name == "hit" || name == "lose") }
 
@@ -866,6 +877,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
         if (k(Key.DirectionLeft, Key.A)) x -= 1
         if (k(Key.DirectionDown, Key.S)) y += 1
         if (k(Key.DirectionUp, Key.W)) y -= 1
+        x += padX; y += padY // (a controller's left stick)
         x += extraX; y += extraY
         val l = hypot(x, y)
         return if (l > 1) Offset((x / l).toFloat(), (y / l).toFloat()) else Offset(x.toFloat(), y.toFloat())
@@ -873,9 +885,74 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     fun isDown(action: String): Boolean {
         if (action in virtualHeld || action in virtHeld) return true
         if (buttons.any { it.action == action && it.finger != null }) return true
-        if (action == "jump") return Key.Spacebar in keys || Key.DirectionUp in keys || Key.W in keys
-        if (action == "action") return Key.X in keys || Key.F in keys || Key.Enter in keys
+        if (action == "jump") return Key.Spacebar in keys || Key.DirectionUp in keys || Key.W in keys || keyHeld("jump")
+        if (action == "action") return Key.X in keys || Key.F in keys || Key.Enter in keys || keyHeld("fire")
         return false
+    }
+    /** The keys (and controller buttons) for an action: Game Settings › Keyboard & controller (keyJump, keyFire, keyDash, keyRun), or the defaults. */
+    fun binds(action: String): List<String> {
+        val raw = settings["key" + action.replaceFirstChar { it.uppercase() }]?.toString()?.takeIf { it.isNotBlank() } ?: KEY_DEFAULTS[action] ?: ""
+        return raw.split(",").map { lkeyWant(it) }.filter { it.isNotEmpty() }
+    }
+    fun keyHit(action: String) = binds(action).let { b -> keysDown.any { lkeyName(it) in b } }
+    fun keyHeld(action: String) = binds(action).let { b -> keys.any { lkeyName(it) in b } }
+    /** Controller buttons held now, by the engine's names (pad:a…); the D-pad counts once a controller is in use. */
+    fun padNames(set: Set<Key>): Set<String> = set.mapNotNull { padKeyNames[it] ?: if (padConnected) dpadNames[it] else null }.toSet()
+    /** Analog sticks and triggers from platform code (Android: joystick MotionEvents), with the dead zone. */
+    fun padAxes(lx: Double, ly: Double, rx: Double = 0.0, ry: Double = 0.0, lt: Double = 0.0, rt: Double = 0.0) {
+        val dz = numOf(settings["gamepadDeadZone"], 0.2).coerceIn(0.0, 0.9)
+        fun dead(x: Double, y: Double): Pair<Double, Double> { val l = hypot(x, y); if (l < dz) return 0.0 to 0.0; val m = min(1.0, (l - dz) / (1 - dz)); return x / l * m to y / l * m }
+        dead(lx, ly).let { padX = it.first; padY = it.second }; dead(rx, ry).let { pad2X = it.first; pad2Y = it.second }
+        padLT = lt.coerceIn(0.0, 1.0); padRT = rt.coerceIn(0.0, 1.0)
+        if (padX != 0.0 || padY != 0.0 || pad2X != 0.0 || pad2Y != 0.0) padSeen()
+    }
+    /** A controller button or stick was used: its controls take over (and the first time, a note). */
+    fun padSeen() {
+        padActive = true
+        if (!padConnected) { padConnected = true; if (settings["padNotice"] != false) message("🎮 Controller connected", 1.6) }
+    }
+    /** Platform code: a controller was plugged in or went away. */
+    fun padConnectedChanged(on: Boolean) {
+        if (on == padConnected) return
+        padConnected = on; if (!on) padActive = false
+        if (settings["padNotice"] != false) message(if (on) "🎮 Controller connected" else "Controller disconnected", 1.6)
+    }
+    /** Hits and haptic taps also rumble a controller in use. */
+    fun padRumble(ms: Double, k: Double) { if (padActive && settings["padRumble"] != false) rumble(ms, k) }
+    /** A controller on menus: the D-pad (or stick) moves a highlight between buttons, A presses it, B goes back, Start pauses / resumes. */
+    private fun padNav(dt: Double) {
+        if (!padActive || settings["padMenus"] == false) { padFocus = null; return }
+        val playing = state == "play" && !paused
+        if (Key.ButtonStart in keysDown && state == "play") { paused = !paused; padFocus = null; keysDown.remove(Key.ButtonStart); return }
+        if (Key.ButtonB in keysDown && paused) { paused = false; keysDown.remove(Key.ButtonB); return }
+        val targets = if (playing && settings["padUiNav"] != "always") emptyList()
+            else tapTargets.filter { !it.dead && it.ui && it.shown && onScreen(it) }.map { it to uiRect(it) }.sortedWith(compareBy({ it.second.center.y }, { it.second.center.x }))
+        val a = Key.ButtonA in keysDown || (!playing && Key.ButtonStart in keysDown)
+        if (targets.isEmpty()) {
+            padFocus = null
+            if (!playing && a) { keysDown.remove(Key.ButtonA); if (paused) paused = false else start() } // (no buttons on this screen: A does what a tap does)
+            return
+        }
+        var cur = targets.firstOrNull { it.first === padFocus } ?: targets[0].also { padFocus = it.first }
+        var dx = 0; var dy = 0
+        if (Key.DirectionRight in keysDown) dx += 1; if (Key.DirectionLeft in keysDown) dx -= 1
+        if (Key.DirectionDown in keysDown) dy += 1; if (Key.DirectionUp in keysDown) dy -= 1
+        keysDown.removeAll(listOf(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight))
+        val far = hypot(padX, padY) > 0.6
+        if (dx == 0 && dy == 0 && far) { padRep -= dt; if (!padHeldDir || padRep <= 0) { if (abs(padX) > abs(padY)) dx = sign(padX).toInt() else dy = sign(padY).toInt(); padRep = if (padHeldDir) 0.16 else 0.4 } }
+        padHeldDir = far; if (!far) padRep = 0.0
+        if (dx != 0 || dy != 0) {
+            var best: Pair<GameObject, Rect>? = null; var bs = Double.POSITIVE_INFINITY
+            for (t in targets) {
+                if (t.first === cur.first) continue
+                val ox = (t.second.center.x - cur.second.center.x).toDouble(); val oy = (t.second.center.y - cur.second.center.y).toDouble(); val along = ox * dx + oy * dy
+                if (along <= 4) continue
+                val sc = along + abs(ox * dy - oy * dx) * 2
+                if (sc < bs) { bs = sc; best = t }
+            }
+            best?.let { cur = it; padFocus = it.first }
+        }
+        if (a) { keysDown.remove(Key.ButtonA); keysDown.remove(Key.ButtonStart); val at = cur.second.center; taps.add(Tap(at, toWorld(at), -1L)); buzz() }
     }
     /** Jump pressed this frame (the button, a tap, Space, or a control scheme's jump). */
     fun jumpPressed() = "jump" in pressed || "virt:jump" in pressed
@@ -928,6 +1005,7 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     private var laidOutFor = Size.Zero
 
     fun pointerDown(id: Long, at: Offset) {
+        padActive = false // a finger again: the touch controls come back
         val p = Pointer(id, at, at, time)
         pointers[id] = p; downs.add(p)
         finger = at
@@ -967,8 +1045,11 @@ class PocketGame(source: String, vars: MutableMap<String, Any?>? = null) {
     fun step(dt: Double) {
         if (screen != laidOutFor) { laidOutFor = screen; layoutButtons() }
         keysDown.clear(); for (k in keys) if (k !in keysBefore) keysDown.add(k)
-        for (k in keys) {
-            if (k in keysBefore) continue
+        if (keysDown.any { it in padKeyNames }) padSeen()
+        padNav(dt)
+        if (keyHit("jump")) pressed.add("jump")
+        if (keyHit("fire")) pressed.add("action")
+        for (k in keysDown.toList()) {
             if (k == Key.Spacebar || k == Key.DirectionUp || k == Key.W) pressed.add("jump")
             if (k == Key.X || k == Key.F) pressed.add("action")
             if (k == Key.DirectionLeft || k == Key.A) pressed.add("swipe:left")
@@ -1093,7 +1174,7 @@ private fun runDashButtons(g: PocketGame, runWith: String, dashWith: String) {
         if (use == "jump" && g.settings["jumpButton"] != true) { g.settings["jumpButton"] = true; if (strOf(g.settings["jumpLabel"], "JUMP") == "JUMP") g.settings["jumpLabel"] = word; g.layoutButtons() }
     }
 }
-private fun shiftHeld(g: PocketGame) = Key.ShiftLeft in g.keys || Key.ShiftRight in g.keys
+private fun shiftHeld(g: PocketGame) = Key.ShiftLeft in g.keys || Key.ShiftRight in g.keys || g.keyHeld("run")
 
 /** Move: arrow keys / WASD, the joystick, and dragging on the screen (the object follows the finger's movement); run and dash. */
 class Move(p: JsonMap) : Component(p) {
@@ -1124,7 +1205,7 @@ class Move(p: JsonMap) : Component(p) {
         dashCd -= dt
         val dw = s("dashWith", "off")
         if (dw != "off") {
-            var go = Key.K in g.keysDown; var dx = lastX; var dy = lastY
+            var go = Key.K in g.keysDown || g.keyHit("dash"); var dx = lastX; var dy = lastY
             when (dw) {
                 "action" -> if ("action" in g.pressed || "virt:action" in g.pressed) go = true
                 "jump" -> if (g.jumpPressed()) go = true
@@ -1205,7 +1286,7 @@ class Platformer(p: JsonMap) : Component(p) {
         val dw = s("dashWith", "off")
         if (dw != "off") {
             var go = 0.0
-            if (Key.X in kd || Key.K in kd) go = facing
+            if (Key.X in kd || Key.K in kd || g.keyHit("dash")) go = facing
             if (dw == "action" && ("action" in g.pressed || "virt:action" in g.pressed)) go = facing
             if (dw == "swipe") { if (g.swiped("left")) go = -1.0 else if (g.swiped("right")) go = 1.0 }
             if (dw == "doubletap") {
@@ -3137,6 +3218,7 @@ private fun DrawScope.drawGame(g: PocketGame, measurer: TextMeasurer) {
         if (cd > 0) drawArc(Color(0x73000000), -90f, (360 * cd).toFloat(), true, topLeft = r.topLeft, size = r.size)
     }
     if (g.state == "play" && !g.paused) drawControls(g, measurer)
+    g.padFocus?.let { f -> if (g.padActive && !f.dead) { val r = g.uiRect(f); drawRoundRect(Color(0xFF8FC3FF), Offset(r.left - 5f, r.top - 5f), Size(r.width + 10f, r.height + 10f), CornerRadius(min(16f, r.height / 2 + 5f)), style = Stroke(3f)) } } // the controller's highlight on a menu
     for (f in g.overlays.toList()) f()
     for (f in g.floats) {
         val t = measurer.measure(f.text, TextStyle(color = f.color.copy(alpha = f.life.coerceIn(0.0, 1.0).toFloat()), fontSize = (f.size / density).sp, fontWeight = FontWeight.Black))
@@ -3146,6 +3228,7 @@ private fun DrawScope.drawGame(g: PocketGame, measurer: TextMeasurer) {
 
 /** The joystick (where the thumb is) and the jump / fire / arrow buttons. */
 private fun DrawScope.drawControls(g: PocketGame, measurer: TextMeasurer) {
+    if (g.padActive && g.settings["padHideTouch"] != false) return // (a controller is being used: the touch controls step aside)
     val st = g.stick
     if (st != null) {
         val r = (50.0 * g.uiK).toFloat(); val base = g.stickBase ?: st.start; val d = st.at - base; val k = if (d.getDistance() > r) d / d.getDistance() * r else d
@@ -7653,6 +7736,14 @@ fun lnearest(g: PocketGame, e: GameObject, key: String): GameObject? {
 }
 fun ldist(a: GameObject, b: GameObject) = hypot(a.x - b.x, a.y - b.y)
 
+/** The engine's default keys (and controller buttons) for the player's actions. */
+val KEY_DEFAULTS = mapOf("jump" to "space, pad:a", "fire" to "j, enter, pad:b", "dash" to "x, k, pad:x", "run" to "shift, pad:rb")
+/** Controller buttons by the engine's names (the standard layout). */
+val padKeyNames: Map<Key, String> by lazy {
+    mapOf(Key.ButtonA to "pad:a", Key.ButtonB to "pad:b", Key.ButtonX to "pad:x", Key.ButtonY to "pad:y", Key.ButtonL1 to "pad:lb", Key.ButtonR1 to "pad:rb",
+        Key.ButtonL2 to "pad:lt", Key.ButtonR2 to "pad:rt", Key.ButtonStart to "pad:start", Key.ButtonSelect to "pad:select", Key.ButtonThumbLeft to "pad:ls", Key.ButtonThumbRight to "pad:rs")
+}
+val dpadNames: Map<Key, String> by lazy { mapOf(Key.DirectionUp to "pad:up", Key.DirectionDown to "pad:down", Key.DirectionLeft to "pad:left", Key.DirectionRight to "pad:right") }
 private val keyNames: Map<Key, String> by lazy {
     mapOf(Key.Spacebar to "space", Key.Enter to "enter", Key.Escape to "escape", Key.Tab to "tab", Key.Backspace to "backspace",
         Key.DirectionUp to "arrowup", Key.DirectionDown to "arrowdown", Key.DirectionLeft to "arrowleft", Key.DirectionRight to "arrowright",
@@ -7662,7 +7753,7 @@ private val keyNames: Map<Key, String> by lazy {
         Key.Zero to "0", Key.One to "1", Key.Two to "2", Key.Three to "3", Key.Four to "4", Key.Five to "5", Key.Six to "6", Key.Seven to "7", Key.Eight to "8", Key.Nine to "9")
 }
 /** A keyboard key by the engine's name: space, a, arrowup, enter… */
-fun lkeyName(k: Key): String = keyNames[k] ?: k.toString().lowercase().replace(" ", "")
+fun lkeyName(k: Key): String = keyNames[k] ?: padKeyNames[k] ?: k.toString().lowercase().replace(" ", "")
 fun lkeyWant(v: Any?): String { val s = ltext(v).trim().lowercase(); return if (s == " ") "space" else s.replace(" ", "") }
 /** Put inputs into steps: "@amount" becomes the value; "{@amount}" inside text is replaced. */
 fun lbind(v: Any?, args: Map<String, Any?>): Any? = when (v) {
@@ -8799,7 +8890,15 @@ class GraphRun(graph: Map<*, *>) {
                 val d = lclock()
                 return when (P("part")) { "minute" -> d[1]; "second" -> d[2]; "weekday (0 = Sun)" -> d[3]; "day of month" -> d[4]; "month" -> d[5]; "year" -> d[6]; else -> d[0] }.toDouble()
             }
-            "keyHeld" -> return g.keys.any { lkeyName(it) == lkeyWant(param(n, "key")) }
+            "keyHeld" -> return g.keys.any { lkeyName(it) == lkeyWant(param(n, "key")) || (g.padConnected && dpadNames[it] == lkeyWant(param(n, "key"))) }
+            "padHeld" -> { val b = P("button").ifEmpty { "a" }; val held = g.padNames(g.keys); return if (b == "any") held.isNotEmpty() else "pad:$b" in held }
+            "padStick" -> {
+                val x = if (P("stick") == "right") g.pad2X else g.padX; val y = if (P("stick") == "right") g.pad2Y else g.padY; val give = P("give")
+                return when { give.startsWith("y") -> y; give.startsWith("push") -> min(1.0, hypot(x, y)); give.startsWith("angle") -> if (x != 0.0 || y != 0.0) atan2(y, x) * 180 / PI else 0.0; else -> x }
+            }
+            "padTrigger" -> return if (P("trigger").startsWith("left")) g.padLT else g.padRT
+            "padConnected" -> return g.padConnected
+            "usingPad" -> return g.padActive
             "keyAxis" -> {
                 fun k(names: List<String>) = g.keys.any { lkeyName(it) in names }
                 return if (P("axis") == "up / down") (if (k(listOf("arrowdown", "s"))) 1.0 else 0.0) - (if (k(listOf("arrowup", "w"))) 1.0 else 0.0)
@@ -8967,6 +9066,7 @@ private fun GraphRun.exec(n: Map<*, *>, t: String, ctx: GCtx): Boolean {
         "showHide" -> { val k = P("object"); val o = if (k.isEmpty()) e else g.find(k); if (o != null) o.visible = if (P("mode") == "show") true else if (P("mode") == "hide") false else !o.visible }
         "vibrate" -> g.buzz(true)
         "haptic", "vibratePattern" -> g.buzz(P("style") == "heavy" || P("style") == "error")
+        "padRumble" -> { val k = (if (pn(n, "strength") == 0.0) 0.6 else pn(n, "strength")).coerceIn(0.0, 1.0); if (g.padActive) g.rumble((if (pn(n, "seconds") == 0.0) 0.25 else pn(n, "seconds")) * 1000, k) else g.buzz(k > 0.5) }
         "shake", "impulse" -> g.shake = max(g.shake, if (I("strength") == 0.0) 10.0 else I("strength"))
         "win", "nextLevel" -> { g.win(); return false }
         "gameOver" -> { g.gameOver(); return false }
@@ -9620,6 +9720,14 @@ private fun GraphRun.pollMore(dt: Double, playing: Boolean) {
             }
             "onKeyUp" -> if (lkeyWant(param(n, "key")) in keysUp) follow(n, "then", GCtx())
             "onAnyKey" -> for (k in keysDown) follow(n, "then", GCtx(eventValue = k))
+            "onPadButton" -> {
+                val b = p("button").ifEmpty { "a" }; val w = p("when")
+                @Suppress("UNCHECKED_CAST") val before = state["$id:pad"] as Set<String>? ?: emptySet(); val now = g.padNames(g.keys); state["$id:pad"] = now
+                val list = when (w) { "held" -> now; "released" -> before - now; else -> now - before }
+                val k = list.firstOrNull { if (b == "any") true else it == "pad:$b" }
+                if (k != null) follow(n, "then", GCtx(dt = dt, eventValue = k.removePrefix("pad:")))
+            }
+            "onPadConnect" -> { val on = g.padConnected; val was = was(n, "pc", on); if (was != null && was != on) follow(n, if (on) "connected" else "disconnected", GCtx()) }
             "onJoystick" -> { val on = g.stick != null; val was = was(n, "stick", on); if (on && was != true) follow(n, "pushed", GCtx()) else if (!on && was == true) follow(n, "released", GCtx()) }
             "onIdle" -> {
                 val busy = g.pointers.isNotEmpty() || g.keys.isNotEmpty()
@@ -10175,6 +10283,11 @@ private fun graphDefaults4(): Map<String, Map<String, Any?>> = mapOf(
     "onKey" to mapOf("key" to "Space", "when" to "pressed"),
     "keyHeld" to mapOf("key" to "Space"),
     "keyAxis" to mapOf("axis" to "left / right"),
+    "onPadButton" to mapOf("button" to "a", "when" to "pressed"),
+    "padHeld" to mapOf("button" to "a"),
+    "padStick" to mapOf("stick" to "left", "give" to "x (left / right)"),
+    "padTrigger" to mapOf("trigger" to "right (RT)"),
+    "padRumble" to mapOf("strength" to 0.6, "seconds" to 0.25),
     "onScreenTouch" to mapOf("where" to "anywhere"),
     "dragAmount" to mapOf("axis" to "x"),
     "askPermission" to mapOf("kind" to "location", "title" to "", "why" to "", "soft" to true),

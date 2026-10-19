@@ -381,6 +381,29 @@ class PocketGame extends ChangeNotifier {
   bool noTapJump = false;
   /// Keys pressed this frame.
   final Set<LogicalKeyboardKey> keysDown = {};
+  /// A game controller: being played with (the touch controls step aside until the screen is touched), and seen at all.
+  /// (Flutter has no connect / disconnect event without a plugin: a controller counts as connected once one of its buttons is pressed.)
+  bool padActive = false, padConnected = false;
+  bool get padHidesTouch => padActive && settings['padHideTouch'] != false;
+  /// A controller button held: a..y, lb, rb, lt, rt, start, select, ls, rs, or up / down / left / right (the D-pad, while the controller is in use).
+  bool padHeld(String b) {
+    if (b == 'any') return keys.any(padKeyNames.containsKey);
+    const arrows = {'up': LogicalKeyboardKey.arrowUp, 'down': LogicalKeyboardKey.arrowDown, 'left': LogicalKeyboardKey.arrowLeft, 'right': LogicalKeyboardKey.arrowRight};
+    final ar = arrows[b];
+    if (ar != null) return padActive && keys.contains(ar);
+    return keys.any((k) => padKeyNames[k] == 'pad:$b');
+  }
+  /// A controller key went down: note the controller, and on the title / pause / end screens A or Start does what a tap does (Start pauses while playing, B resumes).
+  void padKey(LogicalKeyboardKey k) {
+    final name = padKeyNames[k];
+    if (name == null) return;
+    padActive = true;
+    if (!padConnected) { padConnected = true; if (settings['padNotice'] != false) message('🎮 Controller connected', 1.6); }
+    if (settings['padMenus'] == false) return;
+    if (name == 'pad:start' && state == 'play') { paused = !paused; notifyListeners(); return; }
+    if (paused && (name == 'pad:a' || name == 'pad:b')) { paused = false; _keysBefore.add(k); notifyListeners(); return; }
+    if (state != 'play' && (name == 'pad:a' || name == 'pad:start')) { start(); _keysBefore.add(k); } // (held A doesn't also jump on the first frame)
+  }
   /// The camera object driving the view (several cameras: the one switched to).
   GameObject? activeCamera;
   /// Things drawn in the world by components (a rope), in world units.
@@ -857,8 +880,8 @@ class PocketGame extends ChangeNotifier {
   bool isDown(String action) {
     if (virtualHeld.contains(action) || virtHeld.contains(action)) return true;
     if (buttons.any((b) => b.action == action && b.finger != null)) return true;
-    if (action == 'jump') return keys.contains(LogicalKeyboardKey.space) || keys.contains(LogicalKeyboardKey.arrowUp) || keys.contains(LogicalKeyboardKey.keyW);
-    if (action == 'action') return keys.contains(LogicalKeyboardKey.keyX) || keys.contains(LogicalKeyboardKey.keyF) || keys.contains(LogicalKeyboardKey.enter);
+    if (action == 'jump') return keys.contains(LogicalKeyboardKey.space) || keys.contains(LogicalKeyboardKey.arrowUp) || keys.contains(LogicalKeyboardKey.keyW) || keys.contains(LogicalKeyboardKey.gameButtonA);
+    if (action == 'action') return keys.contains(LogicalKeyboardKey.keyX) || keys.contains(LogicalKeyboardKey.keyF) || keys.contains(LogicalKeyboardKey.enter) || keys.contains(LogicalKeyboardKey.gameButtonB);
     return false;
   }
   bool hasButton(String action) => buttons.any((b) => b.action == action) || objects.any((o) => !o.dead && o.part<TouchKey>() != null && (o.part<TouchKey>()!.p['action'] ?? 'jump') == (action == 'action' ? 'fire' : action));
@@ -911,6 +934,7 @@ class PocketGame extends ChangeNotifier {
   Size _laidOutFor = Size.zero;
 
   void pointerDown(int id, Offset at) {
+    padActive = false; // a finger again: the touch controls come back
     final p = Pointer(id, at, at, time);
     pointers[id] = p; downs.add(p);
     finger = at;
@@ -953,8 +977,8 @@ class PocketGame extends ChangeNotifier {
     for (final k in keys) {
       if (_keysBefore.contains(k)) continue;
       keysDown.add(k);
-      if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyW) pressed.add('jump');
-      if (k == LogicalKeyboardKey.keyX || k == LogicalKeyboardKey.keyF) pressed.add('action');
+      if (k == LogicalKeyboardKey.space || k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyW || k == LogicalKeyboardKey.gameButtonA) pressed.add('jump');
+      if (k == LogicalKeyboardKey.keyX || k == LogicalKeyboardKey.keyF || k == LogicalKeyboardKey.gameButtonB) pressed.add('action');
       if (k == LogicalKeyboardKey.arrowLeft || k == LogicalKeyboardKey.keyA) pressed.add('swipe:left');
       if (k == LogicalKeyboardKey.arrowRight || k == LogicalKeyboardKey.keyD) pressed.add('swipe:right');
       if (k == LogicalKeyboardKey.arrowUp || k == LogicalKeyboardKey.keyW) pressed.add('swipe:up');
@@ -1211,7 +1235,7 @@ class Move extends Component {
     if ((dirs == '4' || dirs == '8') && a.distance > 0) { final m = a.distance, st = math.pi / (dirs == '4' ? 2 : 4), an = (math.atan2(a.dy, a.dx) / st).round() * st; a = Offset((math.cos(an) * m * 1e6).round() / 1e6, (math.sin(an) * m * 1e6).round() / 1e6); }
     if (a.distance > 0.2) lastDir = a / a.distance;
     // run (pushing the joystick to the edge, holding a button, or always; Shift on a keyboard) and dash (a quick burst)
-    final runWith = strOf(p['runWith'], 'off'), shift = g.keys.contains(LogicalKeyboardKey.shiftLeft) || g.keys.contains(LogicalKeyboardKey.shiftRight);
+    final runWith = strOf(p['runWith'], 'off'), shift = g.keys.contains(LogicalKeyboardKey.shiftLeft) || g.keys.contains(LogicalKeyboardKey.shiftRight) || g.keys.contains(LogicalKeyboardKey.gameButtonRight1);
     final running = switch (runWith) { 'edge' => a.distance > 0.9 || shift, 'action' => g.isDown('action') || shift, 'jump' => g.isDown('jump') || shift, 'always' => !shift, _ => false };
     final sv = strOf(p['speedVar']).isEmpty ? double.nan : numOf(g.vars[strOf(p['speedVar'])], double.nan);
     final speed = slowed(e, numOf(p['speed'], 260)) * (sv.isFinite ? sv : 1) * (running ? numOf(p['runSpeed'], 1.7) : 1);
@@ -1283,7 +1307,7 @@ class Platformer extends Component {
     bool key(LogicalKeyboardKey k) => g.keys.contains(k);
     if (a.dx != 0) facing = a.dx > 0 ? 1 : -1;
     // run
-    final shift = key(LogicalKeyboardKey.shiftLeft) || key(LogicalKeyboardKey.shiftRight), runWith = strOf(p['runWith'], 'off');
+    final shift = key(LogicalKeyboardKey.shiftLeft) || key(LogicalKeyboardKey.shiftRight) || key(LogicalKeyboardKey.gameButtonRight1), runWith = strOf(p['runWith'], 'off');
     running = switch (runWith) { 'edge' => a.dx.abs() > 0.9 || shift, 'action' => g.isDown('action') || shift, 'always' => !shift, _ => false };
     final speed = slowed(e, numOf(p['speed'], 240)) * (running ? numOf(p['runSpeed'], 1.6) : 1), accel = numOf(p['accel']);
     // dash
@@ -1291,7 +1315,7 @@ class Platformer extends Component {
     final dashWith = strOf(p['dashWith'], 'off');
     if (dashWith != 'off') {
       var go = 0;
-      if (kd.contains(LogicalKeyboardKey.keyX) || kd.contains(LogicalKeyboardKey.keyK)) go = facing;
+      if (kd.contains(LogicalKeyboardKey.keyX) || kd.contains(LogicalKeyboardKey.keyK) || kd.contains(LogicalKeyboardKey.gameButtonX)) go = facing;
       if (dashWith == 'action' && g.pressed.contains('action')) go = facing;
       if (dashWith == 'swipe') { if (g.pressed.contains('swipe:left')) { go = -1; } else if (g.pressed.contains('swipe:right')) { go = 1; } }
       if (dashWith == 'doubletap') {
@@ -3477,7 +3501,7 @@ class _PocketGameViewState extends State<PocketGameView> with SingleTickerProvid
     return Focus(
       autofocus: true,
       onKeyEvent: (_, ev) {
-        if (ev is KeyDownEvent) { g.keys.add(ev.logicalKey); } else if (ev is KeyUpEvent) { g.keys.remove(ev.logicalKey); }
+        if (ev is KeyDownEvent) { g.keys.add(ev.logicalKey); g.padKey(ev.logicalKey); } else if (ev is KeyUpEvent) { g.keys.remove(ev.logicalKey); }
         if (ev is KeyDownEvent && (ev.logicalKey == LogicalKeyboardKey.enter || ev.logicalKey == LogicalKeyboardKey.space) && g.state != 'play') g.start();
         if (ev is KeyDownEvent && ev.logicalKey == LogicalKeyboardKey.escape && g.state == 'play') g.paused = !g.paused;
         return KeyEventResult.handled;
@@ -3684,6 +3708,7 @@ class GamePainter extends CustomPainter {
 
   /// The joystick (where the thumb is) and the jump / fire / arrow buttons.
   void _drawControls(Canvas canvas) {
+    if (g.padHidesTouch) return; // (a controller is being used: the pause button, a widget, stays)
     final st = g.stick;
     if (st != null) {
       final r = 50.0 * g.uiK, d = st.at - st.start, k = d.distance > r ? d / d.distance * r : d;
@@ -8462,7 +8487,13 @@ GameObject? lnearest(PocketGame g, GameObject e, String key) {
 }
 double ldist(GameObject a, GameObject b) => (Offset(a.x, a.y) - Offset(b.x, b.y)).distance;
 /// A keyboard key by the engine's name: space, a, arrowup, enter…
-String lkeyName(LogicalKeyboardKey k) { final l = k.keyLabel; return l == ' ' ? 'space' : l.toLowerCase().replaceAll(' ', ''); }
+String lkeyName(LogicalKeyboardKey k) { final pad = padKeyNames[k]; if (pad != null) return pad; final l = k.keyLabel; return l == ' ' ? 'space' : l.toLowerCase().replaceAll(' ', ''); }
+/// Game controller buttons (Bluetooth or USB) by the engine's names: pad:a, pad:b… The D-pad (and, on Android, the left stick) arrive as the arrow keys.
+final padKeyNames = <LogicalKeyboardKey, String>{
+  LogicalKeyboardKey.gameButtonA: 'pad:a', LogicalKeyboardKey.gameButtonB: 'pad:b', LogicalKeyboardKey.gameButtonX: 'pad:x', LogicalKeyboardKey.gameButtonY: 'pad:y',
+  LogicalKeyboardKey.gameButtonLeft1: 'pad:lb', LogicalKeyboardKey.gameButtonRight1: 'pad:rb', LogicalKeyboardKey.gameButtonLeft2: 'pad:lt', LogicalKeyboardKey.gameButtonRight2: 'pad:rt',
+  LogicalKeyboardKey.gameButtonStart: 'pad:start', LogicalKeyboardKey.gameButtonSelect: 'pad:select', LogicalKeyboardKey.gameButtonThumbLeft: 'pad:ls', LogicalKeyboardKey.gameButtonThumbRight: 'pad:rs',
+};
 String lkeyWant(Object? v) { final s = ltext(v).trim().toLowerCase(); return s == ' ' ? 'space' : s.replaceAll(' ', ''); }
 /// Put inputs into steps: "@amount" becomes the value; "{@amount}" inside text is replaced.
 Object? lbind(Object? v, Map<String, Object?> args) {
@@ -9530,8 +9561,9 @@ class GraphRun {
     var i = 0;
     var held = false;
     late void Function() next;
+    bool out() => ctx.ret?.done == true; // (a Return Value inside the loop ends the whole Function: no more passes, no "done")
     next = () {
-      while (i < count && !loop.stop && !e.dead) {
+      while (i < count && !loop.stop && !e.dead && !out()) {
         final extra = pass(i++);
         if (extra == null) break;
         final f = GFlow();
@@ -9547,7 +9579,7 @@ class GraphRun {
           return;
         }
       }
-      if (!e.dead) { if (after != null) { after(); } else { follow(n, 'done', ctx); } }
+      if (!e.dead && !out()) { if (after != null) { after(); } else { follow(n, 'done', ctx); } }
       if (held && outer != null) { held = false; outer.n--; outer.check?.call(); }
     };
     next();
@@ -9847,6 +9879,15 @@ class GraphRun {
         return switch (P('part')) { 'minute' => d.minute, 'second' => d.second, 'weekday (0 = Sun)' => d.weekday % 7, 'day of month' => d.day, 'month' => d.month, 'year' => d.year, _ => d.hour };
       }
       case 'keyHeld': return g.keys.any((k) => lkeyName(k) == lkeyWant(param(n, 'key')));
+      case 'padHeld': return g.padHeld(P('button').isEmpty ? 'a' : P('button'));
+      case 'padStick': { // (no analog sticks without a plugin: the D-pad, as −1, 0 or 1)
+        final x = (g.padHeld('right') ? 1.0 : 0.0) - (g.padHeld('left') ? 1.0 : 0.0), y = (g.padHeld('down') ? 1.0 : 0.0) - (g.padHeld('up') ? 1.0 : 0.0), give = P('give');
+        if (P('stick') == 'right') return 0;
+        return give.startsWith('y') ? y : give.startsWith('push') ? math.min(1.0, math.sqrt(x * x + y * y)) : give.startsWith('angle') ? (x == 0 && y == 0 ? 0 : math.atan2(y, x) * 180 / math.pi) : x;
+      }
+      case 'padTrigger': return g.padHeld(P('trigger').startsWith('left') ? 'lt' : 'rt') ? 1 : 0;
+      case 'padConnected': return g.padConnected;
+      case 'usingPad': return g.padActive;
       case 'keyAxis': {
         bool k(List<String> names) => g.keys.any((q) => names.contains(lkeyName(q)));
         return P('axis') == 'up / down' ? (k(['arrowdown', 's']) ? 1 : 0) - (k(['arrowup', 'w']) ? 1 : 0) : (k(['arrowright', 'd']) ? 1 : 0) - (k(['arrowleft', 'a']) ? 1 : 0);
@@ -10005,6 +10046,7 @@ extension GraphRunExec on GraphRun {
       case 'showHide': { final k = P('object'), o = k.isEmpty ? e : g.find(k); if (o != null) o.visible = P('mode') == 'show' ? true : P('mode') == 'hide' ? false : !o.visible; }
       case 'vibrate': g.buzz(true);
       case 'haptic' || 'vibratePattern': g.buzz(P('style') == 'heavy' || P('style') == 'error');
+      case 'padRumble': g.buzz(true); // (Flutter can't rumble a controller: the phone buzzes instead)
       case 'shake' || 'impulse': g.shake = math.max(g.shake, I('strength') == 0 ? 10 : I('strength'));
       case 'win': g.win(); return;
       case 'gameOver': g.gameOver(); return;
@@ -10212,7 +10254,7 @@ extension GraphRunExec on GraphRun {
         var k = 0;
         final later = ctx.fresh();
         void tick() {
-          if (e.dead || !(repeats[id]?.contains(token) ?? false)) return;
+          if (e.dead || !(repeats[id]?.contains(token) ?? false) || later.ret?.done == true) return; // (the Function it's in has returned)
           follow(n, 'each', later.fresh()..index = k);
           k++;
           if (times > 0 && k >= times) { repeats[id]?.remove(token); follow(n, 'done', later.fresh()); return; }
@@ -10639,6 +10681,13 @@ extension GraphRunExec on GraphRun {
         }
         case 'onKeyUp': if (_keysUp.contains(lkeyWant(param(n, 'key')))) follow(n, 'then', GCtx());
         case 'onAnyKey': for (final k in _keysDown) { follow(n, 'then', GCtx(eventValue: k)); }
+        case 'onPadButton': {
+          final b = p('button').isEmpty ? 'a' : p('button'), w = p('when');
+          final list = w == 'held' ? {for (final k in g.keys) lkeyName(k)} : w == 'released' ? _keysUp : _keysDown;
+          final hit = list.where((k) => b == 'any' ? k.startsWith('pad:') : k == 'pad:$b').firstOrNull;
+          if (hit != null) follow(n, 'then', GCtx(dt: dt, eventValue: hit.substring(4)));
+        }
+        case 'onPadConnect': { final on = g.padConnected, was = _was(n, 'pc', on); if (was != null && was != on) follow(n, on ? 'connected' : 'disconnected', GCtx()); }
         case 'onJoystick': { final on = g.stick != null, was = _was(n, 'stick', on); if (on && was != true) { follow(n, 'pushed', GCtx()); } else if (!on && was == true) { follow(n, 'released', GCtx()); } }
         case 'onIdle': {
           final busy = g.pointers.isNotEmpty || g.keys.isNotEmpty;
@@ -10977,6 +11026,11 @@ const graphDefaults = <String, Map<String, Object>>{
   "onKey": {"key": "Space", "when": "pressed"},
   "keyHeld": {"key": "Space"},
   "keyAxis": {"axis": "left / right"},
+  "onPadButton": {"button": "a", "when": "pressed"},
+  "padHeld": {"button": "a"},
+  "padStick": {"stick": "left", "give": "x (left / right)"},
+  "padTrigger": {"trigger": "right (RT)"},
+  "padRumble": {"strength": 0.6, "seconds": 0.25},
   "onScreenTouch": {"where": "anywhere"},
   "dragAmount": {"axis": "x"},
   "askPermission": {"kind": "location", "title": "", "why": "", "soft": true},

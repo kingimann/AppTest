@@ -4971,6 +4971,11 @@ function renderSceneSettings(box) {
     C('settings.keyRun', { label: 'Run (hold)', type: 'text', def: '', placeholder: 'shift, pad:rb' }),
     C('settings.gamepad', { label: 'Game controllers', type: 'bool', def: true, infoText: 'Bluetooth or USB controllers (Xbox, PlayStation, Switch Pro…) on phones, tablets and computers.' }),
     C('settings.gamepadDeadZone', { label: 'Stick dead zone', type: 'number', def: 0.2, step: 0.05, range: [0, 0.9] }),
+    C('settings.padHideTouch', { label: 'Hide touch controls while a controller is used', type: 'bool', def: true, infoText: 'The joystick and on-screen buttons step aside when the controller is used, and come back when the screen is touched.' }),
+    C('settings.padMenus', { label: 'Menus with the controller', type: 'bool', def: true, infoText: 'D-pad or stick moves a highlight between buttons on the title, pause and end screens and on open menus and popups; A presses, B goes back, Start pauses.' }),
+    C('settings.padUiNav', { label: 'While playing, the D-pad', type: 'select', options: [['menus', 'Moves the player (menus only when open)'], ['always', 'Also moves between on-screen buttons']], def: 'menus' }),
+    C('settings.padRumble', { label: 'Rumble with vibration', type: 'bool', def: true, infoText: 'Hits, haptic taps and Vibrate also rumble a controller that has motors.' }),
+    C('settings.padNotice', { label: '"Controller connected" message', type: 'bool', def: true }),
     h('p', { class: 'desc' }, 'Triggers and scripts can use any of these names in Key pressed / Key held (pad:start to pause, for example). The game hears a gamepad event when a controller connects.'),
   ], { icon: 'gamepad', key: 's-keys' }));
   box.append(comp('Notifications', [

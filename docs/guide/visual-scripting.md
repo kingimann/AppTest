@@ -129,7 +129,7 @@ Tap a line to jump to its node, or **Copy** the lot. The code is read-only: the 
 
 ## Functions and custom events
 
-- **Function** names a piece of script. Give it **Function Input** values (a, b, c) and a **Return Value**.
+- **Function** names a piece of script. Give it **Function Input** values (a, b, c) and a **Return Value**. A Return Value ends the whole Function, even from inside a loop: the loop stops there and its *done* doesn't run (like `return` in code).
 - **Call Function** uses it as a value (inside a Formula, say). **Run Function** runs it as a step, optionally storing the result. A Function can **Wait** before its Return Value: Run Function then waits too, stores the result when it arrives and only then goes on to *then* (inside a loop, each round waits for it). **Call Function** is a value, so it can't wait: it gives what the Function returned straight away, or 0 if the Return comes after a Wait. **Run Function On Objects** and the Triggers *Run visual script function* go on at once and store a late result when it arrives. Functions can call each other and themselves (up to 20 deep).
 - **Custom Event** + **Call Custom Event** (on this object, *other*, an object by name, everything with a tag, or everywhere, with a number or text value). Triggers can listen for the same events (*Run by another trigger / custom event*).
 - **Call Function On Object** reads another script's result (the Game Manager's `canAfford`). **Run Function On Objects** runs it on many objects.

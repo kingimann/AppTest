@@ -38,6 +38,15 @@ Space always jumps on a keyboard. Shift runs, X or K dashes, and J or Enter is F
 
 *Game Settings › Keyboard & Controller* changes the keys and buttons for Jump, Fire, Dash and Run (for example `w, pad:y` for Jump), turns controllers off, and sets the stick's dead zone. Controller buttons are named `pad:a`, `pad:b`, `pad:x`, `pad:y`, `pad:lb`, `pad:rb`, `pad:lt`, `pad:rt`, `pad:start`, `pad:select` and `pad:up` / `down` / `left` / `right`. Triggers and scripts can use those names in *Key pressed* and *Key held*, and the game hears a `gamepad` event when a controller connects.
 
+Playing on a phone with a controller:
+
+- **Touch controls step aside.** Once a controller button or stick is used, the joystick and the jump / fire / D-pad buttons hide (pause and sound stay). Touching the screen brings them back. *Hide touch controls while a controller is used* turns this off.
+- **Menus work with the controller.** On the title, pause and end screens (and on open menus and popups), the D-pad or left stick moves a glowing highlight between the buttons, **A** presses the highlighted one, **B** goes back to the game, and **Start** pauses and resumes. *While playing, the D-pad › Also moves between on-screen buttons* lets it reach your own UI buttons mid-game too (for games without a moving player). *Menus with the controller* turns it off.
+- **Rumble.** Hits, haptic taps and *Vibrate* also rumble a controller that has motors (*Rumble with vibration*). The player's *Vibration* setting turns both off.
+- **"🎮 Controller connected"** shows briefly when one connects or drops (*"Controller connected" message*).
+- **Visual script nodes** (Input folder): *On Controller Button* (pressed, released or held; *any* gives the button in Event Value), *Controller Button Held*, *Controller Stick* (left or right: x, y, how far, angle), *Controller Trigger* (0–1), *Controller Connected*, *Playing With Controller* (to show Ⓐ instead of "tap"), *On Controller Connected* (connected / disconnected, e.g. pause when it drops) and *Controller Rumble*.
+- **iOS and Android apps** (Flutter and Kotlin exports) map controller buttons the same way, hide the touch controls, and pause / resume with Start and B. On Android the left stick works like the D-pad. Analog stick amounts, the right stick, triggers as amounts and controller rumble are web-only for now (in the apps the triggers read 0 or 1 and Controller Rumble buzzes the phone instead); the Kotlin export has hooks (`padAxes`, `rumble`) ready for platform code.
+
 ### Platformer moves
 
 Platformer (and the Character Controller's platformer type) has these settings:

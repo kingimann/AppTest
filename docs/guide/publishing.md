@@ -197,6 +197,17 @@ The version comes from **App** in Build Settings and the build number from the F
 
 The **Kotlin project** (Build Settings › Flutter project › *Also: Kotlin project*) hosts the game in a Kotlin Multiplatform app (Compose) for Android and iOS: an Android WebView and an iOS WKWebView, with haptics, Back and closing in `GameBridge.kt`. It doesn't have phone notifications and in-app purchases yet (the game is told and carries on; the preview shows exactly that); the Flutter, Xcode and Android Studio projects have them.
 
+## Pocket Engine as a phone app
+
+The repository's `mobile/` folder is Pocket Engine itself as an iPhone and Android app, made with Expo (React Native).
+
+- **Native screens:** Home, Projects (search, open, rename, duplicate, export, delete, import, back up), Learn (the guides) and Settings (the look, haptics, the editor's address).
+- **The editor:** it opens full screen inside the app, and the phone's Back button returns to Home.
+- **Exports:** they go to the phone's share sheet.
+- **Your projects:** they stay in the editor's storage on the phone, the same as the web version.
+
+To try it, run `npm install` and then `npx expo start` in `mobile/`. Its README has the build and store steps.
+
 ## Native code (apps)
 
 The Flutter, Xcode and Android Studio projects all run your project in a web view. For an **app**, pick **Native code (apps)** in Build Settings to get it written out as real native code instead, to keep building on in code:

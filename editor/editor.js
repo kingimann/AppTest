@@ -6471,7 +6471,15 @@ function quickCreate(sec = 'games') {
   draw();
   return wrap;
 }
+/** Inside the Pocket Engine phone app (mobile/: a React Native app that hosts the editor): it has its own Home. */
+const IN_APP = !!window.ReactNativeWebView || new URLSearchParams(location.search).get('app') === '1';
+const toApp = (m) => { const s = JSON.stringify(m); if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(s); else if (window.parent !== window) window.parent.postMessage(s, '*'); };
+if (IN_APP) { // the app's Back button: save, then go to its Home
+  window.pocketAppHome = () => showHome();
+  addEventListener('message', (e) => { try { if (JSON.parse(e.data)?.type === 'home') showHome(); } catch { /* not ours */ } });
+}
 function showHome(o = {}) {
+  if (IN_APP && !o.keep) { saveNow({ force: true }); toApp({ type: 'home', project: projectId }); return; } // (the app shows its own Home)
   if (!o.keep) { closeLayer(); $('.toast')?.remove(); } // keep: refresh Home behind an open window (after a sync)
   const keepScroll = o.keep ? $('#home').scrollTop : 0;
   const home = $('#home'), all = Object.entries(loadProjects()).sort((a, b) => b[1].updated - a[1].updated);
@@ -9541,7 +9549,8 @@ storageUse().then((u) => { if (u && u.quota && u.used / u.quota > 0.85) toast('S
 {
   const all = loadProjects(), cur = store.get(CURRENT_KEY, '');
   const q = new URLSearchParams(location.search);
-  if (q.get('template') && templates[q.get('template')]) newFromTemplate(q.get('template'));
+  if (q.get('template') && templates[q.get('template')]) { newFromTemplate(q.get('template'), q.get('name') || undefined); if (IN_APP) saveNow({ force: true }); }
+  else if (q.get('project') && all[q.get('project')]) openProject(all[q.get('project')].json, q.get('project')); // (opened from the phone app's Projects)
   else {
     if (all[cur]) openProject(all[cur].json, cur);
     else newFromTemplate('sky-dodge', 'My First Game');

@@ -3944,9 +3944,11 @@ function drawRadius2D(e) {
 function drawEntity2DRaw(ctx, e, vars, time) {
   if (e.tiles) { drawTiles2D(ctx, e); if (!e.shape && !e.sprite && !e.text) return; }
   ctx.save();
-  ctx.translate(e.x, e.y);
-  if (e.rz) ctx.rotate(e.rz * DEG);
-  if (e.sx !== 1 || e.sy !== 1) ctx.scale(e.sx, e.sy);
+  const fx = e.fx; // looks only (squash & stretch, lean, bob from the Character Controller): the collider doesn't change
+  ctx.translate(e.x + (fx ? fx.x || 0 : 0), e.y + (fx ? fx.y || 0 : 0));
+  const rz = (e.rz || 0) + (fx ? fx.rz || 0 : 0), sx = e.sx * (fx ? fx.sx ?? 1 : 1), sy = e.sy * (fx ? fx.sy ?? 1 : 1);
+  if (rz) ctx.rotate(rz * DEG);
+  if (sx !== 1 || sy !== 1) ctx.scale(sx, sy);
   let alpha = e.alpha;
   if (e.data.invuln > 0 && Math.floor(time * 12) % 2) alpha *= 0.3;
   ctx.globalAlpha = alpha;
@@ -5658,27 +5660,40 @@ registerBehavior('platformer', {
     { key: 'dashCooldown', label: 'Dash cooldown (s)', type: 'number', default: 0.5, range: [0, 5], step: 0.1, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
     { key: 'airDashes', label: 'Dashes in the air', type: 'number', default: 1, range: [0, 5], step: 1, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
     { key: 'dashTrail', label: 'Dash effect', type: 'bool', default: true, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off' },
+    { key: 'dashInvuln', label: 'Can’t be hurt while dashing', type: 'bool', default: false, group: 'Run & dash', showIf: (b) => (b.dashWith || 'off') !== 'off', infoText: 'A dodge: hazards and enemies don’t hurt it during the dash.' },
     // down
     { key: 'dropThrough', label: 'Down drops through platforms', type: 'bool', default: true, group: 'Down', infoText: 'Down on the joystick (or a swipe down, S / ↓) on a one-way platform drops through it.' },
     { key: 'groundPound', label: 'Ground pound', type: 'bool', default: false, group: 'Down', infoText: 'Down in the air slams straight down (shakes the camera when it lands).' },
     { key: 'poundSpeed', label: 'Ground pound speed', type: 'number', default: 1400, step: 50, group: 'Down', showIf: (b) => !!b.groundPound },
+    { key: 'crouch', label: 'Crouch (hold down on the ground)', type: 'bool', default: false, group: 'Down', infoText: 'Lower and slower while held. On a one-way platform, down still drops through it.' },
+    { key: 'crouchSpeed', label: 'Crouch speed ×', type: 'number', default: 0.45, range: [0, 1], step: 0.05, group: 'Down', showIf: (b) => !!b.crouch },
+    { key: 'slide', label: 'Slide (crouch while running fast)', type: 'bool', default: false, group: 'Down', showIf: (b) => !!b.crouch },
+    // jump shape
+    { key: 'fallGravity', label: 'Fall faster (gravity × when falling)', type: 'number', default: 1, range: [0.3, 4], step: 0.1, group: 'Jumping', infoText: '1.5–2 makes jumps snappy: up floats, down drops.' },
+    { key: 'apexHang', label: 'Floaty top of the jump', type: 'bool', default: false, group: 'Jumping', infoText: 'Gravity eases off for a moment at the top while jump is held, for finer aiming.' },
+    { key: 'decel', label: 'Stopping (0 = same as acceleration)', type: 'number', default: 0, step: 100, group: 'Feel', infoText: 'How fast it slows down with no input, in speed per second. Low = icy.' },
+    { key: 'iceTag', label: 'Slippery ground tag (blank = none)', type: 'text', default: '', suggest: 'tags', group: 'Feel', infoText: 'Standing on something with this tag slides like ice.' },
+    // ladders
+    { key: 'climb', label: 'Climb ladders', type: 'bool', default: false, group: 'Climbing', infoText: 'Up or down while touching a ladder object (give it the tag below, and make it a trigger) climbs it. Jump lets go.' },
+    { key: 'climbTag', label: 'Ladder tag', type: 'text', default: 'ladder', suggest: 'tags', group: 'Climbing', showIf: (b) => !!b.climb },
+    { key: 'climbSpeed', label: 'Climb speed', type: 'number', default: 160, step: 10, group: 'Climbing', showIf: (b) => !!b.climb },
   ],
   create(p) {
-    let coyote = 0, airUsed = 0, rising = false, buffer = 0, facing = 1, dashT = 0, dashCd = 0, dashDir = 1, airDash = 0, gs0 = 1, wallLock = 0, pounding = false, wasDown = false, lastTap = -9, lastKey = { k: '', t: -9 }, running = false, lastWall = 0, wallMem = 0, bodyMax = 0;
+    let coyote = 0, airUsed = 0, rising = false, buffer = 0, facing = 1, dashT = 0, dashCd = 0, dashDir = 1, airDash = 0, gs0 = 1, wallLock = 0, pounding = false, wasDown = false, lastTap = -9, lastKey = { k: '', t: -9 }, running = false, lastWall = 0, wallMem = 0, bodyMax = 0, gsBase = 1, climbing = false, crouching = false, sliding = false;
     const airJumps = () => Math.max(Math.round(+p.airJumps || 0), p.doubleJump ? 1 : 0);
     const dashing = () => dashT > 0;
     function dash(e, s, dir) {
       const b = e.body; if (!b || dashCd > 0 || dashing() || is3D(e)) return false;
       if (!b.grounded && airDash >= Math.round(+(p.airDashes ?? 1))) return false;
       if (!b.grounded) airDash++;
-      dashDir = dir || facing; dashT = +p.dashTime || 0.15; dashCd = (+p.dashCooldown || 0) + dashT; gs0 = b.gravityScale ?? 1; b.gravityScale = 0; b.vel.y = 0; pounding = false;
+      dashDir = dir || facing; dashT = +p.dashTime || 0.15; dashCd = (+p.dashCooldown || 0) + dashT; gs0 = gsBase; b.gravityScale = 0; b.vel.y = 0; pounding = false; climbing = false; if (p.dashInvuln) e.data.invuln = Math.max(e.data.invuln || 0, dashT + 0.05);
       s.emit('dash', e); if (p.dashTrail !== false) s.burst?.(e.x, e.y, e.z, '#ffffff', 10); s.engine.vibrate(10);
       return true;
     }
     const endDash = (e) => { if (!dashing()) return; dashT = 0; if (e.body) { e.body.gravityScale = gs0; e.body.vel.x *= 0.5; } };
     return {
       start(e, s) {
-        e.ensureBody({ type: 'dynamic' }); bodyMax = +e.body.maxFall || 0; // (a Rigidbody's own max fall speed)
+        e.ensureBody({ type: 'dynamic' }); bodyMax = +e.body.maxFall || 0; gsBase = e.body.gravityScale ?? 1; // (a Rigidbody's own max fall speed and gravity)
         if (!s.gravity) s.gravity = is3D(e) ? -25 : 1600;
         for (const [use, word] of [[p.runWith, 'RUN'], [p.dashWith, 'DASH']]) // run / dash on the Fire button: make sure it's on screen
           if (use === 'action' && !s.settings.actionButton) { s.settings.actionButton = true; if (!s.settings.actionLabel || s.settings.actionLabel === 'FIRE') s.settings.actionLabel = word; s.engine.layoutButtons?.(); }
@@ -5711,10 +5726,29 @@ registerBehavior('platformer', {
           if (dashT <= 0) { dashT = 0.0001; endDash(e); }
         } else if (wallLock > 0) wallLock -= dt; // just sprang off a wall: the push holds for a moment
         else {
-          const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1);
-          const steer = (cur, want) => (p.accel ? cur + clamp(want - cur, -p.accel * ctl * dt, p.accel * ctl * dt) : cur + (want - cur) * ctl);
-          if (!pounding) b.vel.x = steer(b.vel.x, a.x * speed);
-          if (three) b.vel.z = steer(b.vel.z, a.y * speed);
+          const ctl = b.grounded ? 1 : clamp(p.airControl ?? 1, 0, 1), icy = !!(p.iceTag && b.grounded && b.groundedOn?.has?.(p.iceTag));
+          const sp = speed * (crouching && !sliding ? +(p.crouchSpeed ?? 0.45) : 1) * (climbing ? 0.6 : 1);
+          const steer = (cur, want) => {
+            const slowing = Math.abs(want) < Math.abs(cur) - 1 || (want && cur && Math.sign(want) !== Math.sign(cur));
+            let k = slowing && +p.decel > 0 ? +p.decel : +p.accel || 0; if (icy) k = Math.min(k || 9999, slowing ? 260 : 700); // (ice: slow to get going, slower to stop)
+            return k ? cur + clamp(want - cur, -k * ctl * dt, k * ctl * dt) : cur + (want - cur) * ctl;
+          };
+          if (sliding) b.vel.x *= Math.max(0, 1 - 1.6 * dt); // a slide keeps its speed for a while, then stops
+          else if (!pounding) b.vel.x = steer(b.vel.x, a.x * sp);
+          if (three) b.vel.z = steer(b.vel.z, a.y * sp);
+        }
+        // ladders: up / down on one climbs it (no gravity while on it)
+        if (p.climb && !three) {
+          const lad = touchingTag(e, s, p.climbTag || 'ladder');
+          if (lad && !climbing && Math.abs(a.y) > 0.4 && !dashing()) { climbing = true; airUsed = 0; }
+          if (!lad && climbing) climbing = false;
+          if (climbing) { b.gravityScale = 0; b.vel.y = a.y * (+p.climbSpeed || 160); coyote = Math.max(coyote, 0.05); }
+        }
+        if (!climbing && !dashing() && !three) { // the shape of the jump: fall faster, float at the top
+          let g = gsBase;
+          if (b.vel.y > 0 && +p.fallGravity && +p.fallGravity !== 1) g = gsBase * +p.fallGravity;
+          else if (p.apexHang && !b.grounded && Math.abs(b.vel.y) < 110 && inp.isDown('jump')) g = gsBase * 0.45;
+          b.gravityScale = g;
         }
         if (b.grounded) {
           coyote = +(p.coyoteTime ?? 0.12); airUsed = 0; airDash = 0;
@@ -5727,6 +5761,13 @@ registerBehavior('platformer', {
           else if (!b.grounded && p.groundPound && !dashing()) { pounding = true; b.vel.x = 0; }
         }
         if (pounding) b.vel.y = +p.poundSpeed || 1400;
+        // crouch (and slide when running fast)
+        const canCrouch = p.crouch && !three && b.grounded && !climbing && !dashing() && !(p.dropThrough !== false && b.groundedOn?.body?.oneWay);
+        if (canCrouch && downNow) { if (!crouching && p.slide && Math.abs(b.vel.x) > p.speed * 0.8) { sliding = true; s.emit('slide', e); } crouching = true; }
+        else if (crouching && (!downNow || !b.grounded)) { crouching = false; sliding = false; }
+        if (sliding && Math.abs(b.vel.x) < 40) sliding = false;
+        if (e.move) { e.move.crouching = crouching; e.move.climbing = climbing; e.move.slidingGround = sliding; }
+        if (!three) { const f = (e.fx ||= { x: 0, y: 0, rz: 0, sx: 1, sy: 1 }); f.crouch = crouching ? 0.62 : 1; if (!f.juice) { const hy = e.extents().hy || 0; f.sy = f.crouch; f.y = hy * (1 - f.sy) * Math.abs(e.sy || 1); } } // looks lower (the Character Controller's squash builds on this)
         // jump (with a buffer: pressed a little early still counts)
         if (inp.pressed('jump') && !M.locked) buffer = Math.max(+(p.jumpBuffer ?? 0.12), dt * 1.5);
         if (b.wall) { lastWall = b.wall; wallMem = 0.1; } else wallMem -= dt; // (it only touches while pressing in: remember the wall for a moment)
@@ -5737,7 +5778,7 @@ registerBehavior('platformer', {
           else if (wall && p.wallJump) { did = 'wall'; b.vel.x = -wall * (+p.wallJumpPush || 320); facing = -wall; wallLock = 0.18; airUsed = 0; }
           else if (airUsed < airJumps()) { did = 'air'; airUsed++; }
           if (did) {
-            endDash(e); pounding = false;
+            endDash(e); pounding = false; climbing = false; crouching = false; sliding = false; b.gravityScale = gsBase;
             b.vel.y = p.jump * up; coyote = 0; buffer = 0; rising = true;
             s.engine.audio.sfx('jump'); if (did !== 'ground') s.emit(did === 'wall' ? 'wallJump' : 'airJump', e);
           }
@@ -20470,9 +20511,19 @@ registerBehavior('gridMove', {
 
 // ---- Character Controller 2D: one component, many kinds of 2D movement ----
 const withParamDefaults = (type, extra) => { const d = Behaviors[type]; const o = {}; for (const q of d.params || []) o[q.key] = paramDefault(q, false); return { ...o, ...extra }; };
+/** The first object with this tag that overlaps e (boxes; triggers too): ladders. */
+function touchingTag(e, s, tag) {
+  const a = e.extents(), ax = a.sphere ? a.r : a.bx ?? a.hx, ay = a.sphere ? a.r : a.by ?? a.hy, cx = e.x + (a.ox || 0), cy = e.y + (a.oy || 0);
+  for (const q of s.entities) {
+    if (q === e || q.dead || !q.has?.(tag)) continue;
+    const b = q.extents(), bx = b.sphere ? b.r : b.bx ?? b.hx, by = b.sphere ? b.r : b.by ?? b.hy;
+    if (Math.abs(q.x + (b.ox || 0) - cx) < ax + bx && Math.abs(q.y + (b.oy || 0) - cy) < ay + by) return q;
+  }
+  return null;
+}
 // The platformer's extra moves (and run & dash, which top-down movement has too), offered in the Character Controller for those movement types
 const onlyFor = (modes, q) => ({ ...q, showIf: (b) => modes.includes(b.mode || 'topdown8') && (typeof q.showIf === 'function' ? q.showIf(b) : true) });
-const CONTROLLER_EXTRAS = Behaviors.platformer.params.filter((q) => q.key === 'doubleJump' || ['Jumping', 'Walls', 'Run & dash', 'Down'].includes(q.group))
+const CONTROLLER_EXTRAS = Behaviors.platformer.params.filter((q) => q.key === 'doubleJump' || ['Jumping', 'Walls', 'Run & dash', 'Down', 'Feel', 'Climbing'].includes(q.group))
   .map((q) => onlyFor(q.group === 'Run & dash' && q.key !== 'airDashes' ? ['topdown8', 'sideToSide', 'platformer'] : ['platformer'], q));
 const JUMPY = ['platformer', 'jetpack'], TURNY = ['car', 'spaceship', 'tank'];
 /** Set up the screen for a control scheme: which joystick, D-pad, arrows or buttons show (for this play). */
@@ -20571,17 +20622,84 @@ registerBehavior('controller2d', {
     { key: 'waitStop', label: 'Only when it has stopped', type: 'bool', default: true, showIf: { mode: ['slingshot'] } },
     { key: 'grab', label: 'Start a pull', type: 'select', options: [['anywhere', 'Anywhere on screen'], ['object', 'On the object']], default: 'anywhere', showIf: { mode: ['slingshot'] } },
     ...CONTROLLER_EXTRAS,
+    // movement feel (most types)
+    { key: 'accelTime', label: 'Time to full speed (s)', type: 'number', default: 0, range: [0, 3], step: 0.05, group: 'Feel', showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'platformer', 'jetpack', 'tank'] }, infoText: '0 = instant. Bigger feels heavier.' },
+    { key: 'decelTime', label: 'Time to stop (s)', type: 'number', default: 0, range: [0, 3], step: 0.05, group: 'Feel', showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'platformer', 'jetpack', 'tank'] }, infoText: '0 = stops at once. Bigger slides, like ice.' },
+    { key: 'directions', label: 'Directions', type: 'select', options: [['any', 'Any direction'], ['8', '8 directions'], ['4', '4 directions']], default: 'any', group: 'Feel', showIf: { mode: ['topdown8'] } },
+    { key: 'face2D', label: 'Face where it moves', type: 'select', options: [['none', 'No'], ['flip', 'Flip left / right'], ['rotate', 'Turn to face it']], default: 'none', group: 'Feel', showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'tapToMove', 'followFinger', 'jetpack'] } },
+    { key: 'speedVar', label: 'Speed × variable (blank = off)', type: 'text', default: '', suggest: 'vars', group: 'Feel', showIf: (b) => !['slingshot', 'grid', 'lanes'].includes(b.mode || 'topdown8'), infoText: 'Multiplies the speed by a variable, e.g. speedBoost = 2 for a power-up.' },
+    { key: 'wrapEdges', label: 'Wrap around the screen edges', type: 'bool', default: false, group: 'Feel', showIf: { mode: ['topdown8', 'topdown4', 'sideToSide', 'car', 'tank', 'jetpack', 'followFinger'] }, infoText: 'Going off one side comes back on the other (like Asteroids or Pac-Man).' },
+    // per type
+    { key: 'grip', label: 'Grip (1 = on rails, low = drifts)', type: 'number', default: 1, range: [0.05, 1], step: 0.05, showIf: { mode: ['car'] } },
+    { key: 'reverseSpeed', label: 'Reverse speed ×', type: 'number', default: 0.4, range: [0, 1], step: 0.05, showIf: { mode: ['car'] } },
+    { key: 'runRamp', label: 'Speeds up (% every 10 s)', type: 'number', default: 0, step: 5, showIf: { mode: ['runner'] } },
+    { key: 'runMax', label: 'Top speed (0 = no limit)', type: 'number', default: 0, step: 20, showIf: { mode: ['runner'] } },
+    { key: 'runJumps', label: 'Jumps in the air', type: 'number', default: 0, range: [0, 5], step: 1, showIf: { mode: ['runner'] } },
+    { key: 'flapTilt', label: 'Tilts with its speed', type: 'bool', default: true, showIf: { mode: ['flappy'] } },
+    { key: 'tapMarker', label: 'Show where you tapped', type: 'bool', default: true, showIf: { mode: ['tapToMove'] } },
+    { key: 'fingerOffset', label: 'Stay above the finger (px)', type: 'number', default: 0, step: 10, showIf: { mode: ['followFinger'] }, infoText: 'So your finger doesn’t cover it (60–90 works well).' },
+    { key: 'followAxes', label: 'Follows', type: 'select', options: [['both', 'Up, down and sideways'], ['x', 'Sideways only'], ['y', 'Up and down only']], default: 'both', showIf: { mode: ['followFinger'] } },
+    { key: 'thrust', label: 'Thrust power (0 = from jump power)', type: 'number', default: 0, step: 20, showIf: { mode: ['jetpack'] } },
+    { key: 'bounce', label: 'Bounciness (0–1)', type: 'number', default: 0.3, range: [0, 1], step: 0.05, showIf: { mode: ['slingshot'] } },
+    { key: 'gridStep', label: 'Time per step (s)', type: 'number', default: 0.14, range: [0.03, 1], step: 0.01, showIf: { mode: ['grid'] } },
+    { key: 'gridHold', label: 'Keeps walking while held', type: 'bool', default: true, showIf: { mode: ['grid'] } },
+    { key: 'gridDiagonal', label: 'Diagonal steps', type: 'bool', default: false, showIf: { mode: ['grid'] } },
+    { key: 'gridTap', label: 'Tap a tile to walk there', type: 'bool', default: true, showIf: { mode: ['grid'] } },
+    // looks (every type)
+    { key: 'squash', label: 'Squash & stretch (jumps and landings)', type: 'bool', default: false, group: 'Looks' },
+    { key: 'lean', label: 'Lean into movement (°, 0 = off)', type: 'number', default: 0, range: [0, 30], step: 1, group: 'Looks' },
+    { key: 'bob', label: 'Bob while walking', type: 'bool', default: false, group: 'Looks' },
+    { key: 'dust', label: 'Dust puffs (landing, turning, dashing)', type: 'bool', default: false, group: 'Looks' },
   ],
   create(p) {
     // movements the engine already does well
     const sch = p.input || 'auto', custom = sch !== 'auto' && !['runner', 'flappy', 'tapToMove', 'followFinger', 'grid', 'lanes', 'slingshot'].includes(p.mode);
     const extras = {}; for (const q of CONTROLLER_EXTRAS) if (p[q.key] !== undefined) extras[q.key] = p[q.key];
     const moveCtl = custom ? 'joystick' : 'both'; // a chosen control scheme steers on its own (no dragging the player as well)
-    const delegate = { topdown8: () => Behaviors.move.create(withParamDefaults('move', { ...extras, speed: p.speed, control: moveCtl, axes: 'all', keepInView: p.keepInView, face2D: p.faceMove ? 'rotate' : 'none' })),
-      sideToSide: () => Behaviors.move.create(withParamDefaults('move', { ...extras, speed: p.speed, control: moveCtl, axes: 'horizontal', keepInView: p.keepInView })),
-      platformer: () => Behaviors.platformer.create(withParamDefaults('platformer', { ...extras, speed: p.speed, jump: p.jump, onFall: p.onFall })),
+    const faceMode = p.face2D && p.face2D !== 'none' ? p.face2D : p.faceMove ? 'rotate' : 'none', feel = { accelTime: +p.accelTime || 0, decelTime: +p.decelTime || 0, speedVar: p.speedVar || '' };
+    const keepOn = p.keepInView && !p.wrapEdges;
+    const delegate = { topdown8: () => Behaviors.move.create(withParamDefaults('move', { ...extras, ...feel, speed: p.speed, control: moveCtl, axes: 'all', keepInView: keepOn, face2D: faceMode, directions: p.directions || 'any' })),
+      sideToSide: () => Behaviors.move.create(withParamDefaults('move', { ...extras, ...feel, speed: p.speed, control: moveCtl, axes: 'horizontal', keepInView: keepOn, face2D: faceMode })),
+      platformer: () => Behaviors.platformer.create(withParamDefaults('platformer', { ...extras, speed: p.speed, jump: p.jump, onFall: p.onFall, ...(+p.accelTime > 0 ? { accel: p.speed / +p.accelTime } : {}), ...(+p.decelTime > 0 ? { decel: p.speed / +p.decelTime } : {}) })),
       lanes: () => Behaviors.swipeMove.create(withParamDefaults('swipeMove', { distance: +p.laneWidth || 110, lanes: +p.lanes || 3, jump: 0 })),
-      grid: () => Behaviors.gridMove.create(withParamDefaults('gridMove', { tile: p.tile })) }[p.mode];
+      grid: () => Behaviors.gridMove.create(withParamDefaults('gridMove', { tile: p.tile, stepTime: +p.gridStep || 0.14, holdRepeat: p.gridHold !== false, diagonal: !!p.gridDiagonal, tapToMove: p.gridTap !== false })) }[p.mode];
+    const fxState = { k: 0, wasG: true, vy: 0, t: 0, dir: 0 };
+    /** After the movement: wrap around the edges, the dodge, and the looks (squash, lean, bob, dust). */
+    function after(e, dt, s) {
+      const b = e.body; if (!b) return;
+      if (p.wrapEdges) { const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy; if (e.x < v.left - hx) e.x = v.right + hx; else if (e.x > v.right + hx) e.x = v.left - hx; if (p.mode !== 'jetpack') { if (e.y < v.top - hy) e.y = v.bottom + hy; else if (e.y > v.bottom + hy) e.y = v.top - hy; } }
+      if (p.dashInvuln && e.move?.dashing && p.mode !== 'platformer') e.data.invuln = Math.max(e.data.invuln || 0, 0.06);
+      juice(e, dt, s);
+    }
+    function juice(e, dt, s) {
+      const on = p.squash || +p.lean || p.bob || p.dust; if (!on && !e.fx) return;
+      const b = e.body, f = (e.fx ||= { x: 0, y: 0, rz: 0, sx: 1, sy: 1 }), st = fxState, ex = e.extents(), hy = ex.sphere ? ex.r : ex.hy, gnd = !!b.grounded, sp = Math.max(1, +p.speed || 240);
+      f.juice = true;
+      if (p.squash) {
+        if (gnd && !st.wasG && st.vy > 220) st.k = Math.min(0.32, st.vy / 2600); // landing: squash
+        if (!gnd && st.wasG && b.vel.y < -150) st.k = -0.22; // take-off: stretch
+        st.k += (0 - st.k) * Math.min(1, dt * 11);
+      } else st.k = 0;
+      const crouch = f.crouch ?? 1;
+      f.sy = (1 - st.k) * crouch; f.sx = 1 + st.k * 0.7;
+      f.y = hy * (1 - f.sy) * Math.abs(e.sy || 1); // feet stay on the ground
+      const moving = Math.hypot(b.vel.x, b.vel.y) > 25 && (gnd || !['platformer', 'runner', 'jetpack', 'flappy'].includes(p.mode));
+      if (p.bob && moving) { st.t += dt * (7 + Math.hypot(b.vel.x, b.vel.y) / 45); f.y -= Math.abs(Math.sin(st.t)) * Math.min(4, hy * 0.25); } else st.t = 0;
+      if (+p.lean && !['car', 'spaceship', 'tank'].includes(p.mode)) { const want = clamp(b.vel.x / sp, -1, 1) * +p.lean; f.rz += (want - f.rz) * Math.min(1, dt * 10); } else f.rz = 0;
+      if (p.dust) {
+        const feetY = e.y + hy * Math.abs(e.sy || 1), d = Math.sign(b.vel.x);
+        if (gnd && !st.wasG && st.vy > 260) s.burst?.(e.x, feetY, e.z, '#d9d2c3', 9, 0.5);
+        else if (gnd && d && st.dir && d !== st.dir && Math.abs(b.vel.x) > sp * 0.5) s.burst?.(e.x, feetY, e.z, '#d9d2c3', 4, 0.35);
+        if (e.move?.dashing && Math.random() < dt * 40) s.burst?.(e.x, e.y, e.z, '#ffffff', 2, 0.3);
+        if (d) st.dir = d;
+      }
+      st.wasG = gnd; st.vy = b.vel.y;
+    }
+    const approach = (cur, want, dt, top = sc ? speedNow(sc) : +p.speed || 240) => { // speed up / slow down over "Time to full speed" / "Time to stop"
+      const t = Math.abs(want) > Math.abs(cur) * 0.99 && want ? +p.accelTime || 0 : +p.decelTime || 0;
+      if (!t) return want; const k = (Math.max(1, Math.abs(top)) / t) * dt; return cur + clamp(want - cur, -k, k);
+    };
+    const speedNow = (s) => { const v = p.speedVar ? +s.vars[p.speedVar] : NaN; return p.speed * (Number.isFinite(v) ? v : 1); };
     if (delegate) {
       const inner = delegate();
       return { ...inner,
@@ -20590,12 +20708,12 @@ registerBehavior('controller2d', {
           else if (['topdown8', 'sideToSide', 'platformer'].includes(p.mode)) { s.settings.joystick = true; if (p.mode === 'platformer') s.settings.jumpButton = true; s.engine.layoutButtons?.(); }
           inner.start?.(e, s);
         },
-        update(e, dt, s) { if (custom && s.state === 'play') steerScheme(e, s, sch, p.mode); inner.update?.(e, dt, s); } };
+        update(e, dt, s) { if (custom && s.state === 'play') steerScheme(e, s, sch, p.mode); inner.update?.(e, dt, s); if (s.state === 'play') after(e, dt, s); } };
     }
-    let heading = 0, target = null, speed = 0, fuel = 1, pull = null, aimRef = null, me = null, sc = null;
-    const keep = (e, s) => { if (!p.keepInView) return; const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy; e.x = clamp(e.x, v.left + hx, v.right - hx); e.y = clamp(e.y, v.top + hy, v.bottom - hy); };
+    let heading = 0, target = null, speed = 0, fuel = 1, pull = null, aimRef = null, markRef = null, me = null, sc = null, runT = 0, runAir = 0;
+    const keep = (e, s) => { if (!p.keepInView || p.wrapEdges) return; const v = s.viewBounds(), ex = e.extents(), hx = ex.sphere ? ex.r : ex.hx, hy = ex.sphere ? ex.r : ex.hy; e.x = clamp(e.x, v.left + hx, v.right - hx); e.y = clamp(e.y, v.top + hy, v.bottom - hy); };
     const fell = (e, s) => { const v = s.viewBounds(); if (e.y > v.bottom + 300) respawnOrEnd(e, s, p.onFall); };
-    const face = (e, vx, vy) => { if (p.faceMove && Math.hypot(vx, vy) > 5) e.rz = Math.atan2(vy, vx) / DEG; };
+    const face = (e, vx, vy) => { if (Math.hypot(vx, vy) <= 5) return; if (faceMode === 'rotate') e.rz = Math.atan2(vy, vx) / DEG; else if (faceMode === 'flip' && Math.abs(vx) > 5) { if (e.shape?.type === 'emoji') e.data.flipX = vx > 0; else e.sx = Math.abs(e.sx) * (vx < 0 ? -1 : 1); } };
     return {
       start(e, s) {
         const gravity = ['runner', 'flappy'].includes(p.mode);
@@ -20604,6 +20722,7 @@ registerBehavior('controller2d', {
         heading = (e.rz || 0) * DEG; e.data.respawn ||= { x: e.x, y: e.y, z: e.z }; me = e; sc = s;
         if (p.mode === 'jetpack') { e.body.gravityScale = 1; if (!s.gravity) s.gravity = 1600; }
         if (p.mode === 'slingshot') {
+          e.body.bounce = clamp(+(p.bounce ?? 0.3), 0, 1);
           e.body.gravityScale = p.slingGravity === false ? 0 : 1; if (p.slingGravity !== false && !s.gravity) s.gravity = 1600;
           (s.overlays ||= []).push(aimRef = (ctx) => { // the aim: a dotted line the way it will fly, longer for a harder pull
             if (!pull || e.dead || s.engine.editing) return;
@@ -20614,13 +20733,18 @@ registerBehavior('controller2d', {
             ctx.restore();
           });
         }
+        if (p.mode === 'tapToMove' && p.tapMarker !== false) (s.overlays ||= []).push(markRef = (ctx) => { // where it's walking to: a ring that pulses
+          if (!target || e.dead || s.engine.editing) return;
+          const o = s.engine.renderer.worldToScreen(s, target.x, target.y), r = 10 + Math.sin(s.time * 8) * 2;
+          ctx.save(); ctx.strokeStyle = '#ffffff'; ctx.globalAlpha = 0.75; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.arc(o.x, o.y, r, 0, Math.PI * 2); ctx.stroke(); ctx.globalAlpha = 0.35; ctx.beginPath(); ctx.arc(o.x, o.y, r * 0.35, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+        });
         if (custom) controlScheme(s, sch, p.mode);
         else {
           if (['topdown4', 'car', 'spaceship', 'tank', 'jetpack'].includes(p.mode)) { s.settings.joystick = true; s.engine.layoutButtons?.(); }
           if (p.mode === 'runner' || p.mode === 'jetpack') { s.settings.jumpButton = true; if (p.mode === 'jetpack' && (!s.settings.jumpLabel || s.settings.jumpLabel === 'JUMP')) s.settings.jumpLabel = 'FLY'; s.engine.layoutButtons?.(); }
         }
       },
-      destroy(e, s) { if (aimRef) s.overlays = (s.overlays || []).filter((f) => f !== aimRef); },
+      destroy(e, s) { s.overlays = (s.overlays || []).filter((f) => f !== aimRef && f !== markRef); },
       update(e, dt, s) {
         if (s.state !== 'play') return;
         scaleSpeed(p, e);
@@ -20631,24 +20755,29 @@ registerBehavior('controller2d', {
             let ax = a.x, ay = a.y; if (Math.abs(ax) > Math.abs(ay)) ay = 0; else ax = 0;
             const d = inp.drag; let dx = d.dx, dy = d.dy; if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0;
             const z = s.engine.renderer.zoomFor(s);
-            b.vel.x = Math.sign(ax) * (Math.abs(ax) > 0.3 ? p.speed : 0); b.vel.y = Math.sign(ay) * (Math.abs(ay) > 0.3 ? p.speed : 0);
+            const sp4 = speedNow(s); b.vel.x = approach(b.vel.x, Math.sign(ax) * (Math.abs(ax) > 0.3 ? sp4 : 0), dt); b.vel.y = approach(b.vel.y, Math.sign(ay) * (Math.abs(ay) > 0.3 ? sp4 : 0), dt);
             e.x += dx / z; e.y += dy / z; face(e, b.vel.x || dx, b.vel.y || dy); keep(e, s); break;
           }
           case 'runner': {
-            b.vel.x = p.speed;
-            if ((inp.pressed('tap') || inp.pressed('btn:jump') || inp.pressed('swipe:up')) && b.grounded) { b.vel.y = -p.jump; s.engine.audio.sfx('jump'); }
+            runT += dt; let rs = speedNow(s) * (1 + (+p.runRamp || 0) / 100 * runT / 10); if (+p.runMax > 0) rs = Math.min(rs, +p.runMax);
+            b.vel.x = rs; s.vars.runSpeed = Math.round(rs);
+            if (b.grounded) runAir = 0;
+            if ((inp.pressed('tap') || inp.pressed('btn:jump') || inp.pressed('swipe:up') || inp.keyHit('jump')) && (b.grounded || runAir < (+p.runJumps || 0))) { if (!b.grounded) runAir++; b.vel.y = -p.jump; s.engine.audio.sfx('jump'); }
             fell(e, s); break;
           }
           case 'flappy': {
             if (inp.pressed('tap') || inp.pressed('btn:jump')) { b.vel.y = -p.jump * 0.6; s.engine.audio.sfx('jump'); }
-            e.rz = clamp(b.vel.y / 12, -30, 70); if (p.keepInView) { const v = s.viewBounds(); if (e.y < v.top) { e.y = v.top; b.vel.y = 0; } }
+            if (p.flapTilt !== false) e.rz = clamp(b.vel.y / 12, -30, 70); if (p.keepInView) { const v = s.viewBounds(); if (e.y < v.top) { e.y = v.top; b.vel.y = 0; } }
             fell(e, s); break;
           }
           case 'car': {
             const thr = p.autoDrive ? 1 : Math.max(0, -a.y) + (a.y > 0.3 ? -0.5 : 0);
-            speed = speed * damp + thr * p.accel * dt; speed = clamp(speed, -p.speed * 0.4, p.speed);
-            heading += a.x * (p.turn * DEG) * dt * clamp(Math.abs(speed) / (p.speed * 0.3), 0, 1) * Math.sign(speed || 1);
-            b.vel.x = Math.cos(heading) * speed; b.vel.y = Math.sin(heading) * speed; e.rz = heading / DEG; break;
+            const top = speedNow(s); speed = speed * damp + thr * p.accel * dt; speed = clamp(speed, -top * clamp(+(p.reverseSpeed ?? 0.4), 0, 1), top);
+            heading += a.x * (p.turn * DEG) * dt * clamp(Math.abs(speed) / (top * 0.3), 0, 1) * Math.sign(speed || 1);
+            const g = clamp(+(p.grip ?? 1), 0.05, 1), wx = Math.cos(heading) * speed, wy = Math.sin(heading) * speed, kk = g >= 1 ? 1 : Math.min(1, g * g * dt * 30); // low grip: the car keeps sliding the way it was going (drifts)
+            b.vel.x += (wx - b.vel.x) * kk; b.vel.y += (wy - b.vel.y) * kk; e.rz = heading / DEG;
+            if (g < 1 && p.dust && Math.abs(Math.atan2(b.vel.y, b.vel.x) - heading) % (Math.PI * 2) > 0.35 && Math.hypot(b.vel.x, b.vel.y) > top * 0.4 && Math.random() < dt * 25) s.burst?.(e.x, e.y, e.z, '#bbbbbb', 2, 0.3);
+            break;
           }
           case 'spaceship': {
             heading += a.x * (p.turn * DEG) * dt;
@@ -20660,7 +20789,7 @@ registerBehavior('controller2d', {
             break;
           }
           case 'tank': {
-            heading += a.x * (p.turn * DEG) * dt; const fwd = -a.y * p.speed;
+            heading += a.x * (p.turn * DEG) * dt; const fwd = approach(speed, -a.y * speedNow(s), dt); speed = fwd;
             b.vel.x = Math.cos(heading) * fwd; b.vel.y = Math.sin(heading) * fwd; e.rz = heading / DEG; break;
           }
           case 'tapToMove': {
@@ -20668,25 +20797,28 @@ registerBehavior('controller2d', {
             if (t) { const w = s.engine.renderer.screenToWorld(s, t.x, t.y); target = { x: w.x, y: w.y }; }
             if (target) {
               const dx = target.x - e.x, dy = target.y - e.y, d = Math.hypot(dx, dy);
-              if (d < 4) { b.vel.x = b.vel.y = 0; target = null; } else { const v = Math.min(p.speed, d / Math.max(dt, 1e-3)); b.vel.x = dx / d * v; b.vel.y = dy / d * v; face(e, dx, dy); }
+              if (d < 4) { b.vel.x = b.vel.y = 0; target = null; } else { const v = Math.min(speedNow(s), d / Math.max(dt, 1e-3)); b.vel.x = dx / d * v; b.vel.y = dy / d * v; face(e, dx, dy); }
             }
             break;
           }
           case 'followFinger': {
             const t = [...inp.pointers.values()].find((q) => q.role === 'free');
-            if (t) { const w = s.engine.renderer.screenToWorld(s, t.x, t.y), dx = w.x - e.x, dy = w.y - e.y, k = Math.min(1, dt * (p.speed / 20)); b.vel.x = dx * k / Math.max(dt, 1e-3); b.vel.y = dy * k / Math.max(dt, 1e-3); }
+            if (t) {
+              const w = s.engine.renderer.screenToWorld(s, t.x, t.y - (+p.fingerOffset || 0)), ax2 = p.followAxes || 'both', dx = ax2 === 'y' ? 0 : w.x - e.x, dy = ax2 === 'x' ? 0 : w.y - e.y, k = Math.min(1, dt * (speedNow(s) / 20));
+              b.vel.x = dx * k / Math.max(dt, 1e-3); b.vel.y = dy * k / Math.max(dt, 1e-3); face(e, dx, dy);
+            }
             else { b.vel.x = 0; b.vel.y = 0; }
             keep(e, s); break;
           }
           case 'jetpack': {
-            b.vel.x += (a.x * p.speed - b.vel.x) * Math.min(1, dt * 10);
+            b.vel.x = +p.accelTime || +p.decelTime ? approach(b.vel.x, a.x * speedNow(s), dt) : b.vel.x + (a.x * speedNow(s) - b.vel.x) * Math.min(1, dt * 10);
             const hold = inp.isDown('jump') || inp.virtHeld.has('jump') || (!inp.buttons.some((q) => q.action === 'jump') && !custom && inp.pointerDown) || inp.keyHeld('jump') || inp.keys?.has('arrowup') || inp.keys?.has('w') || inp.keys?.has('pad:up');
             const tank = +p.fuel || 0;
             if (b.grounded) fuel = Math.min(1, fuel + dt / Math.max(0.5, tank * 0.5));
-            if (hold && (tank <= 0 || fuel > 0)) { b.vel.y = Math.max(b.vel.y - (s.gravity || 1600) * 2.1 * dt, -p.jump * 0.75); if (tank > 0) fuel = Math.max(0, fuel - dt / tank); if (Math.random() < dt * 30) s.burst?.(e.x, e.y + (e.extents().hy || 16), e.z, '#ffb347', 2, 0.4); }
+            if (hold && (tank <= 0 || fuel > 0)) { b.vel.y = Math.max(b.vel.y - (s.gravity || 1600) * 2.1 * dt, -(+p.thrust || p.jump * 0.75)); if (tank > 0) fuel = Math.max(0, fuel - dt / tank); if (Math.random() < dt * 30) s.burst?.(e.x, e.y + (e.extents().hy || 16), e.z, '#ffb347', 2, 0.4); }
             if (tank > 0) s.setVar?.('fuel', Math.round(fuel * 100));
             if (p.keepInView) { const v = s.viewBounds(); if (e.y < v.top) { e.y = v.top; b.vel.y = Math.max(0, b.vel.y); } }
-            if (a.x && e.shape?.type === 'emoji') e.data.flipX = a.x > 0;
+            if (a.x) { if (faceMode === 'none' && e.shape?.type === 'emoji') e.data.flipX = a.x > 0; else face(e, a.x, 0); }
             fell(e, s); break;
           }
           case 'slingshot': {
@@ -20707,6 +20839,7 @@ registerBehavior('controller2d', {
           }
           default: break;
         }
+        after(e, dt, s);
       },
     };
     /** The launch velocity for the pull so far: away from the finger, stronger the further you pull (up to "Pull for full power"). */

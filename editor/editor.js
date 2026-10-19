@@ -8155,7 +8155,7 @@ for (const [name, ic, label] of [['scene', 'scene', 'Scene'], ['hierarchy', 'lis
         pd.on = true; pd.y += 10; app.classList.add('dragging');
       }
       e.preventDefault();
-      app.style.setProperty('--sheet-h', Math.max(98, pd.h - Math.max(0, e.touches[0].clientY - pd.y)) + 'px');
+      app.style.setProperty('--sheet-h', Math.max(82, pd.h - Math.max(0, e.touches[0].clientY - pd.y)) + 'px');
     }, { passive: false });
     const end = (e) => {
       if (!pd?.on) { pd = null; return; }

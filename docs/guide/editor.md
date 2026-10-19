@@ -9,7 +9,7 @@ The editor is designed for one hand on a phone, and grows into side panels on a 
 - **Scene view:** your level. Select, move, rotate, scale and paint objects here.
 - **Tool rail** (left edge of the Scene): Hand, Move, Rotate, Scale, **Rect** and **Paint**.
 - **Blue + button:** opens the **Create** screen.
-- **Bottom bar:** **Scene · Hierarchy · Inspector · Scripts · Project · Console**. Tap a tab to open its panel; tap it again (or **Scene**) to put the panel away.
+- **Bottom bar:** **Scene · Hierarchy · Inspector · Scripts · Project · Console**. Tap a tab to open its panel; tap it again (or **Scene**) to put the panel away. The bar is short and sits clear of the preview's phone keys and the iPhone home bar.
 
 On a phone, panels open full size above the bottom bar. Drag the handle to make one half height (remembered), or swipe up and down on the tabs. Held sideways, or on a bigger screen, the panels move to the side.
 
